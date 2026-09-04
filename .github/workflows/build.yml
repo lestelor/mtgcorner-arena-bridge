@@ -63,7 +63,10 @@ jobs:
           # para arrancar. Copiar sólo el .exe (como hacía esto antes) produce
           # un paquete que no funciona: se copia la CARPETA entera donde vive.
           $daemonExe = Get-ChildItem -Path daemon-extraido -Filter "mtga-tracker-daemon.exe" -Recurse | Select-Object -First 1
-          Copy-Item "$($daemonExe.DirectoryName)/*" paquete/ -Recurse
+          # `Copy-Item "carpeta/*" -Recurse` es frágil en PowerShell — se
+          # enumeran los ficheros explícitamente y se copian uno a uno, que es
+          # lo que de verdad falló en el intento anterior.
+          Get-ChildItem -Path $daemonExe.DirectoryName -File | Copy-Item -Destination paquete/ -Force
           Copy-Item LEEME.txt paquete/
           Copy-Item LICENCIA-TERCEROS.txt paquete/
           # El texto completo de la GPLv3 se descarga en vez de guardarlo en el
