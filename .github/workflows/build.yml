@@ -58,10 +58,12 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path paquete | Out-Null
           Copy-Item dist/MtgCornerArenaBridge.exe paquete/
-          # El .exe del daemon puede venir en una subcarpeta según cómo empaquete
-          # su propio release; se busca por nombre en vez de asumir la ruta.
+          # OJO: mtga-tracker-daemon NO es de un solo fichero — su .exe es sólo
+          # un lanzador nativo que necesita más de ciento cincuenta DLL al lado
+          # para arrancar. Copiar sólo el .exe (como hacía esto antes) produce
+          # un paquete que no funciona: se copia la CARPETA entera donde vive.
           $daemonExe = Get-ChildItem -Path daemon-extraido -Filter "mtga-tracker-daemon.exe" -Recurse | Select-Object -First 1
-          Copy-Item $daemonExe.FullName paquete/
+          Copy-Item "$($daemonExe.DirectoryName)/*" paquete/ -Recurse
           Copy-Item LEEME.txt paquete/
           Copy-Item LICENCIA-TERCEROS.txt paquete/
           # El texto completo de la GPLv3 se descarga en vez de guardarlo en el
