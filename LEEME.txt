@@ -4,17 +4,22 @@ Importar tu colección de MTG Arena a MTG Corner
 QUÉ ES ESTO
 -----------
 Un programa que lee tu colección de MTG Arena mientras el juego está
-abierto, y escribe un fichero para que lo importes en mtgcorner.com.
+abierto, y la guarda directamente en tu cuenta de mtgcorner.com.
 
-Nunca toca tu cuenta ni Arena en sí — sólo LEE lo que ya está en tu
-ordenador, en modo sólo lectura, mientras juegas.
+Nunca toca tu cuenta de Arena ni el juego en sí — sólo LEE lo que ya está
+en tu ordenador, en modo sólo lectura, mientras juegas.
 
 CÓMO USARLO
 -----------
 1. Abre MTG Arena y espera a que cargue del todo.
 2. Ejecuta MtgCornerArenaBridge.exe (en esta misma carpeta).
-3. Espera a que diga "Listo" — deja un fichero .json en tu Escritorio.
-4. Ve a mtgcorner.com/importar-arena y arrastra ese fichero.
+3. Se abrirá tu navegador pidiendo confirmar que eres tú — inicia sesión en
+   MTG Corner si hace falta, y pulsa "Sí, soy yo".
+4. Vuelve a la ventana del programa: leerá tu colección y la guardará sola.
+
+Nada se identifica antes de que confirmes en el navegador, y no se lee nada
+de Arena hasta ese momento. Si no confirmas a tiempo, el programa se cierra
+sin haber tocado ni guardado nada.
 
 Si Windows avisa de "editor desconocido" al abrirlo, es normal en un
 programa sin firmar — puedes ver el código completo en
@@ -23,11 +28,12 @@ https://github.com/lestelor/mtgcorner-arena-bridge
 QUÉ NO HACE
 -----------
 No lee ni exporta tus comodines ni tus mazos — eso se hace por separado,
-arrastrando tu Player.log a la misma página web. Este programa cubre sólo
-la colección completa, que no siempre queda en ese fichero.
+arrastrando tu Player.log a mtgcorner.com/importar-arena. Este programa
+cubre sólo la colección completa, que no siempre queda en ese fichero.
 
 QUIÉN HACE QUÉ (ver LICENCIA-TERCEROS.txt para el detalle legal)
 ------------------------------------------------------------------
-MtgCornerArenaBridge.exe es de MTG Corner y sólo arranca el otro programa.
+MtgCornerArenaBridge.exe es de MTG Corner: confirma tu sesión y arranca el
+otro programa.
 mtga-tracker-daemon.exe es de terceros y es quien de verdad lee la memoria
 de Arena — MTG Corner no lo ha escrito, sólo lo distribuye junto al suyo.
