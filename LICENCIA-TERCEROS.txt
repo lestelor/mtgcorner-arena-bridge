@@ -1,0 +1,16 @@
+Este paquete incluye dos programas distintos:
+
+  MtgCornerArenaBridge.exe
+    De MTG Corner. Sólo arranca el otro programa y le pide datos por red —
+    no lee memoria de nada por su cuenta.
+
+  mtga-tracker-daemon.exe
+    De terceros: frcaton, https://github.com/frcaton/mtga-tracker-daemon
+    Licencia: GNU General Public License v3 (texto completo en
+    LICENCIA-GPLv3-mtga-tracker-daemon.txt, en esta misma carpeta).
+    Código fuente: el mismo enlace de arriba, versión empaquetada aquí
+    indicada en el nombre del release usado para compilar este paquete.
+
+    Es quien de verdad lee la memoria de MTG Arena, en modo sólo lectura —
+    MTG Corner no ha escrito ni modificado ese programa, sólo lo distribuye
+    junto al suyo tal cual lo publica su autor.

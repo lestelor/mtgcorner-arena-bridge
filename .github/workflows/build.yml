@@ -1,0 +1,80 @@
+name: Compilar y publicar
+
+# Compila este programa (C#, .NET 8) como un único .exe autocontenido para
+# Windows, le añade al lado el `mtga-tracker-daemon` de terceros (GPLv3,
+# https://github.com/frcaton/mtga-tracker-daemon — la lectura de memoria de
+# verdad; este programa sólo lo arranca y le habla por HTTP) y publica el zip
+# resultante en un "release" de GitHub, para que mtgcorner.com pueda
+# enlazarlo directamente.
+#
+# POR QUÉ UN RELEASE Y NO UN ARTEFACTO DE ACTIONS: un artefacto exige estar
+# identificado en GitHub para descargarlo — inútil para un enlace en una web
+# pública. Un release de un repositorio PÚBLICO no.
+#
+# POR QUÉ SIEMPRE LA MISMA ETIQUETA ("latest"): así el enlace de la web no
+# cambia nunca, aunque este programa se recompile.
+#
+# LA VERSIÓN DEL DAEMON SE FIJA A MANO (abajo, DAEMON_VERSION), no "la más
+# reciente": si su autor publica una versión rota, este workflow sigue
+# empaquetando la última buena hasta que alguien decida subir el número
+# aposta, en vez de que el zip descargado cambie solo de un día para otro.
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch: {}
+
+env:
+  DAEMON_VERSION: '1.0.11.0'
+
+permissions:
+  contents: write # hace falta para crear el release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Compilar, autocontenido y en un solo fichero
+        run: >
+          dotnet publish -c Release -r win-x64
+          -p:SelfContained=true -p:PublishSingleFile=true
+          -o dist
+
+      - name: Descargar mtga-tracker-daemon ${{ env.DAEMON_VERSION }}
+        shell: pwsh
+        run: |
+          $url = "https://github.com/frcaton/mtga-tracker-daemon/releases/download/${{ env.DAEMON_VERSION }}/mtga-tracker-daemon-Windows.zip"
+          Invoke-WebRequest -Uri $url -OutFile daemon.zip
+          Expand-Archive -Path daemon.zip -DestinationPath daemon-extraido
+
+      - name: Montar el paquete final
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path paquete | Out-Null
+          Copy-Item dist/MtgCornerArenaBridge.exe paquete/
+          # El .exe del daemon puede venir en una subcarpeta según cómo empaquete
+          # su propio release; se busca por nombre en vez de asumir la ruta.
+          $daemonExe = Get-ChildItem -Path daemon-extraido -Filter "mtga-tracker-daemon.exe" -Recurse | Select-Object -First 1
+          Copy-Item $daemonExe.FullName paquete/
+          Copy-Item LEEME.txt paquete/
+          Copy-Item LICENCIA-TERCEROS.txt paquete/
+          # El texto completo de la GPLv3 se descarga en vez de guardarlo en el
+          # repo — es largo, es siempre el mismo, y así queda la fuente canónica.
+          Invoke-WebRequest -Uri "https://www.gnu.org/licenses/gpl-3.0.txt" -OutFile "paquete/LICENCIA-GPLv3-mtga-tracker-daemon.txt"
+          Compress-Archive -Path paquete/* -DestinationPath mtgcorner-importar-arena.zip
+
+      - name: Publicar en el release "latest"
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>$null
+          gh release create latest mtgcorner-importar-arena.zip `
+            --title "Importar de MTG Arena" `
+            --notes "Se recompila automáticamente en cada cambio. Incluye mtga-tracker-daemon ${{ env.DAEMON_VERSION }} (GPLv3, de terceros) — ver LICENCIA-TERCEROS.txt dentro del zip."
