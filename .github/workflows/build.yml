@@ -56,8 +56,8 @@ jobs:
       - name: Montar el paquete final
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path paquete | Out-Null
-          Copy-Item dist/MtgCornerArenaBridge.exe paquete/
+          New-Item -ItemType Directory -Force -Path mtgcorner-importar-arena | Out-Null
+          Copy-Item dist/MtgCornerArenaBridge.exe mtgcorner-importar-arena/
           # OJO: mtga-tracker-daemon NO es de un solo fichero — su .exe es sólo
           # un lanzador nativo que necesita más de ciento cincuenta DLL al lado
           # para arrancar. Copiar sólo el .exe (como hacía esto antes) produce
@@ -66,13 +66,17 @@ jobs:
           # `Copy-Item "carpeta/*" -Recurse` es frágil en PowerShell — se
           # enumeran los ficheros explícitamente y se copian uno a uno, que es
           # lo que de verdad falló en el intento anterior.
-          Get-ChildItem -Path $daemonExe.DirectoryName -File | Copy-Item -Destination paquete/ -Force
-          Copy-Item LEEME.txt paquete/
-          Copy-Item LICENCIA-TERCEROS.txt paquete/
+          Get-ChildItem -Path $daemonExe.DirectoryName -File | Copy-Item -Destination mtgcorner-importar-arena/ -Force
+          Copy-Item LEEME.txt mtgcorner-importar-arena/
+          Copy-Item LICENCIA-TERCEROS.txt mtgcorner-importar-arena/
           # El texto completo de la GPLv3 se descarga en vez de guardarlo en el
           # repo — es largo, es siempre el mismo, y así queda la fuente canónica.
-          Invoke-WebRequest -Uri "https://www.gnu.org/licenses/gpl-3.0.txt" -OutFile "paquete/LICENCIA-GPLv3-mtga-tracker-daemon.txt"
-          Compress-Archive -Path paquete/* -DestinationPath mtgcorner-importar-arena.zip
+          Invoke-WebRequest -Uri "https://www.gnu.org/licenses/gpl-3.0.txt" -OutFile "mtgcorner-importar-arena/LICENCIA-GPLv3-mtga-tracker-daemon.txt"
+          # Se comprime la CARPETA (no su contenido con /*), para que al
+          # descomprimir el zip salga todo dentro de una carpeta propia, en vez
+          # de doscientos y pico ficheros sueltos mezclándose con lo que ya
+          # hubiera donde se descomprima.
+          Compress-Archive -Path mtgcorner-importar-arena -DestinationPath mtgcorner-importar-arena.zip
 
       - name: Publicar en el release "latest"
         shell: pwsh
