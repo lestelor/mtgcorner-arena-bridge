@@ -50,7 +50,7 @@ jobs:
         shell: pwsh
         run: |
           $url = "https://github.com/frcaton/mtga-tracker-daemon/releases/download/${{ env.DAEMON_VERSION }}/mtga-tracker-daemon-Windows.zip"
-          Invoke-WebRequest -Uri $url -OutFile daemon.zip
+          Invoke-WebRequest -Uri $url -OutFile daemon.zip -MaximumRetryCount 3 -RetryIntervalSec 5
           Expand-Archive -Path daemon.zip -DestinationPath daemon-extraido
 
       - name: Montar el paquete final
@@ -71,7 +71,7 @@ jobs:
           Copy-Item LICENCIA-TERCEROS.txt mtgcorner-importar-arena/
           # El texto completo de la GPLv3 se descarga en vez de guardarlo en el
           # repo — es largo, es siempre el mismo, y así queda la fuente canónica.
-          Invoke-WebRequest -Uri "https://www.gnu.org/licenses/gpl-3.0.txt" -OutFile "mtgcorner-importar-arena/LICENCIA-GPLv3-mtga-tracker-daemon.txt"
+          Invoke-WebRequest -Uri "https://www.gnu.org/licenses/gpl-3.0.txt" -OutFile "mtgcorner-importar-arena/LICENCIA-GPLv3-mtga-tracker-daemon.txt" -MaximumRetryCount 3 -RetryIntervalSec 5
           # Se comprime la CARPETA (no su contenido con /*), para que al
           # descomprimir el zip salga todo dentro de una carpeta propia, en vez
           # de doscientos y pico ficheros sueltos mezclándose con lo que ya
