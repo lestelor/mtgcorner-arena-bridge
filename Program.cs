@@ -81,8 +81,17 @@ internal static class Program
         // antes— chocó en la primera prueba real con otra cosa ya escuchando
         // ahí en el ordenador de un usuario; el daemon se caía al arrancar
         // sin que nada en esta consola lo dejara ver.
+        // "localhost", NUNCA "127.0.0.1": el propio daemon sólo registra el
+        // prefijo "http://localhost:<puerto>/" en HTTP.sys, y HTTP.sys
+        // compara el host exacto salvo comodín — una petición a 127.0.0.1
+        // contra ese prefijo no es "el mismo destino con otro nombre", es
+        // sencillamente un prefijo distinto, y responde 400 Bad Request
+        // (Invalid Hostname) sin que la petición llegue siquiera al código
+        // del daemon. Esto hacía fallar SIEMPRE la detección de Arena, con
+        // Arena abierto o no — visto de un `curl 127.0.0.1:<puerto>/status`
+        // real reproduciendo el mismo 400.
         var puerto = PuertoLibre();
-        var baseDaemon = new Uri($"http://127.0.0.1:{puerto}");
+        var baseDaemon = new Uri($"http://localhost:{puerto}");
 
         Console.WriteLine($"Arrancando el lector de Arena en el puerto {puerto} (mtga-tracker-daemon, de terceros, GPLv3)…");
         var salidaDaemon = new System.Text.StringBuilder();
@@ -110,6 +119,17 @@ internal static class Program
         daemon.OutputDataReceived += (_, e) => RecibirLinea(e.Data);
         daemon.ErrorDataReceived += (_, e) => RecibirLinea(e.Data);
 
+        // Antes de enseñar "pulsa una tecla para cerrar" (que se queda
+        // bloqueado esperando), no después: si el lector se mata DESPUÉS de
+        // ese mensaje, se queda vivo y ocupando su puerto todo el rato que el
+        // usuario tarde en pulsar algo — tiempo de sobra para que una prueba
+        // manual en ese mismo puerto choque con él.
+        int Salir(int codigo)
+        {
+            try { if (!daemon.HasExited) daemon.Kill(entireProcessTree: true); } catch { /* ya se habrá cerrado solo, o ni llegó a arrancar */ }
+            return Esperar(codigo);
+        }
+
         try
         {
             daemon.Start();
@@ -119,7 +139,7 @@ internal static class Program
         catch (Exception ex)
         {
             Console.WriteLine($"No se pudo arrancar el lector: {ex.Message}");
-            return Esperar(1);
+            return Salir(1);
         }
 
         // Un momento para que, si va a caerse al arrancar (como el conflicto
@@ -132,7 +152,7 @@ internal static class Program
             Console.WriteLine(salidaDaemon.Length > 0
                 ? "El lector de Arena se cerró solo nada más arrancar — mira lo que dijo arriba."
                 : $"El lector de Arena se cerró solo nada más arrancar, sin decir nada (código de salida {daemon.ExitCode}).");
-            return Esperar(1);
+            return Salir(1);
         }
 
         try
@@ -149,7 +169,7 @@ internal static class Program
                 {
                     Console.WriteLine("Además, el lector se cerró solo mientras esperaba — mira lo que dijo arriba.");
                 }
-                return Esperar(1);
+                return Salir(1);
             }
 
             Console.WriteLine("Arena detectado. Leyendo tu colección…");
@@ -157,7 +177,7 @@ internal static class Program
             if (coleccion is null)
             {
                 Console.WriteLine("No se pudo leer la colección — ¿acabas de abrir Arena? Espera a que cargue del todo y reinténtalo.");
-                return Esperar(1);
+                return Salir(1);
             }
 
             // ── 3. Directo a tu cuenta, con el mismo código ya confirmado ──
@@ -167,14 +187,14 @@ internal static class Program
             if (!resp.IsSuccessStatusCode)
             {
                 Console.WriteLine($"MTG Corner no aceptó la importación (código {(int)resp.StatusCode}). No se ha guardado nada.");
-                return Esperar(1);
+                return Salir(1);
             }
 
             var resumen = await resp.Content.ReadFromJsonAsync<ResumenGuardado>(JsonOpciones);
             Console.WriteLine();
             Console.WriteLine($"Listo: {resumen?.CartasGuardadas ?? 0} cartas guardadas en tu colección.");
             if (resumen?.SinTraducir > 0) Console.WriteLine($"({resumen.SinTraducir} no se reconocieron — puede que sean muy nuevas.)");
-            return Esperar(0);
+            return Salir(0);
         }
         finally
         {
