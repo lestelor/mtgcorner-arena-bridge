@@ -188,7 +188,7 @@ internal static class Program
             }
 
             // ── 3. Directo a tu cuenta, con el mismo código ya confirmado ──
-            Console.WriteLine($"Saving {coleccion.Length} cards to your MTG Corner collection…");
+            Console.WriteLine($"Saving {coleccion.Length} cards to your \"Arena\" deck on MTG Corner…");
             Console.WriteLine("(a large collection can take more than a minute — keep waiting)");
             var cuerpo = new PeticionImportar(codigo, null, [], coleccion, []);
             var resp = await http.PostAsJsonAsync("/api/mtga-import", cuerpo, JsonOpciones);
@@ -200,7 +200,7 @@ internal static class Program
 
             var resumen = await resp.Content.ReadFromJsonAsync<ResumenGuardado>(JsonOpciones);
             Console.WriteLine();
-            Console.WriteLine($"Done: {resumen?.CartasGuardadas ?? 0} cards saved to your collection.");
+            Console.WriteLine($"Done: {resumen?.CartasGuardadas ?? 0} cards saved to your \"Arena\" deck.");
             if (resumen?.SinTraducir > 0) Console.WriteLine($"({resumen.SinTraducir} weren't recognized — they might be very new.)");
             return Salir(0);
         }
