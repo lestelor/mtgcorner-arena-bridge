@@ -24,8 +24,6 @@ namespace MtgCornerArenaBridge;
 internal static class Program
 {
     private const string Sitio = "https://mtgcorner.com";
-    private const int PuertoDaemon = 9000;
-    private static readonly Uri BaseDaemon = new($"http://127.0.0.1:{PuertoDaemon}");
     private static readonly JsonSerializerOptions JsonOpciones = new(JsonSerializerDefaults.Web);
 
     private static async Task<int> Main()
@@ -79,10 +77,18 @@ internal static class Program
             return Esperar(1);
         }
 
+        // Puerto libre DE VERDAD, no uno fijo. El 9000 —el que llevaba éste
+        // antes— chocó en la primera prueba real con otra cosa ya escuchando
+        // ahí en el ordenador de un usuario; el daemon se caía al arrancar
+        // sin que nada en esta consola lo dejara ver.
+        var puerto = PuertoLibre();
+        var baseDaemon = new Uri($"http://127.0.0.1:{puerto}");
+
         Console.WriteLine("Arrancando el lector de Arena (mtga-tracker-daemon, de terceros, GPLv3)…");
+        var salidaDaemon = new System.Text.StringBuilder();
         using var daemon = new Process
         {
-            StartInfo = new ProcessStartInfo(rutaDaemon, $"-p {PuertoDaemon}")
+            StartInfo = new ProcessStartInfo(rutaDaemon, $"-p {puerto}")
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -90,11 +96,34 @@ internal static class Program
                 RedirectStandardError = true,
             },
         };
+        // Se recoge TODO lo que diga, en vivo — así, si se cae, hay algo que
+        // enseñar en vez de un "no se detectó" sin ninguna pista. Es
+        // literalmente lo que faltó la primera vez que esto falló de verdad:
+        // el error real (un puerto ocupado) estaba ahí, pero nadie lo veía.
+        daemon.OutputDataReceived += (_, e) => { if (e.Data != null) lock (salidaDaemon) salidaDaemon.AppendLine(e.Data); };
+        daemon.ErrorDataReceived += (_, e) => { if (e.Data != null) lock (salidaDaemon) salidaDaemon.AppendLine(e.Data); };
 
-        try { daemon.Start(); }
+        try
+        {
+            daemon.Start();
+            daemon.BeginOutputReadLine();
+            daemon.BeginErrorReadLine();
+        }
         catch (Exception ex)
         {
             Console.WriteLine($"No se pudo arrancar el lector: {ex.Message}");
+            return Esperar(1);
+        }
+
+        // Un momento para que, si va a caerse al arrancar (como el conflicto
+        // de puerto que motivó todo esto), se vea YA en vez de esperar el
+        // minuto entero para nada.
+        await Task.Delay(1500);
+        if (daemon.HasExited)
+        {
+            Console.WriteLine();
+            Console.WriteLine("El lector de Arena se cerró solo nada más arrancar. Esto es lo que dijo:");
+            Console.WriteLine(salidaDaemon.Length > 0 ? salidaDaemon.ToString() : "(no dijo nada — código de salida " + daemon.ExitCode + ")");
             return Esperar(1);
         }
 
@@ -104,15 +133,21 @@ internal static class Program
 
             Console.WriteLine("Esperando a que detecte MTG Arena abierto (hasta 60 s)…");
             Console.WriteLine("Si no lo tienes abierto todavía, ábrelo ahora.");
-            if (!await EsperarArena(httpDaemon, TimeSpan.FromSeconds(60)))
+            if (!await EsperarArena(httpDaemon, baseDaemon, TimeSpan.FromSeconds(60)))
             {
                 Console.WriteLine();
                 Console.WriteLine("No se detectó Arena abierto a tiempo. Ábrelo y vuelve a ejecutar este programa.");
+                if (daemon.HasExited)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("Además, el lector se cerró solo mientras esperaba. Esto dijo:");
+                    Console.WriteLine(salidaDaemon.Length > 0 ? salidaDaemon.ToString() : "(nada)");
+                }
                 return Esperar(1);
             }
 
             Console.WriteLine("Arena detectado. Leyendo tu colección…");
-            var coleccion = await LeerColeccion(httpDaemon);
+            var coleccion = await LeerColeccion(httpDaemon, baseDaemon);
             if (coleccion is null)
             {
                 Console.WriteLine("No se pudo leer la colección — ¿acabas de abrir Arena? Espera a que cargue del todo y reinténtalo.");
@@ -157,14 +192,14 @@ internal static class Program
         return false;
     }
 
-    private static async Task<bool> EsperarArena(HttpClient http, TimeSpan plazo)
+    private static async Task<bool> EsperarArena(HttpClient http, Uri baseDaemon, TimeSpan plazo)
     {
         var limite = DateTime.UtcNow + plazo;
         while (DateTime.UtcNow < limite)
         {
             try
             {
-                var r = await http.GetFromJsonAsync<EstadoDaemon>(new Uri(BaseDaemon, "/status"), JsonOpciones);
+                var r = await http.GetFromJsonAsync<EstadoDaemon>(new Uri(baseDaemon, "/status"), JsonOpciones);
                 if (r?.IsRunning == true) return true;
             }
             catch { /* el daemon puede tardar un segundo en levantar su servidor */ }
@@ -173,14 +208,35 @@ internal static class Program
         return false;
     }
 
-    private static async Task<CartaColeccion[]?> LeerColeccion(HttpClient http)
+    private static async Task<CartaColeccion[]?> LeerColeccion(HttpClient http, Uri baseDaemon)
     {
         try
         {
-            var r = await http.GetFromJsonAsync<RespuestaCartas>(new Uri(BaseDaemon, "/cards"), JsonOpciones);
+            var r = await http.GetFromJsonAsync<RespuestaCartas>(new Uri(baseDaemon, "/cards"), JsonOpciones);
             return r?.Cards.Select(c => new CartaColeccion(c.GrpId, c.Owned)).ToArray();
         }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// Un puerto libre de verdad, pedido al sistema operativo en el momento
+    /// — no uno fijo que puede chocar con lo que ya haya en el ordenador de
+    /// quien lo ejecuta. Se abre un socket en el puerto 0 (que el SO resuelve
+    /// a uno libre), se lee cuál le tocó, y se cierra enseguida para que el
+    /// daemon lo use él.
+    ///
+    /// Hay una ventana mínima entre que se libera aquí y el daemon lo coge —
+    /// en teoría otra cosa podría colárselo en medio—, pero es el mismo
+    /// método que usan herramientas de desarrollo con el mismo problema, y en
+    /// la práctica es muchísimo más fiable que un número fijo cualquiera.
+    /// </summary>
+    private static int PuertoLibre()
+    {
+        using var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        l.Start();
+        var puerto = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
+        l.Stop();
+        return puerto;
     }
 
     private static int Esperar(int codigo)
