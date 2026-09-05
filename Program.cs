@@ -84,7 +84,7 @@ internal static class Program
         var puerto = PuertoLibre();
         var baseDaemon = new Uri($"http://127.0.0.1:{puerto}");
 
-        Console.WriteLine("Arrancando el lector de Arena (mtga-tracker-daemon, de terceros, GPLv3)…");
+        Console.WriteLine($"Arrancando el lector de Arena en el puerto {puerto} (mtga-tracker-daemon, de terceros, GPLv3)…");
         var salidaDaemon = new System.Text.StringBuilder();
         using var daemon = new Process
         {
@@ -96,12 +96,19 @@ internal static class Program
                 RedirectStandardError = true,
             },
         };
-        // Se recoge TODO lo que diga, en vivo — así, si se cae, hay algo que
-        // enseñar en vez de un "no se detectó" sin ninguna pista. Es
-        // literalmente lo que faltó la primera vez que esto falló de verdad:
-        // el error real (un puerto ocupado) estaba ahí, pero nadie lo veía.
-        daemon.OutputDataReceived += (_, e) => { if (e.Data != null) lock (salidaDaemon) salidaDaemon.AppendLine(e.Data); };
-        daemon.ErrorDataReceived += (_, e) => { if (e.Data != null) lock (salidaDaemon) salidaDaemon.AppendLine(e.Data); };
+        // Se enseña en vivo, línea a línea, según va hablando — no sólo si se
+        // cae. Es literalmente lo que faltó la primera vez que esto falló de
+        // verdad: el error real (un puerto ocupado) estaba ahí, pero nadie lo
+        // veía hasta que ya era tarde. Se guarda también en `salidaDaemon`
+        // para poder reenseñarlo entero si hace falta más abajo.
+        void RecibirLinea(string? linea)
+        {
+            if (linea is null) return;
+            lock (salidaDaemon) salidaDaemon.AppendLine(linea);
+            Console.WriteLine($"[lector] {linea}");
+        }
+        daemon.OutputDataReceived += (_, e) => RecibirLinea(e.Data);
+        daemon.ErrorDataReceived += (_, e) => RecibirLinea(e.Data);
 
         try
         {
@@ -122,8 +129,9 @@ internal static class Program
         if (daemon.HasExited)
         {
             Console.WriteLine();
-            Console.WriteLine("El lector de Arena se cerró solo nada más arrancar. Esto es lo que dijo:");
-            Console.WriteLine(salidaDaemon.Length > 0 ? salidaDaemon.ToString() : "(no dijo nada — código de salida " + daemon.ExitCode + ")");
+            Console.WriteLine(salidaDaemon.Length > 0
+                ? "El lector de Arena se cerró solo nada más arrancar — mira lo que dijo arriba."
+                : $"El lector de Arena se cerró solo nada más arrancar, sin decir nada (código de salida {daemon.ExitCode}).");
             return Esperar(1);
         }
 
@@ -139,9 +147,7 @@ internal static class Program
                 Console.WriteLine("No se detectó Arena abierto a tiempo. Ábrelo y vuelve a ejecutar este programa.");
                 if (daemon.HasExited)
                 {
-                    Console.WriteLine();
-                    Console.WriteLine("Además, el lector se cerró solo mientras esperaba. Esto dijo:");
-                    Console.WriteLine(salidaDaemon.Length > 0 ? salidaDaemon.ToString() : "(nada)");
+                    Console.WriteLine("Además, el lector se cerró solo mientras esperaba — mira lo que dijo arriba.");
                 }
                 return Esperar(1);
             }
