@@ -33,7 +33,14 @@ internal static class Program
         Console.WriteLine("==================================");
         Console.WriteLine();
 
-        using var http = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromSeconds(10) };
+        // 10 s bastaba de sobra para iniciar/confirmar/consultar el vínculo,
+        // pero la ÚLTIMA llamada —guardar la colección— puede tardar de
+        // verdad: mtgcorner.com traduce cada arena_id contra Scryfall en
+        // lotes de 75, a su ritmo, y una colección real son miles. Con sólo
+        // 10 s este cliente cortaba esa petición él solo antes de que el
+        // servidor pudiera siquiera terminar — daba error y no se guardaba
+        // nada, aunque el servidor sí hubiera podido acabar con más tiempo.
+        using var http = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(4) };
 
         // ── 1. Quién eres, confirmado en tu navegador — nunca aquí ─────────
         string codigo;
@@ -182,6 +189,7 @@ internal static class Program
 
             // ── 3. Directo a tu cuenta, con el mismo código ya confirmado ──
             Console.WriteLine($"Guardando {coleccion.Length} cartas en tu colección de MTG Corner…");
+            Console.WriteLine("(una colección grande puede tardar más de un minuto — sigue esperando)");
             var cuerpo = new PeticionImportar(codigo, null, [], coleccion, []);
             var resp = await http.PostAsJsonAsync("/api/mtga-import", cuerpo, JsonOpciones);
             if (!resp.IsSuccessStatusCode)
