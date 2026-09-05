@@ -29,7 +29,7 @@ internal static class Program
     private static async Task<int> Main()
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
-        Console.WriteLine("MTG Corner — puente con MTG Arena");
+        Console.WriteLine("MTG Corner — bridge to MTG Arena");
         Console.WriteLine("==================================");
         Console.WriteLine();
 
@@ -54,33 +54,33 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"No se pudo contactar con MTG Corner: {ex.Message}");
+            Console.WriteLine($"Couldn't reach MTG Corner: {ex.Message}");
             return Esperar(1);
         }
 
         var url = $"{Sitio}/vincular-dispositivo?codigo={codigo}";
-        Console.WriteLine("Abriendo tu navegador para confirmar que eres tú…");
-        Console.WriteLine($"Si no se abre solo, entra en: {url}");
+        Console.WriteLine("Opening your browser to confirm it's you…");
+        Console.WriteLine($"If it doesn't open on its own, go to: {url}");
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
         catch { /* el aviso de arriba con la URL ya basta si esto falla */ }
 
-        Console.WriteLine("Esperando la confirmación (hasta 3 minutos)…");
+        Console.WriteLine("Waiting for confirmation (up to 3 minutes)…");
         var confirmado = await EsperarConfirmacion(http, codigo, TimeSpan.FromMinutes(3));
         if (!confirmado)
         {
             Console.WriteLine();
-            Console.WriteLine("No se confirmó a tiempo. No se ha leído ni guardado nada.");
+            Console.WriteLine("Not confirmed in time. Nothing was read or saved.");
             return Esperar(1);
         }
-        Console.WriteLine("Confirmado.");
+        Console.WriteLine("Confirmed.");
         Console.WriteLine();
 
         // ── 2. Sólo ahora se toca Arena ─────────────────────────────────────
         var rutaDaemon = Path.Combine(AppContext.BaseDirectory, "mtga-tracker-daemon.exe");
         if (!File.Exists(rutaDaemon))
         {
-            Console.WriteLine($"No se encuentra {rutaDaemon}.");
-            Console.WriteLine("Este programa espera venir junto a mtga-tracker-daemon.exe en la misma carpeta.");
+            Console.WriteLine($"Can't find {rutaDaemon}.");
+            Console.WriteLine("This program expects to be next to mtga-tracker-daemon.exe in the same folder.");
             return Esperar(1);
         }
 
@@ -100,7 +100,7 @@ internal static class Program
         var puerto = PuertoLibre();
         var baseDaemon = new Uri($"http://localhost:{puerto}");
 
-        Console.WriteLine($"Arrancando el lector de Arena en el puerto {puerto} (mtga-tracker-daemon, de terceros, GPLv3)…");
+        Console.WriteLine($"Starting the Arena reader on port {puerto} (mtga-tracker-daemon, third-party, GPLv3)…");
         var salidaDaemon = new System.Text.StringBuilder();
         using var daemon = new Process
         {
@@ -121,7 +121,7 @@ internal static class Program
         {
             if (linea is null) return;
             lock (salidaDaemon) salidaDaemon.AppendLine(linea);
-            Console.WriteLine($"[lector] {linea}");
+            Console.WriteLine($"[reader] {linea}");
         }
         daemon.OutputDataReceived += (_, e) => RecibirLinea(e.Data);
         daemon.ErrorDataReceived += (_, e) => RecibirLinea(e.Data);
@@ -145,7 +145,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"No se pudo arrancar el lector: {ex.Message}");
+            Console.WriteLine($"Couldn't start the reader: {ex.Message}");
             return Salir(1);
         }
 
@@ -157,8 +157,8 @@ internal static class Program
         {
             Console.WriteLine();
             Console.WriteLine(salidaDaemon.Length > 0
-                ? "El lector de Arena se cerró solo nada más arrancar — mira lo que dijo arriba."
-                : $"El lector de Arena se cerró solo nada más arrancar, sin decir nada (código de salida {daemon.ExitCode}).");
+                ? "The Arena reader closed itself right after starting — see what it said above."
+                : $"The Arena reader closed itself right after starting, without saying anything (exit code {daemon.ExitCode}).");
             return Salir(1);
         }
 
@@ -166,42 +166,42 @@ internal static class Program
         {
             using var httpDaemon = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
 
-            Console.WriteLine("Esperando a que detecte MTG Arena abierto (hasta 60 s)…");
-            Console.WriteLine("Si no lo tienes abierto todavía, ábrelo ahora.");
+            Console.WriteLine("Waiting for it to detect MTG Arena open (up to 60 s)…");
+            Console.WriteLine("If you don't have it open yet, open it now.");
             if (!await EsperarArena(httpDaemon, baseDaemon, TimeSpan.FromSeconds(60)))
             {
                 Console.WriteLine();
-                Console.WriteLine("No se detectó Arena abierto a tiempo. Ábrelo y vuelve a ejecutar este programa.");
+                Console.WriteLine("Arena wasn't detected open in time. Open it and run this program again.");
                 if (daemon.HasExited)
                 {
-                    Console.WriteLine("Además, el lector se cerró solo mientras esperaba — mira lo que dijo arriba.");
+                    Console.WriteLine("Also, the reader closed itself while waiting — see what it said above.");
                 }
                 return Salir(1);
             }
 
-            Console.WriteLine("Arena detectado. Leyendo tu colección…");
+            Console.WriteLine("Arena detected. Reading your collection…");
             var coleccion = await LeerColeccion(httpDaemon, baseDaemon);
             if (coleccion is null)
             {
-                Console.WriteLine("No se pudo leer la colección — ¿acabas de abrir Arena? Espera a que cargue del todo y reinténtalo.");
+                Console.WriteLine("Couldn't read the collection — did you just open Arena? Wait for it to fully load and try again.");
                 return Salir(1);
             }
 
             // ── 3. Directo a tu cuenta, con el mismo código ya confirmado ──
-            Console.WriteLine($"Guardando {coleccion.Length} cartas en tu colección de MTG Corner…");
-            Console.WriteLine("(una colección grande puede tardar más de un minuto — sigue esperando)");
+            Console.WriteLine($"Saving {coleccion.Length} cards to your MTG Corner collection…");
+            Console.WriteLine("(a large collection can take more than a minute — keep waiting)");
             var cuerpo = new PeticionImportar(codigo, null, [], coleccion, []);
             var resp = await http.PostAsJsonAsync("/api/mtga-import", cuerpo, JsonOpciones);
             if (!resp.IsSuccessStatusCode)
             {
-                Console.WriteLine($"MTG Corner no aceptó la importación (código {(int)resp.StatusCode}). No se ha guardado nada.");
+                Console.WriteLine($"MTG Corner didn't accept the import (code {(int)resp.StatusCode}). Nothing was saved.");
                 return Salir(1);
             }
 
             var resumen = await resp.Content.ReadFromJsonAsync<ResumenGuardado>(JsonOpciones);
             Console.WriteLine();
-            Console.WriteLine($"Listo: {resumen?.CartasGuardadas ?? 0} cartas guardadas en tu colección.");
-            if (resumen?.SinTraducir > 0) Console.WriteLine($"({resumen.SinTraducir} no se reconocieron — puede que sean muy nuevas.)");
+            Console.WriteLine($"Done: {resumen?.CartasGuardadas ?? 0} cards saved to your collection.");
+            if (resumen?.SinTraducir > 0) Console.WriteLine($"({resumen.SinTraducir} weren't recognized — they might be very new.)");
             return Salir(0);
         }
         finally
@@ -276,7 +276,7 @@ internal static class Program
     private static int Esperar(int codigo)
     {
         Console.WriteLine();
-        Console.WriteLine("Pulsa una tecla para cerrar…");
+        Console.WriteLine("Press a key to close…");
         Console.ReadKey();
         return codigo;
     }
