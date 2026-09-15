@@ -443,6 +443,26 @@ internal static class Program
             }
             if (intento < 3) await Task.Delay(TimeSpan.FromSeconds(10));
         }
+
+        // Tres fallos: se pide al lector el recorrido paso a paso de la ruta que
+        // lee (/diagnostico, el parche de MTG Corner en parches/) y se enseña
+        // entero. Con eso se ve qué nombre interno ha cambiado en Arena sin
+        // tener Arena delante.
+        try
+        {
+            var d = await http.GetFromJsonAsync<RespuestaDiagnostico>(new Uri(baseDaemon, "/diagnostico"), JsonOpciones);
+            if (d?.Diagnostico is { Length: > 0 } lineas)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Diagnosis from the reader (please send these lines to MTG Corner):");
+                foreach (var linea in lineas) Console.WriteLine($"[diagnosis] {linea}");
+                Console.WriteLine();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[diagnosis] not available: {ex.GetType().Name}: {ex.Message}");
+        }
         return null;
     }
 
@@ -738,6 +758,10 @@ internal sealed record EstadoDaemon([property: JsonPropertyName("isRunning")] bo
 internal sealed record RespuestaCartas(
     [property: JsonPropertyName("cards")] CartaDaemon[]? Cards,
     [property: JsonPropertyName("error")] string? Error);
+
+/// <summary><c>/diagnostico</c>: el recorrido de la ruta de la colección, línea a línea
+/// (parche de MTG Corner sobre mtga-tracker-daemon, ver parches/).</summary>
+internal sealed record RespuestaDiagnostico([property: JsonPropertyName("diagnostico")] string[]? Diagnostico);
 internal sealed record CartaDaemon(
     [property: JsonPropertyName("grpId")] int GrpId,
     [property: JsonPropertyName("owned")] int Owned);

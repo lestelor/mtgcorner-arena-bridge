@@ -1,0 +1,129 @@
+diff --git a/src/mtga-tracker-daemon/HttpServer.cs b/src/mtga-tracker-daemon/HttpServer.cs
+index 8008c48..69fe774 100644
+--- a/src/mtga-tracker-daemon/HttpServer.cs
++++ b/src/mtga-tracker-daemon/HttpServer.cs
+@@ -1,6 +1,7 @@
+ // Based on the work of Benjamin N. Summerton <define-private-public> on HttpServer.cs
+ using System;
+ using System.Collections.Generic;
++using System.Linq;
+ using System.Diagnostics;
+ using System.IO;
+ using System.Text;
+@@ -113,6 +114,55 @@ namespace MTGATrackerDaemon
+                     };
+                     responseJSON = JsonConvert.SerializeObject(statusResponse);
+                 }
++                else if (request.Url.AbsolutePath == "/diagnostico")
++                {
++                    // Parche de MTG Corner (github.com/lestelor/mtgcorner-arena-bridge, GPLv3):
++                    // recorre paso a paso la ruta que lee /cards y dice dónde se rompe y qué
++                    // campos hay en cada punto, para ajustarla tras una actualización de Arena.
++                    var informe = new List<string>();
++                    try
++                    {
++                        IAssemblyImage img = CreateAssemblyImage();
++                        informe.Add("Core assembly loaded");
++                        try
++                        {
++                            var parecidos = img.TypeDefinitions
++                                .Where(t => t != null && t.Name != null && (t.Name.Contains("WrapperController") || t.Name.Contains("Inventory")))
++                                .Select(t => t.FullName).Distinct().Take(40).ToList();
++                            informe.Add("types like WrapperController/Inventory: " + string.Join(", ", parecidos));
++                        }
++                        catch (Exception ex)
++                        {
++                            informe.Add("listing types failed: " + ex.GetType().Name + ": " + ex.Message);
++                        }
++
++                        ITypeDefinition wc = null;
++                        try { wc = img.GetTypeDefinition("WrapperController"); }
++                        catch (Exception ex) { informe.Add("WrapperController lookup failed: " + ex.GetType().Name + ": " + ex.Message); }
++                        if (wc == null)
++                        {
++                            informe.Add("WrapperController type: NOT FOUND");
++                        }
++                        else
++                        {
++                            informe.Add("WrapperController -> " + CamposDe(wc));
++                            object actual = Paso(informe, "<Instance>k__BackingField", () => wc.GetStaticValue<object>("<Instance>k__BackingField"));
++                            actual = Siguiente(informe, actual, "<InventoryManager>k__BackingField");
++                            actual = Siguiente(informe, actual, "InventoryServiceWrapper");
++                            actual = Siguiente(informe, actual, "<Cards>k__BackingField");
++                            actual = Siguiente(informe, actual, "_entries");
++                            if (actual is object[] entradas)
++                            {
++                                informe.Add("_entries length: " + entradas.Length);
++                            }
++                        }
++                    }
++                    catch (Exception ex)
++                    {
++                        informe.Add("EXCEPTION: " + ex.GetType().Name + ": " + ex.Message);
++                    }
++                    responseJSON = JsonConvert.SerializeObject(new { diagnostico = informe });
++                }
+                 else if (request.Url.AbsolutePath == "/cards")
+                 {
+                     try
+@@ -369,6 +419,60 @@ namespace MTGATrackerDaemon
+             response.Close();
+         }
+ 
++        // ── Parche de MTG Corner: ayudantes de /diagnostico ──
++
++        private static string CamposDe(ITypeDefinition tipo)
++        {
++            if (tipo == null) return "<unknown type>";
++            try
++            {
++                var nombres = tipo.Fields.Where(f => f != null).Select(f => f.Name).Take(80).ToList();
++                return tipo.FullName + " { " + string.Join(", ", nombres) + " }";
++            }
++            catch (Exception ex)
++            {
++                return tipo.FullName + " { fields unreadable: " + ex.GetType().Name + ": " + ex.Message + " }";
++            }
++        }
++
++        private static object Paso(List<string> informe, string nombre, Func<object> leer)
++        {
++            try
++            {
++                object valor = leer();
++                if (valor == null)
++                {
++                    informe.Add(nombre + " = null");
++                    return null;
++                }
++                if (valor is IManagedObjectInstance objeto)
++                {
++                    informe.Add(nombre + " -> " + CamposDe(objeto.TypeDefinition));
++                }
++                else
++                {
++                    informe.Add(nombre + " -> " + valor.GetType().Name);
++                }
++                return valor;
++            }
++            catch (Exception ex)
++            {
++                informe.Add(nombre + " FAILED: " + ex.GetType().Name + ": " + ex.Message);
++                return null;
++            }
++        }
++
++        private static object Siguiente(List<string> informe, object actual, string campo)
++        {
++            if (actual == null) return null;
++            if (!(actual is IManagedObjectInstance objeto))
++            {
++                informe.Add("cannot read " + campo + " from " + actual.GetType().Name);
++                return null;
++            }
++            return Paso(informe, campo, () => objeto.GetValue<object>(campo));
++        }
++
+         private IAssemblyImage CreateAssemblyImage()
+         {
+             UnityProcessFacade unityProcess = CreateUnityProcessFacade();
