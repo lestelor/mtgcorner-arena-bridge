@@ -57,10 +57,17 @@ jobs:
       - name: Compilar mtga-tracker-daemon ${{ env.DAEMON_VERSION }} con el parche de MTG Corner
         shell: pwsh
         run: |
+          # En pwsh un comando nativo que falla NO para el script: sin estas
+          # comprobaciones, un parche que no se aplica daría un daemon sin
+          # /diagnostico y el paquete se publicaría igual.
           git clone https://github.com/frcaton/mtga-tracker-daemon.git daemon-src
+          if ($LASTEXITCODE -ne 0) { throw "no se pudo clonar mtga-tracker-daemon" }
           git -C daemon-src checkout ${{ env.DAEMON_COMMIT }}
+          if ($LASTEXITCODE -ne 0) { throw "no existe el commit ${{ env.DAEMON_COMMIT }}" }
           git -C daemon-src apply --whitespace=nowarn ../parches/mtga-tracker-daemon-diagnostico.patch
+          if ($LASTEXITCODE -ne 0) { throw "no se pudo aplicar el parche de diagnóstico" }
           dotnet publish daemon-src/src/mtga-tracker-daemon -c Release -r win-x64 --self-contained -o daemon-extraido
+          if ($LASTEXITCODE -ne 0) { throw "no compiló mtga-tracker-daemon" }
           if (-not (Test-Path daemon-extraido/mtga-tracker-daemon.exe)) { throw "no se generó mtga-tracker-daemon.exe" }
 
       - name: Montar el paquete final

@@ -1,0 +1,2 @@
+# Los parches se aplican con git apply: sin conversión de finales de línea.
+*.patch -text
