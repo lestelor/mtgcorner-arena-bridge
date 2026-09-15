@@ -1,7 +1,7 @@
 # MTG Corner — puente con MTG Arena
 
-Programa pequeño, en C#/.NET, que lee tu colección de MTG Arena mientras el
-juego está abierto y la guarda directamente en tu cuenta de
+Programa pequeño, en C#/.NET, que lee tu colección, tus mazos y tus comodines
+de MTG Arena y los guarda directamente en tu cuenta de
 [mtgcorner.com](https://mtgcorner.com).
 
 ## Cómo funciona
@@ -12,6 +12,12 @@ terceros, código abierto, GPLv3— que es quien de verdad hace la lectura de
 memoria de Arena en modo sólo lectura, le pide la colección por su servidor
 HTTP local, y la envía al sitio.
 
+Los **mazos y los comodines** salen del `Player.log` de Arena, sin preguntarle
+al usuario dónde está: Unity lo escribe siempre en
+`%USERPROFILE%\AppData\LocalLow\Wizards Of The Coast\MTGA`, con el instalador
+de Wizards, con Steam o con Epic. Se leen `Player-prev.log` y `Player.log`,
+compartidos para no chocar con Arena abierto.
+
 ```
 MtgCornerArenaBridge.exe
         │
@@ -21,20 +27,41 @@ MtgCornerArenaBridge.exe
         │
         │   ── sólo a partir de aquí se toca Arena ──
         │
-        ├─ arranca ─▶ mtga-tracker-daemon.exe -p 9000
-        ├─ GET http://127.0.0.1:9000/status       (espera a que detecte Arena)
-        ├─ GET http://127.0.0.1:9000/cards        ({ grpId, owned }[])
+        ├─ arranca ─▶ mtga-tracker-daemon.exe -p <puerto libre>
+        ├─ GET http://localhost:<puerto>/status   (espera a que detecte Arena)
+        ├─ GET http://localhost:<puerto>/cards    ({ grpId, owned }[])
         │
-        └─ POST /api/mtga-import                  (con el código ya confirmado)
+        ├─ lee Player-prev.log y Player.log       (sólo inicios de sesión y líneas de mazo)
+        │
+        ├─ POST /api/mtga-import                  (colección + trozos del log + revisar, con el código ya confirmado)
+        │                                          responde { pendiente }: queda pendiente, sin tocar tus mazos
+        │
+        └─ abre el navegador en /importar-arena?revisar=<pendiente>   (tú eliges qué mazos se guardan)
 ```
 
 Sin confirmar en el navegador, nunca se llega a leer nada de Arena — no hay
 motivo para sacar datos del juego que no se van a poder guardar. No queda
 ningún fichero en el ordenador, acabe bien o mal.
 
-Los comodines y los mazos ya se leen bien directamente del `Player.log` de
-Arena — ese análisis vive en el código del propio sitio web, no aquí. Este
-programa cubre sólo lo que el log no siempre trae: la colección completa.
+**El log no se analiza aquí.** De cada inicio de sesión (la respuesta de
+`StartHook`) se quedan los cuatro comodines y los nombres, formatos y listas de
+los mazos del usuario, sin los precon de Arena ni el resto; de la sesión, las
+líneas `DeckUpsertDeckV3` y `EventSetDeckV3`. Nunca el fichero entero, que
+también tiene las partidas con los nombres de los rivales. Esos trozos los
+analiza el servidor con `lib/mtgaLog.ts`, el mismo código que usa la web al
+arrastrar el fichero, para que un cambio de formato de Arena se arregle en un
+solo sitio.
+
+Si la colección no se puede leer (Arena cerrado, el lector no arranca), se
+guardan igualmente los mazos y los comodines. Si el log no tiene datos
+detallados, el programa explica cómo activar «Detailed Logs (Plugin Support)».
+
+**Nada se guarda sin elegir.** Un log trae todos los mazos de la cuenta de
+Arena, a veces decenas y de hace años, y un mazo que ya exista en MTG Corner
+con el mismo nombre se reescribiría entero. Por eso el servidor deja lo leído
+pendiente una hora y el programa abre la página de revisión, en el idioma de
+Windows: cada mazo con su casilla y una etiqueta de «nuevo» o «ya existe», y la
+colección completa con la suya. Lo no marcado se descarta.
 
 ## Compilar
 

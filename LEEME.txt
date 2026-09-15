@@ -3,19 +3,26 @@ Importar tu colección de MTG Arena a MTG Corner
 
 QUÉ ES ESTO
 -----------
-Un programa que lee tu colección de MTG Arena mientras el juego está
-abierto, y la guarda directamente en tu cuenta de mtgcorner.com.
+Un programa que lee tu colección, tus mazos y tus comodines de MTG Arena,
+y los guarda directamente en tu cuenta de mtgcorner.com.
 
 Nunca toca tu cuenta de Arena ni el juego en sí — sólo LEE lo que ya está
 en tu ordenador, en modo sólo lectura, mientras juegas.
 
 CÓMO USARLO
 -----------
-1. Abre MTG Arena y espera a que cargue del todo.
-2. Ejecuta MtgCornerArenaBridge.exe (en esta misma carpeta).
-3. Se abrirá tu navegador pidiendo confirmar que eres tú — inicia sesión en
+1. En MTG Arena, una sola vez: engranaje → Cuenta → marca
+   "Detailed Logs (Plugin Support)" y reinicia Arena. Sin eso Arena no
+   escribe tus mazos en su registro.
+2. Abre MTG Arena y espera a que cargue del todo.
+3. Ejecuta MtgCornerArenaBridge.exe (en esta misma carpeta).
+4. Se abrirá tu navegador pidiendo confirmar que eres tú — inicia sesión en
    MTG Corner si hace falta, y pulsa "Sí, soy yo".
-4. Vuelve a la ventana del programa: leerá tu colección y la guardará sola.
+5. El programa leerá tu colección, tus mazos y tus comodines, sin que tengas
+   que buscar ningún fichero, y abrirá otra página en tu navegador.
+6. En esa página marca los mazos que quieres traer y pulsa Guardar. Los que
+   no marques se descartan, y un mazo que ya tengas en MTG Corner con el
+   mismo nombre sólo se reescribe si lo marcas.
 
 Nada se identifica antes de que confirmes en el navegador, y no se lee nada
 de Arena hasta ese momento. Si no confirmas a tiempo, el programa se cierra
@@ -25,11 +32,19 @@ Si Windows avisa de "editor desconocido" al abrirlo, es normal en un
 programa sin firmar — puedes ver el código completo en
 https://github.com/lestelor/mtgcorner-arena-bridge
 
-QUÉ NO HACE
------------
-No lee ni exporta tus comodines ni tus mazos — eso se hace por separado,
-arrastrando tu Player.log a mtgcorner.com/importar-arena. Este programa
-cubre sólo la colección completa, que no siempre queda en ese fichero.
+DE DÓNDE SALE CADA COSA
+-----------------------
+La colección completa, de la memoria de Arena mientras está abierto (con
+mtga-tracker-daemon, ver abajo).
+
+Tus mazos y tus comodines, del registro de Arena (Player.log), que Arena
+guarda siempre en la misma carpeta:
+  %USERPROFILE%\AppData\LocalLow\Wizards Of The Coast\MTGA
+Del registro sólo se envían tus mazos y tus comodines; nunca el fichero
+entero, que también tiene tus partidas.
+
+Si Arena está cerrado, la colección no se puede leer, pero tus mazos y
+comodines se guardan igual.
 
 QUIÉN HACE QUÉ (ver LICENCIA-TERCEROS.txt para el detalle legal)
 ------------------------------------------------------------------
