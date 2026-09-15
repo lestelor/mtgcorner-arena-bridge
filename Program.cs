@@ -51,6 +51,35 @@ internal static class Program
         Console.WriteLine("==================================");
         Console.WriteLine();
 
+        // ── 0. El lector de Arena tiene que estar al lado, ANTES de pedir nada ─
+        // Lo más habitual cuando falta: abrir el .exe con doble clic DENTRO del
+        // zip. Windows saca sólo ese fichero a una carpeta temporal
+        // (…\Temp\…_nombre.zip.123\…) y mtga-tracker-daemon.exe se queda dentro
+        // del zip. Pasó en la primera prueba real del 2026-09-15: se confirmó la
+        // sesión, se guardaron los mazos del log y la colección no, y la página
+        // de revisión mandaba a "abrir Arena", que no era el problema.
+        var rutaDaemon = Path.Combine(AppContext.BaseDirectory, "mtga-tracker-daemon.exe");
+        if (!File.Exists(rutaDaemon))
+        {
+            if (EjecutandoDesdeZip())
+            {
+                Console.WriteLine("It looks like you opened this program from inside the zip, without extracting it.");
+                Console.WriteLine("Windows only takes out this .exe, so the Arena reader that comes with it isn't there.");
+                Console.WriteLine();
+                Console.WriteLine("Close this window, right-click the zip → \"Extract All…\", open the extracted folder");
+                Console.WriteLine("and run MtgCornerArenaBridge.exe from there.");
+            }
+            else
+            {
+                Console.WriteLine($"Can't find the Arena reader: {rutaDaemon}");
+                Console.WriteLine("Extract the whole zip again into a folder and run MtgCornerArenaBridge.exe from there.");
+                Console.WriteLine("If mtga-tracker-daemon.exe disappears after extracting, your antivirus may have removed it.");
+            }
+            Console.WriteLine();
+            Console.WriteLine("Nothing was read or saved.");
+            return Esperar(1);
+        }
+
         // 10 s bastaba de sobra para iniciar/confirmar/consultar el vínculo,
         // pero la ÚLTIMA llamada —guardar la colección— puede tardar de
         // verdad: mtgcorner.com traduce cada arena_id contra Scryfall en
@@ -424,6 +453,18 @@ internal static class Program
     /// a uno libre), se lee cuál le tocó, y se cierra enseguida para que el
     /// daemon lo use él.
     /// </summary>
+    /// <summary>
+    /// Si el programa corre desde la copia temporal que hace Windows al abrir un
+    /// .exe dentro de un zip: una carpeta bajo %TEMP% con ".zip" en el nombre.
+    /// </summary>
+    private static bool EjecutandoDesdeZip()
+    {
+        var aqui = AppContext.BaseDirectory;
+        var temporal = Path.GetTempPath();
+        return aqui.Contains(".zip", StringComparison.OrdinalIgnoreCase)
+            && aqui.StartsWith(temporal, StringComparison.OrdinalIgnoreCase);
+    }
+
     [DllImport("kernel32.dll")]
     private static extern ushort GetUserDefaultUILanguage();
 
