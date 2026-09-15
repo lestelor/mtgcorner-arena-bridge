@@ -392,7 +392,21 @@ internal static class Program
                 var r = await http.GetFromJsonAsync<RespuestaCartas>(new Uri(baseDaemon, "/cards"), JsonOpciones);
                 var cartas = (r?.Cards ?? []).Where(c => c.Owned > 0).Select(c => new CartaColeccion(c.GrpId, c.Owned)).ToArray();
                 if (cartas.Length > 0) return cartas;
-                Console.WriteLine($"The reader answered without any cards (attempt {intento} of 3) — Arena may still be loading.");
+                // El daemon NO devuelve un código de error cuando falla: responde
+                // 200 con { "error": "<la excepción entera>" } (HttpServer.cs,
+                // ErrorResponseData). Antes eso se leía como "sin cartas" y el
+                // motivo real se perdía; tras una actualización de Arena suele ser
+                // que ha cambiado un nombre interno de la ruta que lee
+                // (WrapperController → InventoryManager → InventoryServiceWrapper → Cards).
+                if (!string.IsNullOrWhiteSpace(r?.Error))
+                {
+                    var primera = r.Error.Split('\n')[0].Trim();
+                    Console.WriteLine($"The reader couldn't read the collection (attempt {intento} of 3): {(primera.Length > 400 ? primera[..400] + "…" : primera)}");
+                }
+                else
+                {
+                    Console.WriteLine($"The reader answered without any cards (attempt {intento} of 3) — Arena may still be loading.");
+                }
             }
             catch (Exception ex)
             {
@@ -679,7 +693,10 @@ internal sealed record RespuestaImportar(
 // ─── mtga-tracker-daemon ─────────────────────────────────────────────────────
 
 internal sealed record EstadoDaemon([property: JsonPropertyName("isRunning")] bool IsRunning);
-internal sealed record RespuestaCartas([property: JsonPropertyName("cards")] CartaDaemon[] Cards);
+/// <summary><c>/cards</c> del daemon: las cartas, o <c>error</c> con la excepción si no pudo leerlas.</summary>
+internal sealed record RespuestaCartas(
+    [property: JsonPropertyName("cards")] CartaDaemon[]? Cards,
+    [property: JsonPropertyName("error")] string? Error);
 internal sealed record CartaDaemon(
     [property: JsonPropertyName("grpId")] int GrpId,
     [property: JsonPropertyName("owned")] int Owned);
