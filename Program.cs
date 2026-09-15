@@ -97,6 +97,15 @@ internal static class Program
         // Si esto falla no se corta todo: los mazos y los comodines salen del
         // log, que existe aunque Arena esté cerrado o el lector no arranque.
         var coleccion = await LeerColeccionDeArena();
+        if (coleccion is null)
+        {
+            // Que no pase desapercibido: el resto sigue, pero la colección es lo
+            // principal de este programa y "Arena" se queda como estaba.
+            Console.WriteLine();
+            Console.WriteLine("!! Your full collection (\"Arena\") will NOT be updated this time.");
+            Console.WriteLine("!! Open MTG Arena, wait until it has fully loaded, and run this program again.");
+            Console.WriteLine("   Your decks and wildcards can still be saved now.");
+        }
         Console.WriteLine();
 
         // ── 3. Mazos y comodines, del Player.log ────────────────────────────
@@ -178,7 +187,7 @@ internal static class Program
         var mazos = (respuesta?.MazosGuardados ?? []).Where(n => n != "Arena").ToArray();
         Console.WriteLine();
         Console.WriteLine("Done.");
-        if (coleccion is not null) Console.WriteLine("  Collection: saved to your \"Arena\" deck.");
+        if (coleccion is not null) Console.WriteLine("  Collection: saved as \"Arena\".");
         if (mazos.Length > 0) Console.WriteLine($"  Decks: {mazos.Length} saved ({string.Join(", ", mazos.Take(6))}{(mazos.Length > 6 ? ", …" : "")}).");
         if (respuesta?.ComodinesGuardados == true) Console.WriteLine("  Wildcards: updated.");
         if (respuesta?.SinTraducir > 0) Console.WriteLine($"  ({respuesta.SinTraducir} cards weren't recognized — they might be very new.)");
@@ -271,9 +280,10 @@ internal static class Program
 
             using var httpDaemon = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
 
-            Console.WriteLine("Waiting for it to detect MTG Arena open (up to 60 s)…");
-            Console.WriteLine("If you don't have it open yet, open it now.");
-            if (!await EsperarArena(httpDaemon, baseDaemon, TimeSpan.FromSeconds(60)))
+            // Tres minutos y no uno: da tiempo a abrir Arena y a que cargue.
+            Console.WriteLine("Waiting for it to detect MTG Arena open (up to 3 minutes)…");
+            Console.WriteLine("If you don't have it open yet, open it now and wait until it has fully loaded.");
+            if (!await EsperarArena(httpDaemon, baseDaemon, TimeSpan.FromMinutes(3)))
             {
                 Console.WriteLine();
                 Console.WriteLine("Arena wasn't detected open in time, so the full collection can't be read.");
@@ -282,7 +292,7 @@ internal static class Program
             }
 
             Console.WriteLine("Arena detected. Reading your collection…");
-            var coleccion = await LeerColeccion(httpDaemon, baseDaemon);
+            var coleccion = await LeerColeccion(baseDaemon);
             if (coleccion is null)
             {
                 Console.WriteLine("Couldn't read the collection — did you just open Arena? Wait for it to fully load and run this again.");
@@ -363,14 +373,34 @@ internal static class Program
         return false;
     }
 
-    private static async Task<CartaColeccion[]?> LeerColeccion(HttpClient http, Uri baseDaemon)
+    /// <summary>
+    /// La colección, del daemon. Leer miles de cartas de la memoria de Arena
+    /// tarda más que un <c>/status</c>: antes compartía el cliente de 5 s de la
+    /// espera, y una lectura lenta se daba por fallida sin decir por qué — el
+    /// 2026-09-15 una importación guardó los mazos sin la colección y no quedó
+    /// rastro del motivo. Ahora 60 s por intento, tres intentos (Arena puede
+    /// estar aún cargando y el daemon responder sin cartas) y el error real
+    /// escrito en la consola.
+    /// </summary>
+    private static async Task<CartaColeccion[]?> LeerColeccion(Uri baseDaemon)
     {
-        try
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        for (var intento = 1; intento <= 3; intento++)
         {
-            var r = await http.GetFromJsonAsync<RespuestaCartas>(new Uri(baseDaemon, "/cards"), JsonOpciones);
-            return r?.Cards.Select(c => new CartaColeccion(c.GrpId, c.Owned)).ToArray();
+            try
+            {
+                var r = await http.GetFromJsonAsync<RespuestaCartas>(new Uri(baseDaemon, "/cards"), JsonOpciones);
+                var cartas = (r?.Cards ?? []).Where(c => c.Owned > 0).Select(c => new CartaColeccion(c.GrpId, c.Owned)).ToArray();
+                if (cartas.Length > 0) return cartas;
+                Console.WriteLine($"The reader answered without any cards (attempt {intento} of 3) — Arena may still be loading.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Couldn't read the collection (attempt {intento} of 3): {ex.GetType().Name}: {ex.Message}");
+            }
+            if (intento < 3) await Task.Delay(TimeSpan.FromSeconds(10));
         }
-        catch { return null; }
+        return null;
     }
 
     /// <summary>
