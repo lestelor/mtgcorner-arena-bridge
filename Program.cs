@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -11,27 +12,27 @@ using System.Text.RegularExpressions;
 namespace MtgCornerArenaBridge;
 
 /// <summary>
-/// LO QUE HACE ESTE PROGRAMA: confirmar quién eres en mtgcorner.com, leer tu
-/// colección de Arena con mtga-tracker-daemon (de terceros, GPLv3,
-/// https://github.com/frcaton/mtga-tracker-daemon), sacar tus mazos y
-/// comodines del `Player.log` de Arena, y mandarlo todo directamente a tu
-/// cuenta. No queda ningún fichero en tu ordenador ni al acabar bien ni si algo
-/// falla.
+/// LO QUE HACE ESTE PROGRAMA: confirmar quién eres en mtgcorner.com, leer de
+/// MTG Arena tu colección, tus mazos y tus comodines, y mandarlo a tu cuenta
+/// para que elijas en el navegador qué se guarda. No deja ningún fichero en tu
+/// ordenador ni al acabar bien ni si algo falla, y sólo LEE.
 ///
-/// NO LEE MEMORIA DE NADA POR SU CUENTA. Eso es justo lo que hace el daemon,
-/// y reescribirlo aquí sería reinventar algo ya hecho, mantenido y probado
-/// por otra gente. Este programa es sólo el pegamento.
+/// UN ÚNICO EJECUTABLE. Hasta el 2026-09-15 esto venía en un zip con otro
+/// programa al lado, mtga-tracker-daemon, que era quien leía la memoria: se
+/// arrancaba, se le buscaba un puerto libre y se le hablaba por HTTP. Casi todos
+/// los fallos reales salieron de ahí — el zip abierto sin extraer, una consola
+/// anterior sin cerrar — así que su código vive ahora dentro (vendor/, GPLv3) y
+/// se lee aquí mismo. Ver <see cref="LectorArena"/>.
 ///
-/// EL LOG NO SE ANALIZA AQUÍ. Se recortan los trozos que importan (ver
-/// <see cref="LogArena"/>) y los analiza el servidor con el mismo código que
-/// usa la página web al arrastrar el fichero (lib/mtgaLog.ts). Un analizador
-/// duplicado en C# se habría quedado roto el día que Arena cambiara el formato
-/// y sólo se arreglara el de la web — que es exactamente lo que pasó en
-/// septiembre de 2026 con el de la web.
+/// DOS FUENTES DISTINTAS, a propósito:
+///   · la colección sólo existe en la memoria de Arena, así que hay que leerla
+///     con Arena abierto;
+///   · los mazos y los comodines están en el Player.log, que se lee siempre,
+///     incluso con Arena cerrado. Ver <see cref="LogArena"/>.
 ///
-/// EL ORDEN IMPORTA: primero se confirma la sesión, y SÓLO DESPUÉS se toca
-/// Arena. Sin sesión confirmada, nunca se llega a leer nada — no hay ningún
-/// motivo para sacar datos del juego que no se van a poder guardar.
+/// EL ORDEN IMPORTA: primero se confirma la sesión y SÓLO DESPUÉS se toca Arena.
+/// Sin sesión confirmada no se lee nada — no hay motivo para sacar datos del
+/// juego que no se van a poder guardar.
 /// </summary>
 internal static class Program
 {
@@ -42,51 +43,21 @@ internal static class Program
     {
         Console.OutputEncoding = Encoding.UTF8;
 
-        // Modo de prueba: lee y recorta el log SIN conectar con nada ni
-        // arrancar el daemon. Sirve para comprobar el recorte contra un log
-        // real y para soporte ("¿qué mandaría con mi log?").
+        // Modos que no conectan con nada: comprobar el recorte del registro,
+        // probar la lectura de la colección y volcar la licencia.
         if (args.Length > 0 && args[0] == "--probar-log") return ProbarLog(args.Skip(1).ToArray());
+        if (args.Length > 0 && args[0] == "--probar-coleccion") return ProbarColeccion();
+        if (args.Length > 0 && args[0] == "--licencia") return EscribirLicencia();
 
         Console.WriteLine("MTG Corner — bridge to MTG Arena");
         Console.WriteLine("==================================");
         Console.WriteLine();
 
-        // ── 0. El lector de Arena tiene que estar al lado, ANTES de pedir nada ─
-        // Lo más habitual cuando falta: abrir el .exe con doble clic DENTRO del
-        // zip. Windows saca sólo ese fichero a una carpeta temporal
-        // (…\Temp\…_nombre.zip.123\…) y mtga-tracker-daemon.exe se queda dentro
-        // del zip. Pasó en la primera prueba real del 2026-09-15: se confirmó la
-        // sesión, se guardaron los mazos del log y la colección no, y la página
-        // de revisión mandaba a "abrir Arena", que no era el problema.
-        var rutaDaemon = Path.Combine(AppContext.BaseDirectory, "mtga-tracker-daemon.exe");
-        if (!File.Exists(rutaDaemon))
-        {
-            if (EjecutandoDesdeZip())
-            {
-                Console.WriteLine("It looks like you opened this program from inside the zip, without extracting it.");
-                Console.WriteLine("Windows only takes out this .exe, so the Arena reader that comes with it isn't there.");
-                Console.WriteLine();
-                Console.WriteLine("Close this window, right-click the zip → \"Extract All…\", open the extracted folder");
-                Console.WriteLine("and run MtgCornerArenaBridge.exe from there.");
-            }
-            else
-            {
-                Console.WriteLine($"Can't find the Arena reader: {rutaDaemon}");
-                Console.WriteLine("Extract the whole zip again into a folder and run MtgCornerArenaBridge.exe from there.");
-                Console.WriteLine("If mtga-tracker-daemon.exe disappears after extracting, your antivirus may have removed it.");
-            }
-            Console.WriteLine();
-            Console.WriteLine("Nothing was read or saved.");
-            return Esperar(1);
-        }
-
         // 10 s bastaba de sobra para iniciar/confirmar/consultar el vínculo,
-        // pero la ÚLTIMA llamada —guardar la colección— puede tardar de
-        // verdad: mtgcorner.com traduce cada arena_id contra Scryfall en
-        // lotes de 75, a su ritmo, y una colección real son miles. Con sólo
-        // 10 s este cliente cortaba esa petición él solo antes de que el
-        // servidor pudiera siquiera terminar — daba error y no se guardaba
-        // nada, aunque el servidor sí hubiera podido acabar con más tiempo.
+        // pero la ÚLTIMA llamada —guardar— puede tardar de verdad: mtgcorner.com
+        // traduce cada carta contra Scryfall en lotes, y una colección real son
+        // miles. Con 10 s este cliente cortaba la petición antes de que el
+        // servidor pudiera terminar.
         using var http = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(4) };
 
         // ── 1. Quién eres, confirmado en tu navegador — nunca aquí ─────────
@@ -119,28 +90,18 @@ internal static class Program
             Console.WriteLine("Not confirmed in time. Nothing was read or saved.");
             return Esperar(1);
         }
+        // Tras confirmar, el visitante está mirando el navegador y aquí sigue
+        // habiendo trabajo: esta ventana se trae al frente y, si Windows no deja,
+        // al menos parpadea en la barra de tareas.
+        TraerAlFrente();
         Console.WriteLine("Confirmed.");
         Console.WriteLine();
 
-        // ── 2. Sólo ahora se toca Arena: la colección, de su memoria ────────
-        // Si esto falla no se corta todo: los mazos y los comodines salen del
-        // log, que existe aunque Arena esté cerrado o el lector no arranque.
-        var coleccion = await LeerColeccionDeArena();
-        if (coleccion is null)
-        {
-            // Que no pase desapercibido: el resto sigue, pero la colección es lo
-            // principal de este programa y "Arena" se queda como estaba.
-            Console.WriteLine();
-            Console.WriteLine("!! Your full collection (\"Arena\") will NOT be updated this time.");
-            Console.WriteLine("!! Open MTG Arena, wait until it has fully loaded, and run this program again.");
-            Console.WriteLine("   Your decks and wildcards can still be saved now.");
-        }
+        // ── 2. La colección, de la memoria de Arena ────────────────────────
+        var coleccion = await LeerColeccion();
         Console.WriteLine();
 
-        // ── 3. Mazos y comodines, del Player.log ────────────────────────────
-        // DESPUÉS de la colección y no antes: si Arena acaba de abrirse, el
-        // inicio de sesión (donde vienen los mazos) se escribe en el log
-        // mientras se espera al lector.
+        // ── 3. Mazos y comodines, del Player.log ───────────────────────────
         var carpeta = LogArena.Carpeta();
         Console.WriteLine("Reading your decks and wildcards from Arena's log…");
         var log = LogArena.Leer(LogArena.FicherosPorDefecto(carpeta));
@@ -167,12 +128,11 @@ internal static class Program
             return Esperar(1);
         }
 
-        // ── 4. Directo a tu cuenta, con el mismo código ya confirmado ──────
+        // ── 4. A tu cuenta, con el mismo código ya confirmado ──────────────
         Console.WriteLine();
         Console.WriteLine(coleccion is null
-            ? "Saving your decks and wildcards to MTG Corner…"
-            : $"Saving {coleccion.Length} cards, your decks and wildcards to MTG Corner…");
-        Console.WriteLine("(a large collection can take more than a minute — keep waiting)");
+            ? "Sending your decks and wildcards to MTG Corner…"
+            : $"Sending {coleccion.Length} cards, your decks and wildcards to MTG Corner…");
         var cuerpo = new PeticionImportar(codigo, null, [], coleccion, [], log.Fragmentos, Revisar: true);
         HttpResponseMessage resp;
         try
@@ -192,18 +152,18 @@ internal static class Program
 
         var respuesta = await resp.Content.ReadFromJsonAsync<RespuestaImportar>(JsonOpciones);
 
-        // ── 5. Tú eliges en el navegador qué se guarda ──────────────────────
-        // Un log trae TODOS los mazos de la cuenta de Arena, y uno que ya
-        // exista en MTG Corner con el mismo nombre se reescribiría entero. Por
-        // eso el servidor lo deja pendiente y nada se guarda hasta que marcas
-        // qué mazos quieres en /importar-arena?revisar=<id>.
+        // ── 5. Tú eliges en el navegador qué se guarda ─────────────────────
+        // Un log trae TODOS los mazos de la cuenta de Arena, y uno que ya exista
+        // en MTG Corner con el mismo nombre se reescribiría entero. Por eso el
+        // servidor lo deja pendiente y nada se guarda hasta que marcas qué
+        // quieres en /importar-arena?revisar=<id>.
         if (respuesta?.Pendiente is string pendiente)
         {
             var revisar = $"{Sitio}{RutaImportar()}?revisar={Uri.EscapeDataString(pendiente)}";
             var deColeccion = respuesta.Coleccion > 0 ? $" and {respuesta.Coleccion} distinct cards of your collection" : "";
             Console.WriteLine();
             Console.WriteLine($"Read {respuesta.Mazos ?? 0} deck(s){deColeccion}.");
-            Console.WriteLine("Opening your browser so you can choose which decks to save…");
+            Console.WriteLine("Opening your browser so you can choose what to save…");
             Console.WriteLine($"If it doesn't open on its own, go to: {revisar}");
             Console.WriteLine("Nothing is saved until you confirm there. The link expires in an hour.");
             try { Process.Start(new ProcessStartInfo(revisar) { UseShellExecute = true }); }
@@ -224,117 +184,100 @@ internal static class Program
     }
 
     /// <summary>
-    /// Arranca mtga-tracker-daemon, espera a que vea Arena y le pide la
-    /// colección. Devuelve <c>null</c> si algo falla, ya explicado por
-    /// consola; el daemon se cierra siempre al salir de aquí.
+    /// La colección de la memoria de Arena, esperando a que el juego esté
+    /// abierto. <c>null</c> si no se pudo leer, ya explicado por consola: esto
+    /// no corta el resto, porque los mazos y los comodines salen del log y se
+    /// pueden guardar igual.
     /// </summary>
-    private static async Task<CartaColeccion[]?> LeerColeccionDeArena()
+    private static async Task<CartaColeccion[]?> LeerColeccion()
     {
-        var rutaDaemon = Path.Combine(AppContext.BaseDirectory, "mtga-tracker-daemon.exe");
-        if (!File.Exists(rutaDaemon))
+        if (!LectorArena.ArenaAbierto())
         {
-            Console.WriteLine($"Can't find {rutaDaemon}.");
-            Console.WriteLine("This program expects to be next to mtga-tracker-daemon.exe in the same folder.");
-            Console.WriteLine("Continuing with your decks and wildcards only.");
+            Console.WriteLine("MTG Arena isn't open. Open it now and wait until it has fully loaded…");
+            Console.WriteLine("(up to 3 minutes; your decks and wildcards will be read either way)");
+            await LectorArena.EsperarArena(TimeSpan.FromMinutes(3));
+        }
+
+        if (!LectorArena.ArenaAbierto())
+        {
+            Console.WriteLine("Arena wasn't open in time, so your full collection can't be read this time.");
+            Avisar();
             return null;
         }
 
-        // Puerto libre DE VERDAD, no uno fijo. El 9000 —el que llevaba éste
-        // antes— chocó en la primera prueba real con otra cosa ya escuchando
-        // ahí en el ordenador de un usuario; el daemon se caía al arrancar
-        // sin que nada en esta consola lo dejara ver.
-        // "localhost", NUNCA "127.0.0.1": el propio daemon sólo registra el
-        // prefijo "http://localhost:<puerto>/" en HTTP.sys, y HTTP.sys
-        // compara el host exacto salvo comodín — una petición a 127.0.0.1
-        // contra ese prefijo no es "el mismo destino con otro nombre", es
-        // sencillamente un prefijo distinto, y responde 400 Bad Request
-        // (Invalid Hostname) sin que la petición llegue siquiera al código
-        // del daemon. Esto hacía fallar SIEMPRE la detección de Arena, con
-        // Arena abierto o no — visto de un `curl 127.0.0.1:<puerto>/status`
-        // real reproduciendo el mismo 400.
-        var puerto = PuertoLibre();
-        var baseDaemon = new Uri($"http://localhost:{puerto}");
-
-        Console.WriteLine($"Starting the Arena reader on port {puerto} (mtga-tracker-daemon, third-party, GPLv3)…");
-        var salidaDaemon = new StringBuilder();
-        using var daemon = new Process
+        Console.WriteLine("Arena detected. Reading your collection…");
+        for (var intento = 1; intento <= 3; intento++)
         {
-            StartInfo = new ProcessStartInfo(rutaDaemon, $"-p {puerto}")
+            var cartas = LectorArena.LeerColeccion(out var error);
+            if (cartas is not null)
             {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            },
-        };
-        // Se enseña en vivo, línea a línea, según va hablando — no sólo si se
-        // cae. Es literalmente lo que faltó la primera vez que esto falló de
-        // verdad: el error real (un puerto ocupado) estaba ahí, pero nadie lo
-        // veía hasta que ya era tarde.
-        void RecibirLinea(string? linea)
-        {
-            if (linea is null) return;
-            lock (salidaDaemon) salidaDaemon.AppendLine(linea);
-            Console.WriteLine($"[reader] {linea}");
+                Console.WriteLine($"Read {cartas.Length} cards from your collection.");
+                return cartas;
+            }
+            // Arena recién abierto responde sin cartas: se reintenta antes de
+            // darlo por perdido.
+            Console.WriteLine($"Couldn't read the collection (attempt {intento} of 3): {error}");
+            if (intento < 3) await Task.Delay(TimeSpan.FromSeconds(10));
         }
-        daemon.OutputDataReceived += (_, e) => RecibirLinea(e.Data);
-        daemon.ErrorDataReceived += (_, e) => RecibirLinea(e.Data);
 
+        // El recorrido paso a paso de la ruta que lee, que es lo único que
+        // permite arreglarla si Arena la ha cambiado.
+        Console.WriteLine();
+        Console.WriteLine("Diagnosis (please send these lines to MTG Corner):");
+        foreach (var linea in LectorArena.Diagnostico()) Console.WriteLine($"[diagnosis] {linea}");
+        Avisar();
+        return null;
+
+        static void Avisar()
+        {
+            Console.WriteLine();
+            Console.WriteLine("!! Your full collection (\"Arena\") will NOT be updated this time.");
+            Console.WriteLine("   Your decks and wildcards can still be saved now.");
+        }
+    }
+
+    /// <summary>
+    /// <c>--probar-coleccion</c>: lee la colección y dice cuántas cartas salen, o
+    /// el diagnóstico si falla. No conecta con mtgcorner.com ni guarda nada.
+    /// </summary>
+    private static int ProbarColeccion()
+    {
+        Console.WriteLine("MTG Arena open: " + LectorArena.ArenaAbierto());
+        var cartas = LectorArena.LeerColeccion(out var error);
+        if (cartas is not null)
+        {
+            Console.WriteLine($"Collection read: {cartas.Length} cards with copies, {cartas.Sum(c => c.Cantidad)} copies in total.");
+            return 0;
+        }
+        Console.WriteLine("Couldn't read the collection: " + error);
+        foreach (var linea in LectorArena.Diagnostico()) Console.WriteLine("[diagnosis] " + linea);
+        return 1;
+    }
+
+    /// <summary>
+    /// <c>--licencia</c>: deja el texto de la GPLv3 al lado del ejecutable. Va
+    /// dentro del propio programa porque se distribuye como un único fichero.
+    /// </summary>
+    private static int EscribirLicencia()
+    {
         try
         {
-            try
+            using var recurso = Assembly.GetExecutingAssembly().GetManifestResourceStream("LICENCIA-GPLv3.txt");
+            if (recurso is null)
             {
-                daemon.Start();
-                daemon.BeginOutputReadLine();
-                daemon.BeginErrorReadLine();
+                Console.WriteLine("The license text isn't embedded in this build. See https://www.gnu.org/licenses/gpl-3.0.txt");
+                return 1;
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Couldn't start the reader: {ex.Message}");
-                return null;
-            }
-
-            // Un momento para que, si va a caerse al arrancar (como el conflicto
-            // de puerto que motivó todo esto), se vea YA en vez de esperar el
-            // minuto entero para nada.
-            await Task.Delay(1500);
-            if (daemon.HasExited)
-            {
-                Console.WriteLine();
-                Console.WriteLine(salidaDaemon.Length > 0
-                    ? "The Arena reader closed itself right after starting — see what it said above."
-                    : $"The Arena reader closed itself right after starting, without saying anything (exit code {daemon.ExitCode}).");
-                return null;
-            }
-
-            using var httpDaemon = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-
-            // Tres minutos y no uno: da tiempo a abrir Arena y a que cargue.
-            Console.WriteLine("Waiting for it to detect MTG Arena open (up to 3 minutes)…");
-            Console.WriteLine("If you don't have it open yet, open it now and wait until it has fully loaded.");
-            if (!await EsperarArena(httpDaemon, baseDaemon, TimeSpan.FromMinutes(3)))
-            {
-                Console.WriteLine();
-                Console.WriteLine("Arena wasn't detected open in time, so the full collection can't be read.");
-                if (daemon.HasExited) Console.WriteLine("Also, the reader closed itself while waiting — see what it said above.");
-                return null;
-            }
-
-            Console.WriteLine("Arena detected. Reading your collection…");
-            var coleccion = await LeerColeccion(baseDaemon);
-            if (coleccion is null)
-            {
-                Console.WriteLine("Couldn't read the collection — did you just open Arena? Wait for it to fully load and run this again.");
-            }
-            return coleccion;
+            var destino = Path.Combine(Environment.CurrentDirectory, "LICENCIA-GPLv3.txt");
+            using var fichero = File.Create(destino);
+            recurso.CopyTo(fichero);
+            Console.WriteLine("Written to " + destino);
+            return 0;
         }
-        finally
+        catch (Exception ex)
         {
-            // Antes de enseñar "pulsa una tecla para cerrar" (que se queda
-            // bloqueado esperando), no después: si el lector se mata DESPUÉS de
-            // ese mensaje, se queda vivo y ocupando su puerto todo el rato que el
-            // usuario tarde en pulsar algo.
-            try { if (!daemon.HasExited) daemon.Kill(entireProcessTree: true); } catch { /* ya se habrá cerrado solo, o ni llegó a arrancar */ }
+            Console.WriteLine("Couldn't write the license: " + ex.Message);
+            return 1;
         }
     }
 
@@ -386,107 +329,54 @@ internal static class Program
         return false;
     }
 
-    private static async Task<bool> EsperarArena(HttpClient http, Uri baseDaemon, TimeSpan plazo)
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetConsoleWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr ventana);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr ventana, int comando);
+
+    [DllImport("user32.dll")]
+    private static extern bool FlashWindowEx(ref FLASHWINFO info);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FLASHWINFO
     {
-        var limite = DateTime.UtcNow + plazo;
-        while (DateTime.UtcNow < limite)
-        {
-            try
-            {
-                var r = await http.GetFromJsonAsync<EstadoDaemon>(new Uri(baseDaemon, "/status"), JsonOpciones);
-                if (r?.IsRunning == true) return true;
-            }
-            catch { /* el daemon puede tardar un segundo en levantar su servidor */ }
-            await Task.Delay(1000);
-        }
-        return false;
+        public uint cbSize;
+        public IntPtr hwnd;
+        public uint dwFlags;
+        public uint uCount;
+        public uint dwTimeout;
     }
 
     /// <summary>
-    /// La colección, del daemon. Leer miles de cartas de la memoria de Arena
-    /// tarda más que un <c>/status</c>: antes compartía el cliente de 5 s de la
-    /// espera, y una lectura lenta se daba por fallida sin decir por qué — el
-    /// 2026-09-15 una importación guardó los mazos sin la colección y no quedó
-    /// rastro del motivo. Ahora 60 s por intento, tres intentos (Arena puede
-    /// estar aún cargando y el daemon responder sin cartas) y el error real
-    /// escrito en la consola.
+    /// Trae esta ventana al frente cuando vuelve a haber algo que mirar aquí.
+    /// Windows no siempre deja robar el foco a otra aplicación, así que además
+    /// se hace parpadear en la barra de tareas, que es lo que sí funciona
+    /// siempre.
     /// </summary>
-    private static async Task<CartaColeccion[]?> LeerColeccion(Uri baseDaemon)
+    private static void TraerAlFrente()
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
-        for (var intento = 1; intento <= 3; intento++)
-        {
-            try
-            {
-                var r = await http.GetFromJsonAsync<RespuestaCartas>(new Uri(baseDaemon, "/cards"), JsonOpciones);
-                var cartas = (r?.Cards ?? []).Where(c => c.Owned > 0).Select(c => new CartaColeccion(c.GrpId, c.Owned)).ToArray();
-                if (cartas.Length > 0) return cartas;
-                // El daemon NO devuelve un código de error cuando falla: responde
-                // 200 con { "error": "<la excepción entera>" } (HttpServer.cs,
-                // ErrorResponseData). Antes eso se leía como "sin cartas" y el
-                // motivo real se perdía; tras una actualización de Arena suele ser
-                // que ha cambiado un nombre interno de la ruta que lee
-                // (WrapperController → InventoryManager → InventoryServiceWrapper → Cards).
-                if (!string.IsNullOrWhiteSpace(r?.Error))
-                {
-                    var primera = r.Error.Split('\n')[0].Trim();
-                    Console.WriteLine($"The reader couldn't read the collection (attempt {intento} of 3): {(primera.Length > 400 ? primera[..400] + "…" : primera)}");
-                }
-                else
-                {
-                    Console.WriteLine($"The reader answered without any cards (attempt {intento} of 3) — Arena may still be loading.");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Couldn't read the collection (attempt {intento} of 3): {ex.GetType().Name}: {ex.Message}");
-            }
-            if (intento < 3) await Task.Delay(TimeSpan.FromSeconds(10));
-        }
-
-        // Tres fallos: se pide al lector el recorrido paso a paso de la ruta que
-        // lee (/diagnostico, el parche de MTG Corner en parches/) y se enseña
-        // entero. Con eso se ve qué nombre interno ha cambiado en Arena sin
-        // tener Arena delante.
         try
         {
-            var d = await http.GetFromJsonAsync<RespuestaDiagnostico>(new Uri(baseDaemon, "/diagnostico"), JsonOpciones);
-            if (d?.Diagnostico is { Length: > 0 } lineas)
+            var ventana = GetConsoleWindow();
+            if (ventana == IntPtr.Zero) return;
+            ShowWindow(ventana, 9); // SW_RESTORE
+            SetForegroundWindow(ventana);
+            var info = new FLASHWINFO
             {
-                Console.WriteLine();
-                Console.WriteLine("Diagnosis from the reader (please send these lines to MTG Corner):");
-                foreach (var linea in lineas) Console.WriteLine($"[diagnosis] {linea}");
-                Console.WriteLine();
-            }
+                cbSize = (uint)Marshal.SizeOf<FLASHWINFO>(),
+                hwnd = ventana,
+                dwFlags = 3 | 12, // FLASHW_ALL | FLASHW_TIMERNOFG
+                uCount = 5,
+                dwTimeout = 0,
+            };
+            FlashWindowEx(ref info);
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[diagnosis] not available: {ex.GetType().Name}: {ex.Message}");
-        }
-        return null;
+        catch { /* si no se puede, la consola sigue ahí esperando */ }
     }
-
-    /// <summary>
-    /// Un puerto libre de verdad, pedido al sistema operativo en el momento
-    /// — no uno fijo que puede chocar con lo que ya haya en el ordenador de
-    /// quien lo ejecuta. Se abre un socket en el puerto 0 (que el SO resuelve
-    /// a uno libre), se lee cuál le tocó, y se cierra enseguida para que el
-    /// daemon lo use él.
-    /// </summary>
-    /// <summary>
-    /// Si el programa corre desde la copia temporal que hace Windows al abrir un
-    /// .exe dentro de un zip: una carpeta bajo %TEMP% con ".zip" en el nombre.
-    /// </summary>
-    private static bool EjecutandoDesdeZip()
-    {
-        var aqui = AppContext.BaseDirectory;
-        var temporal = Path.GetTempPath();
-        return aqui.Contains(".zip", StringComparison.OrdinalIgnoreCase)
-            && aqui.StartsWith(temporal, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [DllImport("kernel32.dll")]
-    private static extern ushort GetUserDefaultUILanguage();
 
     /// <summary>
     /// La página de importar en el idioma de Windows de quien lo ejecuta. La
@@ -512,20 +402,15 @@ internal static class Program
         };
     }
 
-    private static int PuertoLibre()
-    {
-        using var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-        l.Start();
-        var puerto = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
-        l.Stop();
-        return puerto;
-    }
+    [DllImport("kernel32.dll")]
+    private static extern ushort GetUserDefaultUILanguage();
 
     private static int Esperar(int codigo)
     {
         Console.WriteLine();
         Console.WriteLine("Press a key to close…");
-        Console.ReadKey();
+        try { Console.ReadKey(); }
+        catch { /* sin consola interactiva (lanzado desde un script): no se espera */ }
         return codigo;
     }
 }
@@ -740,6 +625,7 @@ internal static partial class LogArena
 
 internal sealed record RespuestaIniciar([property: JsonPropertyName("codigo")] string Codigo);
 internal sealed record RespuestaEstado([property: JsonPropertyName("confirmado")] bool Confirmado);
+
 /// <summary>La respuesta de /api/mtga-import: con el paso de revisión, <c>pendiente</c>
 /// y los recuentos; un servidor anterior, el resumen de lo guardado.</summary>
 internal sealed record RespuestaImportar(
@@ -750,21 +636,6 @@ internal sealed record RespuestaImportar(
     [property: JsonPropertyName("sinTraducir")] int? SinTraducir,
     [property: JsonPropertyName("comodinesGuardados")] bool? ComodinesGuardados,
     [property: JsonPropertyName("mazosGuardados")] string[]? MazosGuardados);
-
-// ─── mtga-tracker-daemon ─────────────────────────────────────────────────────
-
-internal sealed record EstadoDaemon([property: JsonPropertyName("isRunning")] bool IsRunning);
-/// <summary><c>/cards</c> del daemon: las cartas, o <c>error</c> con la excepción si no pudo leerlas.</summary>
-internal sealed record RespuestaCartas(
-    [property: JsonPropertyName("cards")] CartaDaemon[]? Cards,
-    [property: JsonPropertyName("error")] string? Error);
-
-/// <summary><c>/diagnostico</c>: el recorrido de la ruta de la colección, línea a línea
-/// (parche de MTG Corner sobre mtga-tracker-daemon, ver parches/).</summary>
-internal sealed record RespuestaDiagnostico([property: JsonPropertyName("diagnostico")] string[]? Diagnostico);
-internal sealed record CartaDaemon(
-    [property: JsonPropertyName("grpId")] int GrpId,
-    [property: JsonPropertyName("owned")] int Owned);
 
 // ─── lo que espera /api/mtga-import (lib/mtgaLog.ts) ────────────────────────
 

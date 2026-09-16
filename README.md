@@ -1,22 +1,13 @@
 # MTG Corner — puente con MTG Arena
 
 Programa pequeño, en C#/.NET, que lee tu colección, tus mazos y tus comodines
-de MTG Arena y los guarda directamente en tu cuenta de
-[mtgcorner.com](https://mtgcorner.com).
+de MTG Arena y los sube a tu cuenta de [mtgcorner.com](https://mtgcorner.com),
+donde eliges qué se guarda.
+
+**Un único `.exe`**, sin instalar nada y sin ficheros al lado: lleva dentro el
+runtime de .NET, el lector de memoria y el texto de la licencia.
 
 ## Cómo funciona
-
-Este programa **no lee memoria de nada por su cuenta**. Arranca
-[`mtga-tracker-daemon`](https://github.com/frcaton/mtga-tracker-daemon) —de
-terceros, código abierto, GPLv3— que es quien de verdad hace la lectura de
-memoria de Arena en modo sólo lectura, le pide la colección por su servidor
-HTTP local, y la envía al sitio.
-
-Los **mazos y los comodines** salen del `Player.log` de Arena, sin preguntarle
-al usuario dónde está: Unity lo escribe siempre en
-`%USERPROFILE%\AppData\LocalLow\Wizards Of The Coast\MTGA`, con el instalador
-de Wizards, con Steam o con Epic. Se leen `Player-prev.log` y `Player.log`,
-compartidos para no chocar con Arena abierto.
 
 ```
 MtgCornerArenaBridge.exe
@@ -27,48 +18,53 @@ MtgCornerArenaBridge.exe
         │
         │   ── sólo a partir de aquí se toca Arena ──
         │
-        ├─ arranca ─▶ mtga-tracker-daemon.exe -p <puerto libre>
-        ├─ GET http://localhost:<puerto>/status   (espera a que detecte Arena)
-        ├─ GET http://localhost:<puerto>/cards    ({ grpId, owned }[])
+        ├─ lee la COLECCIÓN de la memoria de Arena   (LectorArena.cs)
+        ├─ lee MAZOS y COMODINES del Player.log      (LogArena, en Program.cs)
         │
-        ├─ lee Player-prev.log y Player.log       (sólo inicios de sesión y líneas de mazo)
-        │
-        ├─ POST /api/mtga-import                  (colección + trozos del log + revisar, con el código ya confirmado)
-        │                                          responde { pendiente }: queda pendiente, sin tocar tus mazos
-        │
-        └─ abre el navegador en /importar-arena?revisar=<pendiente>   (tú eliges qué mazos se guardan)
+        ├─ POST /api/mtga-import                  responde { pendiente }
+        └─ abre /importar-arena?revisar=<pendiente>   (tú eliges qué se guarda)
 ```
 
-Sin confirmar en el navegador, nunca se llega a leer nada de Arena — no hay
-motivo para sacar datos del juego que no se van a poder guardar. No queda
-ningún fichero en el ordenador, acabe bien o mal.
+Sin confirmar en el navegador no se lee nada de Arena: no hay motivo para sacar
+datos del juego que no se van a poder guardar. No queda ningún fichero en el
+ordenador, acabe bien o mal, y sólo se LEE — nunca se escribe en el juego.
 
-**El log no se analiza aquí.** De cada inicio de sesión (la respuesta de
-`StartHook`) se quedan los cuatro comodines y los nombres, formatos y listas de
-los mazos del usuario, sin los precon de Arena ni el resto; de la sesión, las
-líneas `DeckUpsertDeckV3` y `EventSetDeckV3`. Nunca el fichero entero, que
-también tiene las partidas con los nombres de los rivales. Esos trozos los
-analiza el servidor con `lib/mtgaLog.ts`, el mismo código que usa la web al
-arrastrar el fichero, para que un cambio de formato de Arena se arregle en un
-solo sitio.
+**La colección** sólo existe en la memoria del proceso de Arena, así que hace
+falta tenerlo abierto. La lee `vendor/HackF5.UnitySpy`, la librería del proyecto
+[`mtga-tracker-daemon`](https://github.com/frcaton/mtga-tracker-daemon): localiza
+las estructuras de Mono en el proceso y desde ahí llega a
+`WrapperController.Instance → InventoryManager → InventoryServiceWrapper → Cards`.
+Si una actualización de Arena cambia esa ruta, el programa imprime un
+diagnóstico que la recorre paso a paso y dice dónde se rompe.
 
-Si la colección no se puede leer (Arena cerrado, el lector no arranca), se
-guardan igualmente los mazos y los comodines. Si el log no tiene datos
-detallados, el programa explica cómo activar «Detailed Logs (Plugin Support)».
+**Los mazos y los comodines** salen del `Player.log`, sin preguntar dónde está:
+Unity lo escribe siempre en
+`%USERPROFILE%\AppData\LocalLow\Wizards Of The Coast\MTGA`, con el instalador de
+Wizards, con Steam o con Epic. Se leen `Player-prev.log` y `Player.log`,
+compartidos para no chocar con Arena abierto, y se envían sólo los trozos que
+importan: comodines, nombres, formatos, fechas y listas de tus mazos. Nunca el
+fichero entero, que también tiene las partidas con los nombres de los rivales.
+Ese recorte lo analiza el servidor con el mismo código que la web usa al
+arrastrar el fichero, para que un cambio de formato se arregle en un solo sitio.
 
-**Nada se guarda sin elegir.** Un log trae todos los mazos de la cuenta de
-Arena, a veces decenas y de hace años, y un mazo que ya exista en MTG Corner
-con el mismo nombre se reescribiría entero. Por eso el servidor deja lo leído
-pendiente una hora y el programa abre la página de revisión, en el idioma de
-Windows: cada mazo con su casilla y una etiqueta de «nuevo» o «ya existe», y la
-colección completa con la suya. Lo no marcado se descarta.
+Si la colección no se puede leer, se suben igualmente los mazos y los comodines.
+
+## Modos de prueba
+
+```
+MtgCornerArenaBridge.exe --probar-coleccion            lee la colección y dice cuántas cartas salen
+MtgCornerArenaBridge.exe --probar-log [rutas] [--salida f]   recorta un log y dice qué enviaría
+MtgCornerArenaBridge.exe --licencia                    deja la GPLv3 al lado del programa
+```
+
+Ninguno conecta con mtgcorner.com ni guarda nada.
 
 ## Compilar
 
 Se compila solo, en GitHub Actions ([`.github/workflows/build.yml`](.github/workflows/build.yml))
 en cada cambio, y el resultado se publica en
-[Releases](../../releases/tag/latest) — no hace falta tener el SDK de .NET
-instalado para conseguir el `.exe`, sólo para tocar el código.
+[Releases](../../releases/tag/latest) — no hace falta el SDK de .NET para
+conseguir el `.exe`, sólo para tocar el código.
 
 Para compilarlo en local: [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), luego
 
@@ -76,8 +72,13 @@ Para compilarlo en local: [.NET 8 SDK](https://dotnet.microsoft.com/download/dot
 dotnet publish -c Release -r win-x64 -p:SelfContained=true -p:PublishSingleFile=true -o dist
 ```
 
+Aviso: algunos antivirus ponen en cuarentena `HackF5.UnitySpy.dll` mientras se
+compila, por ser una librería que lee memoria de otros procesos. Si la
+compilación falla copiando esa DLL, es eso.
+
 ## Licencia
 
-El código de este repositorio es [MIT](LICENSE). El paquete descargable
-incluye además el `.exe` de `mtga-tracker-daemon`, de terceros bajo GPLv3 —
-ver `LICENCIA-TERCEROS.txt` dentro del zip.
+**GPLv3** ([LICENSE](LICENSE)), porque incluye en `vendor/HackF5.UnitySpy` el
+lector de memoria de [`mtga-tracker-daemon`](https://github.com/frcaton/mtga-tracker-daemon)
+(frcaton), que es GPLv3. El resto del código es de MTG Corner y va bajo la misma
+licencia. El `.exe` publicado lleva el texto de la licencia dentro.

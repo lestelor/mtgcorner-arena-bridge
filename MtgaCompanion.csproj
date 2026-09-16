@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Sólo librería estándar (HttpClient, System.Text.Json, Diagnostics) — cero
-    paquetes NuGet a propósito. Cuantas menos dependencias, menos cosas que se
-    rompan entre esto y el momento en que alguien lo compile dentro de un año.
+    Un único ejecutable con todo dentro: .NET, el lector de memoria de Arena
+    (vendor/HackF5.UnitySpy) y el texto de la licencia. Quien lo descarga no
+    instala nada ni necesita ficheros al lado.
   -->
 
   <PropertyGroup>
@@ -14,13 +14,31 @@
     <AssemblyName>MtgCornerArenaBridge</AssemblyName>
     <RootNamespace>MtgCornerArenaBridge</RootNamespace>
 
-    <!-- Autocontenido: quien lo descarga no necesita instalar el .NET runtime
-         aparte. El propio mtga-tracker-daemon que arranca ya viene así. -->
+    <!-- Autocontenido: quien lo descarga no necesita instalar el .NET runtime. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- El icono de la web, con seis tamaños (mtgcorner.ico). -->
+    <ApplicationIcon>mtgcorner.ico</ApplicationIcon>
+
+    <!-- Un único fichero y comprimido: baja de ~130 MB en dos programas a uno
+         de unos 30 MB, ahora que el lector de memoria va dentro. -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
+
+  <!-- El lector de memoria de Arena, del proyecto mtga-tracker-daemon
+       (frcaton, GPLv3), copiado en vendor/. Por eso este programa es GPLv3. -->
+  <!-- La GPLv3 va DENTRO del ejecutable: se distribuye como un fichero suelto,
+       así que la opción de licencia del programa la deja al lado cuando alguien la quiera. -->
+  <ItemGroup>
+    <EmbeddedResource Include="LICENSE" LogicalName="LICENCIA-GPLv3.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="vendor/HackF5.UnitySpy/HackF5.UnitySpy.csproj" />
+  </ItemGroup>
 
 </Project>

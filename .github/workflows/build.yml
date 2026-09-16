@@ -1,11 +1,16 @@
 name: Compilar y publicar
 
-# Compila este programa (C#, .NET 8) como un único .exe autocontenido para
-# Windows, le añade al lado el `mtga-tracker-daemon` de terceros (GPLv3,
-# https://github.com/frcaton/mtga-tracker-daemon — la lectura de memoria de
-# verdad; este programa sólo lo arranca y le habla por HTTP) y publica el zip
-# resultante en un "release" de GitHub, para que mtgcorner.com pueda
+# Compila este programa (C#, .NET 8) como UN ÚNICO .exe autocontenido para
+# Windows y lo publica en un "release" de GitHub, para que mtgcorner.com pueda
 # enlazarlo directamente.
+#
+# UN .EXE Y NO UN ZIP. Hasta el 2026-09-15 el paquete llevaba al lado
+# mtga-tracker-daemon con sus doscientos ficheros, y de ahí salieron los fallos
+# reales: abrir el .exe DENTRO del zip (Windows saca sólo ese fichero a una
+# carpeta temporal y el lector se queda dentro), un puerto ocupado, una consola
+# anterior sin cerrar. Ahora el lector va compilado dentro del programa
+# (vendor/HackF5.UnitySpy) y se publica un fichero suelto: nada que
+# descomprimir, nada que tenga que estar al lado.
 #
 # POR QUÉ UN RELEASE Y NO UN ARTEFACTO DE ACTIONS: un artefacto exige estar
 # identificado en GitHub para descargarlo — inútil para un enlace en una web
@@ -14,20 +19,14 @@ name: Compilar y publicar
 # POR QUÉ SIEMPRE LA MISMA ETIQUETA ("latest"): así el enlace de la web no
 # cambia nunca, aunque este programa se recompile.
 #
-# LA VERSIÓN DEL DAEMON SE FIJA A MANO (abajo, DAEMON_VERSION), no "la más
-# reciente": si su autor publica una versión rota, este workflow sigue
-# empaquetando la última buena hasta que alguien decida subir el número
-# aposta, en vez de que el zip descargado cambie solo de un día para otro.
+# LA LICENCIA VIAJA CON EL BINARIO: el texto de la GPLv3 va embebido en el
+# propio .exe (`--licencia` lo deja al lado) y además se sube al release como
+# fichero aparte.
 
 on:
   push:
     branches: [main, master]
   workflow_dispatch: {}
-
-env:
-  DAEMON_VERSION: '1.0.12.0'
-  # El commit exacto de frcaton/mtga-tracker-daemon que se compila (el de 1.0.12.0).
-  DAEMON_COMMIT: 'd5bc784fa5d73d4e186a9a986b98fe22215ceae3'
 
 permissions:
   contents: write # hace falta para crear el release
@@ -43,57 +42,24 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Compilar, autocontenido y en un solo fichero
-        run: >
-          dotnet publish -c Release -r win-x64
-          -p:SelfContained=true -p:PublishSingleFile=true
-          -o dist
-
-      # mtga-tracker-daemon SE COMPILA DESDE SU CÓDIGO, en un commit fijo, con el
-      # parche de parches/ aplicado: un endpoint /diagnostico que recorre la ruta
-      # de la colección y dice dónde se rompe y qué campos hay. Hace falta porque
-      # con Arena 2026.62.50 /cards falla con un NullReferenceException que no
-      # dice qué nombre interno cambió. El resultado es GPLv3 como el original, y
-      # el parche (su código fuente) está en este repositorio.
-      - name: Compilar mtga-tracker-daemon ${{ env.DAEMON_VERSION }} con el parche de MTG Corner
         shell: pwsh
         run: |
-          # En pwsh un comando nativo que falla NO para el script: sin estas
-          # comprobaciones, un parche que no se aplica daría un daemon sin
-          # /diagnostico y el paquete se publicaría igual.
-          git clone https://github.com/frcaton/mtga-tracker-daemon.git daemon-src
-          if ($LASTEXITCODE -ne 0) { throw "no se pudo clonar mtga-tracker-daemon" }
-          git -C daemon-src checkout ${{ env.DAEMON_COMMIT }}
-          if ($LASTEXITCODE -ne 0) { throw "no existe el commit ${{ env.DAEMON_COMMIT }}" }
-          git -C daemon-src apply --whitespace=nowarn ../parches/mtga-tracker-daemon-diagnostico.patch
-          if ($LASTEXITCODE -ne 0) { throw "no se pudo aplicar el parche de diagnóstico" }
-          dotnet publish daemon-src/src/mtga-tracker-daemon -c Release -r win-x64 --self-contained -o daemon-extraido
-          if ($LASTEXITCODE -ne 0) { throw "no compiló mtga-tracker-daemon" }
-          if (-not (Test-Path daemon-extraido/mtga-tracker-daemon.exe)) { throw "no se generó mtga-tracker-daemon.exe" }
+          dotnet publish -c Release -r win-x64 -p:SelfContained=true -p:PublishSingleFile=true -o dist
+          if ($LASTEXITCODE -ne 0) { throw "no compiló MtgCornerArenaBridge" }
+          if (-not (Test-Path dist/MtgCornerArenaBridge.exe)) { throw "no se generó MtgCornerArenaBridge.exe" }
+          $mb = [math]::Round((Get-Item dist/MtgCornerArenaBridge.exe).Length / 1MB, 1)
+          Write-Host "MtgCornerArenaBridge.exe: $mb MB"
 
-      - name: Montar el paquete final
+      # El lector de memoria es justo lo que un antivirus mira con lupa, así que
+      # se publican las huellas del fichero: quien dude puede comprobar que lo
+      # que se descargó es lo que salió de aquí.
+      - name: Huella del ejecutable
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path mtgcorner-importar-arena | Out-Null
-          Copy-Item dist/MtgCornerArenaBridge.exe mtgcorner-importar-arena/
-          # OJO: mtga-tracker-daemon NO es de un solo fichero — su .exe es sólo
-          # un lanzador nativo que necesita más de ciento cincuenta DLL al lado
-          # para arrancar. Copiar sólo el .exe (como hacía esto antes) produce
-          # un paquete que no funciona: se copia la CARPETA entera donde vive.
-          $daemonExe = Get-ChildItem -Path daemon-extraido -Filter "mtga-tracker-daemon.exe" -Recurse | Select-Object -First 1
-          # `Copy-Item "carpeta/*" -Recurse` es frágil en PowerShell — se
-          # enumeran los ficheros explícitamente y se copian uno a uno, que es
-          # lo que de verdad falló en el intento anterior.
-          Get-ChildItem -Path $daemonExe.DirectoryName -File | Copy-Item -Destination mtgcorner-importar-arena/ -Force
-          Copy-Item LEEME.txt mtgcorner-importar-arena/
-          Copy-Item LICENCIA-TERCEROS.txt mtgcorner-importar-arena/
-          # El texto completo de la GPLv3 se descarga en vez de guardarlo en el
-          # repo — es largo, es siempre el mismo, y así queda la fuente canónica.
-          Invoke-WebRequest -Uri "https://www.gnu.org/licenses/gpl-3.0.txt" -OutFile "mtgcorner-importar-arena/LICENCIA-GPLv3-mtga-tracker-daemon.txt" -MaximumRetryCount 3 -RetryIntervalSec 5
-          # Se comprime la CARPETA (no su contenido con /*), para que al
-          # descomprimir el zip salga todo dentro de una carpeta propia, en vez
-          # de doscientos y pico ficheros sueltos mezclándose con lo que ya
-          # hubiera donde se descomprima.
-          Compress-Archive -Path mtgcorner-importar-arena -DestinationPath mtgcorner-importar-arena.zip
+          $h = (Get-FileHash dist/MtgCornerArenaBridge.exe -Algorithm SHA256).Hash
+          "$h  MtgCornerArenaBridge.exe" | Out-File -Encoding utf8 dist/SHA256.txt
+          Write-Host $h
+          Copy-Item LICENSE dist/LICENCIA-GPLv3.txt
 
       - name: Publicar en el release "latest"
         shell: pwsh
@@ -101,6 +67,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag 2>$null
-          gh release create latest mtgcorner-importar-arena.zip `
+          gh release create latest dist/MtgCornerArenaBridge.exe dist/LICENCIA-GPLv3.txt dist/SHA256.txt `
             --title "Importar de MTG Arena" `
-            --notes "Se recompila automáticamente en cada cambio. Incluye mtga-tracker-daemon ${{ env.DAEMON_VERSION }} (GPLv3, de terceros) compilado con el parche de diagnóstico de parches/ — ver LICENCIA-TERCEROS.txt dentro del zip."
+            --notes "Un único .exe, sin instalar nada: lee tu colección, tus mazos y tus comodines de MTG Arena y los sube a tu cuenta para que elijas qué guardar. Se recompila en cada cambio. GPLv3 — el código está en este repositorio e incluye, en vendor/, el lector de memoria de mtga-tracker-daemon (frcaton). SHA256 en SHA256.txt."

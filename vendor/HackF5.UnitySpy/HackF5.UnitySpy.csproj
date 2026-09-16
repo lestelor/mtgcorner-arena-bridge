@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <NoWarn>1701;1702;CA1724;CA1031</NoWarn>
+    <LangVersion>latest</LangVersion>
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\HackF5.UnitySpy.snk</AssemblyOriginatorKeyFile>
+    <Platforms>AnyCPU</Platforms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarningsAsErrors />
+  </PropertyGroup>
+
+ <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+   <PlatformTarget>x64</PlatformTarget>
+ </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jetbrains.Annotations" Version="2019.1.1" />
+    <PackageReference Include="microsoft.csharp" Version="4.5.0" />
+    <PackageReference Include="PeNet" Version="2.8.1" />
+  </ItemGroup>
+
+</Project>
