@@ -31,6 +31,17 @@
 
   <!-- El lector de memoria de Arena, del proyecto mtga-tracker-daemon
        (frcaton, GPLv3), copiado en vendor/. Por eso este programa es GPLv3. -->
+  <!-- vendor/ ESTÁ DENTRO DE ESTA CARPETA, así que el SDK lo compilaría también
+       aquí: los mismos tipos saldrían dos veces (una sin permitir código no
+       seguro, que es lo que la librería necesita para leer memoria en Linux) y
+       la compilación falla. Lo compila SÓLO su propio proyecto, referenciado
+       más abajo. -->
+  <ItemGroup>
+    <Compile Remove="vendor/**" />
+    <EmbeddedResource Remove="vendor/**" />
+    <None Remove="vendor/**" />
+  </ItemGroup>
+
   <!-- La GPLv3 va DENTRO del ejecutable: se distribuye como un fichero suelto,
        así que la opción de licencia del programa la deja al lado cuando alguien la quiera. -->
   <ItemGroup>
