@@ -29,6 +29,14 @@ Sin confirmar en el navegador no se lee nada de Arena: no hay motivo para sacar
 datos del juego que no se van a poder guardar. No queda ningún fichero en el
 ordenador, acabe bien o mal, y sólo se LEE — nunca se escribe en el juego.
 
+**El idioma lo manda la web.** El programa habla los ocho idiomas del sitio
+(`Textos.cs`). Mientras no sabe nada, usa el de Windows; al confirmar, la web le
+dice en qué idioma estás jugando (`/api/mtga-device/estado`) y con ése escribe el
+resto y abre la página de revisión. Antes había dos reglas en el mismo proceso
+—la página de vincular salía en inglés y la de revisión en el idioma del
+sistema— y se notaba a mitad de camino. Los modos de prueba siguen en inglés:
+sus líneas acaban pegadas en un informe.
+
 **La colección** sólo existe en la memoria del proceso de Arena, así que hace
 falta tenerlo abierto. La lee `vendor/HackF5.UnitySpy`, la librería del proyecto
 [`mtga-tracker-daemon`](https://github.com/frcaton/mtga-tracker-daemon): localiza

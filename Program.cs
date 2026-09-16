@@ -42,6 +42,10 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
+        // Primera suposición: el idioma de Windows, que es lo único que se sabe
+        // antes de hablar con nadie. En cuanto se confirma en el navegador, la
+        // web dice en qué idioma se está jugando y manda ése. Ver Textos.cs.
+        Textos.EscogerElDeWindows(IdiomaDeWindows());
 
         // Modos que no conectan con nada: comprobar el recorte del registro,
         // probar la lectura de la colección y volcar la licencia.
@@ -49,7 +53,7 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--probar-coleccion") return ProbarColeccion();
         if (args.Length > 0 && args[0] == "--licencia") return EscribirLicencia();
 
-        Console.WriteLine("MTG Corner — bridge to MTG Arena");
+        Textos.Linea("titulo");
         Console.WriteLine("==================================");
         Console.WriteLine();
 
@@ -72,29 +76,29 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Couldn't reach MTG Corner: {ex.Message}");
+            Textos.Linea("sin_conexion", ex.Message);
             return Esperar(1);
         }
 
         var url = $"{Sitio}/vincular-dispositivo?codigo={codigo}";
-        Console.WriteLine("Opening your browser to confirm it's you…");
-        Console.WriteLine($"If it doesn't open on its own, go to: {url}");
+        Textos.Linea("abriendo_navegador");
+        Textos.Linea("si_no_abre", url);
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
         catch { /* el aviso de arriba con la URL ya basta si esto falla */ }
 
-        Console.WriteLine("Waiting for confirmation (up to 3 minutes)…");
+        Textos.Linea("esperando_confirmacion");
         var confirmado = await EsperarConfirmacion(http, codigo, TimeSpan.FromMinutes(3));
         if (!confirmado)
         {
             Console.WriteLine();
-            Console.WriteLine("Not confirmed in time. Nothing was read or saved.");
+            Textos.Linea("no_confirmado");
             return Esperar(1);
         }
         // Tras confirmar, el visitante está mirando el navegador y aquí sigue
         // habiendo trabajo: esta ventana se trae al frente y, si Windows no deja,
         // al menos parpadea en la barra de tareas.
         TraerAlFrente();
-        Console.WriteLine("Confirmed.");
+        Textos.Linea("confirmado");
         Console.WriteLine();
 
         // ── 2. La colección, de la memoria de Arena ────────────────────────
@@ -103,36 +107,36 @@ internal static class Program
 
         // ── 3. Mazos y comodines, del Player.log ───────────────────────────
         var carpeta = LogArena.Carpeta();
-        Console.WriteLine("Reading your decks and wildcards from Arena's log…");
+        Textos.Linea("leyendo_log");
         var log = LogArena.Leer(LogArena.FicherosPorDefecto(carpeta));
         if (!log.HayLog)
         {
-            Console.WriteLine($"Couldn't find Arena's Player.log in {carpeta}.");
-            Console.WriteLine("Decks and wildcards won't be updated this time.");
+            Textos.Linea("sin_log", carpeta);
+            Textos.Linea("sin_log_2");
         }
         else if (!log.HayDetalle)
         {
-            Console.WriteLine("Arena's log doesn't have the detailed data needed for your decks.");
-            Console.WriteLine("In Arena: gear icon → Account → check \"Detailed Logs (Plugin Support)\",");
-            Console.WriteLine("restart Arena, and run this program again to import your decks.");
+            Textos.Linea("sin_detalle_1");
+            Textos.Linea("sin_detalle_2");
+            Textos.Linea("sin_detalle_3");
         }
         else
         {
-            Console.WriteLine($"Found {log.InicioSesion} login(s) and {log.Ediciones} deck change(s) in the log.");
+            Textos.Linea("log_encontrado", log.InicioSesion, log.Ediciones);
         }
 
         if (coleccion is null && log.Fragmentos is null)
         {
             Console.WriteLine();
-            Console.WriteLine("There's nothing to save — neither the collection nor the log could be read.");
+            Textos.Linea("nada_que_guardar");
             return Esperar(1);
         }
 
         // ── 4. A tu cuenta, con el mismo código ya confirmado ──────────────
         Console.WriteLine();
         Console.WriteLine(coleccion is null
-            ? "Sending your decks and wildcards to MTG Corner…"
-            : $"Sending {coleccion.Length} cards, your decks and wildcards to MTG Corner…");
+            ? Textos.T("enviando")
+            : Textos.T("enviando_con_cartas", coleccion.Length));
         var cuerpo = new PeticionImportar(codigo, null, [], coleccion, [], log.Fragmentos, Revisar: true);
         HttpResponseMessage resp;
         try
@@ -141,12 +145,12 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Couldn't reach MTG Corner to save: {ex.Message}. Nothing was saved.");
+            Textos.Linea("sin_conexion_guardar", ex.Message);
             return Esperar(1);
         }
         if (!resp.IsSuccessStatusCode)
         {
-            Console.WriteLine($"MTG Corner didn't accept the import (code {(int)resp.StatusCode}). Nothing was saved.");
+            Textos.Linea("rechazado", (int)resp.StatusCode);
             return Esperar(1);
         }
 
@@ -160,12 +164,12 @@ internal static class Program
         if (respuesta?.Pendiente is string pendiente)
         {
             var revisar = $"{Sitio}{RutaImportar()}?revisar={Uri.EscapeDataString(pendiente)}";
-            var deColeccion = respuesta.Coleccion > 0 ? $" and {respuesta.Coleccion} distinct cards of your collection" : "";
+            var deColeccion = respuesta.Coleccion > 0 ? Textos.T("y_coleccion", respuesta.Coleccion) : "";
             Console.WriteLine();
-            Console.WriteLine($"Read {respuesta.Mazos ?? 0} deck(s){deColeccion}.");
-            Console.WriteLine("Opening your browser so you can choose what to save…");
-            Console.WriteLine($"If it doesn't open on its own, go to: {revisar}");
-            Console.WriteLine("Nothing is saved until you confirm there. The link expires in an hour.");
+            Textos.Linea("leidos_mazos", respuesta.Mazos ?? 0, deColeccion);
+            Textos.Linea("abriendo_revision");
+            Textos.Linea("si_no_abre", revisar);
+            Textos.Linea("nada_hasta_confirmar");
             try { Process.Start(new ProcessStartInfo(revisar) { UseShellExecute = true }); }
             catch { /* la URL de arriba basta si esto falla */ }
             return Esperar(0);
@@ -175,11 +179,11 @@ internal static class Program
         // devuelve el resumen de lo guardado.
         var mazos = (respuesta?.MazosGuardados ?? []).Where(n => n != "Arena").ToArray();
         Console.WriteLine();
-        Console.WriteLine("Done.");
-        if (coleccion is not null) Console.WriteLine("  Collection: saved as \"Arena\".");
-        if (mazos.Length > 0) Console.WriteLine($"  Decks: {mazos.Length} saved ({string.Join(", ", mazos.Take(6))}{(mazos.Length > 6 ? ", …" : "")}).");
-        if (respuesta?.ComodinesGuardados == true) Console.WriteLine("  Wildcards: updated.");
-        if (respuesta?.SinTraducir > 0) Console.WriteLine($"  ({respuesta.SinTraducir} cards weren't recognized — they might be very new.)");
+        Textos.Linea("hecho");
+        if (coleccion is not null) Textos.Linea("hecho_coleccion");
+        if (mazos.Length > 0) Textos.Linea("hecho_mazos", mazos.Length, string.Join(", ", mazos.Take(6)) + (mazos.Length > 6 ? ", …" : ""));
+        if (respuesta?.ComodinesGuardados == true) Textos.Linea("hecho_comodines");
+        if (respuesta?.SinTraducir > 0) Textos.Linea("hecho_sin_traducir", respuesta.SinTraducir);
         return Esperar(0);
     }
 
@@ -193,30 +197,30 @@ internal static class Program
     {
         if (!LectorArena.ArenaAbierto())
         {
-            Console.WriteLine("MTG Arena isn't open. Open it now and wait until it has fully loaded…");
-            Console.WriteLine("(up to 3 minutes; your decks and wildcards will be read either way)");
+            Textos.Linea("arena_cerrado");
+            Textos.Linea("arena_cerrado_2");
             await LectorArena.EsperarArena(TimeSpan.FromMinutes(3));
         }
 
         if (!LectorArena.ArenaAbierto())
         {
-            Console.WriteLine("Arena wasn't open in time, so your full collection can't be read this time.");
+            Textos.Linea("arena_no_abrio");
             Avisar();
             return null;
         }
 
-        Console.WriteLine("Arena detected. Reading your collection…");
+        Textos.Linea("arena_detectado");
         for (var intento = 1; intento <= 3; intento++)
         {
             var cartas = LectorArena.LeerColeccion(out var error);
             if (cartas is not null)
             {
-                Console.WriteLine($"Read {cartas.Length} cards from your collection.");
+                Textos.Linea("coleccion_leida", cartas.Length);
                 return cartas;
             }
             // Arena recién abierto responde sin cartas: se reintenta antes de
             // darlo por perdido.
-            Console.WriteLine($"Couldn't read the collection (attempt {intento} of 3): {error}");
+            Textos.Linea("fallo_coleccion", intento, error);
             if (intento < 3) await Task.Delay(TimeSpan.FromSeconds(10));
         }
 
@@ -231,8 +235,8 @@ internal static class Program
         static void Avisar()
         {
             Console.WriteLine();
-            Console.WriteLine("!! Your full collection (\"Arena\") will NOT be updated this time.");
-            Console.WriteLine("   Your decks and wildcards can still be saved now.");
+            Textos.Linea("aviso_sin_coleccion");
+            Textos.Linea("aviso_sin_coleccion_2");
         }
     }
 
@@ -313,6 +317,11 @@ internal static class Program
         return log.Fragmentos is null ? 1 : 0;
     }
 
+    /// <summary>
+    /// Espera a que confirmes en el navegador. Al confirmar, la web dice además
+    /// EN QUÉ IDIOMA lo has hecho —el del sitio, no el de tu Windows— y a partir
+    /// de ahí el programa habla en ése y abre la revisión en ése. Ver Textos.cs.
+    /// </summary>
     private static async Task<bool> EsperarConfirmacion(HttpClient http, string codigo, TimeSpan plazo)
     {
         var limite = DateTime.UtcNow + plazo;
@@ -321,7 +330,7 @@ internal static class Program
             try
             {
                 var r = await http.GetFromJsonAsync<RespuestaEstado>($"/api/mtga-device/estado?codigo={codigo}", JsonOpciones);
-                if (r?.Confirmado == true) return true;
+                if (r?.Confirmado == true) { Textos.Escoger(r.Idioma); return true; }
             }
             catch { /* un fallo de red suelto no corta la espera */ }
             await Task.Delay(2000);
@@ -379,27 +388,31 @@ internal static class Program
     }
 
     /// <summary>
-    /// La página de importar en el idioma de Windows de quien lo ejecuta. La
-    /// ruta está traducida (i18n/routing.ts, '/importar-arena') y el inglés,
-    /// idioma por defecto del sitio, va sin prefijo. Con InvariantGlobalization
-    /// la cultura de .NET no dice nada, así que se pregunta a Windows.
+    /// La página de importar EN EL IDIOMA DEL PROCESO — el que dijo la web al
+    /// confirmar, o el de Windows mientras no se sabe. La ruta está traducida
+    /// (i18n/routing.ts, '/importar-arena') y el inglés, idioma por defecto del
+    /// sitio, va sin prefijo.
     /// </summary>
-    private static string RutaImportar()
+    private static string RutaImportar() => Textos.Idioma switch
     {
-        int primario;
-        try { primario = GetUserDefaultUILanguage() & 0x3FF; }
-        catch { primario = 0; }
-        return primario switch
-        {
-            0x0A => "/es/importar-arena",
-            0x07 => "/de/arena-importieren",
-            0x0C => "/fr/importer-arena",
-            0x16 => "/pt/importar-arena",
-            0x10 => "/it/importa-arena",
-            0x11 => "/ja/import-arena",
-            0x04 => "/zh/import-arena",
-            _ => "/import-arena",
-        };
+        "es" => "/es/importar-arena",
+        "de" => "/de/arena-importieren",
+        "fr" => "/fr/importer-arena",
+        "pt" => "/pt/importar-arena",
+        "it" => "/it/importa-arena",
+        "ja" => "/ja/import-arena",
+        "zh" => "/zh/import-arena",
+        _ => "/import-arena",
+    };
+
+    /// <summary>
+    /// El identificador de idioma primario de Windows. Con InvariantGlobalization
+    /// la cultura de .NET no dice nada, así que se pregunta al sistema.
+    /// </summary>
+    private static int IdiomaDeWindows()
+    {
+        try { return GetUserDefaultUILanguage() & 0x3FF; }
+        catch { return 0; }
     }
 
     [DllImport("kernel32.dll")]
@@ -408,7 +421,7 @@ internal static class Program
     private static int Esperar(int codigo)
     {
         Console.WriteLine();
-        Console.WriteLine("Press a key to close…");
+        Textos.Linea("pulsa_tecla");
         try { Console.ReadKey(); }
         catch { /* sin consola interactiva (lanzado desde un script): no se espera */ }
         return codigo;
@@ -495,7 +508,7 @@ internal static partial class LogArena
             try { lineas = LeerCompartido(fichero); }
             catch (Exception ex)
             {
-                Console.WriteLine($"Couldn't read {fichero}: {ex.Message}");
+                Textos.Linea("no_pude_leer", fichero, ex.Message);
                 continue;
             }
             leidos.Add(fichero);
@@ -624,7 +637,15 @@ internal static partial class LogArena
 // ─── mtgcorner.com — el vínculo de dispositivo ──────────────────────────────
 
 internal sealed record RespuestaIniciar([property: JsonPropertyName("codigo")] string Codigo);
-internal sealed record RespuestaEstado([property: JsonPropertyName("confirmado")] bool Confirmado);
+/// <summary>
+/// El estado del código de vinculación. <c>Idioma</c> es el del SITIO donde se
+/// confirmó ("es", "ja"…), no el de Windows: con él, el resto del proceso —esta
+/// consola y la página de revisión— va en una sola lengua. Llega nulo si el
+/// servidor todavía no lo guarda (sql/2026-09-16-mtga-device-idioma.sql).
+/// </summary>
+internal sealed record RespuestaEstado(
+    [property: JsonPropertyName("confirmado")] bool Confirmado,
+    [property: JsonPropertyName("idioma")] string? Idioma = null);
 
 /// <summary>La respuesta de /api/mtga-import: con el paso de revisión, <c>pendiente</c>
 /// y los recuentos; un servidor anterior, el resumen de lo guardado.</summary>
