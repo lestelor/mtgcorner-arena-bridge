@@ -598,6 +598,29 @@ internal static partial class LogArena
                     partidas++;
                     continue;
                 }
+                /**
+                 * LA FOTO DE TU RANGO, también reducida aquí.
+                 *
+                 * La respuesta de `RankGetCombinedRankInfo` viene de dos formas:
+                 * unas veces es tu posición —temporada, nivel, derrotas de ese
+                 * nivel— y otras arrastra además la ESCALA entera de la
+                 * clasificación (todas las clases y sus escalones, unos 4 KB que
+                 * son iguales para todo el mundo). Se envían sólo tus cinco
+                 * números: lo otro engorda el envío y no dice nada de nadie.
+                 *
+                 * No lleva nombres ni identificadores: es en qué punto de la
+                 * temporada estás, y es lo que permite dibujar cuándo subiste.
+                 */
+                if (linea.Contains("<== RankGetCombinedRankInfo") && i + 1 < lineas.Length)
+                {
+                    hayDetalle = true;
+                    var llaveRango = lineas[i + 1].IndexOf('{');
+                    if (llaveRango < 0) continue;
+                    var rango = RecortarRango(lineas[i + 1][llaveRango..]);
+                    if (rango is null) continue;
+                    sb.Append("<== RangoMtgCorner\n").Append(rango).Append('\n');
+                    continue;
+                }
                 // Cualquier llamada con JSON dice que los registros detallados
                 // están activados, aunque no haya inicio de sesión en este log.
                 if (!hayDetalle && (linea.Contains("==> ") || linea.Contains("<== "))) hayDetalle = true;
@@ -698,6 +721,33 @@ internal static partial class LogArena
                 ["motivo"] = motivo,
             };
             return marcador.ToJsonString();
+        }
+        catch { return null; }
+    }
+
+    /**
+     * TU POSICIÓN EN LA CLASIFICACIÓN, en cinco números.
+     *
+     * LA CLASE PUEDE NO VENIR, y no es un fallo: Arena omite el valor por
+     * defecto al serializar, así que "sin clase" significa la primera —bronce—.
+     * Se manda tal cual viene, con su hueco, y es el servidor quien decide qué
+     * hacer con la ausencia: aquí no se inventa un dato que el juego no dio.
+     *
+     * `null` si la línea no es la de tu posición (la misma llamada devuelve a
+     * veces la escala entera de la clasificación, igual para todo el mundo).
+     */
+    private static string? RecortarRango(string json)
+    {
+        try
+        {
+            var raiz = JsonNode.Parse(json)?.AsObject();
+            if (raiz is null || raiz["constructedSeasonOrdinal"] is null) return null;
+            var foto = new JsonObject();
+            foreach (var clave in new[] { "constructedSeasonOrdinal", "constructedClass", "constructedLevel", "constructedStep", "constructedMatchesLost" })
+            {
+                if (raiz[clave] is JsonNode v) foto[clave] = v.DeepClone();
+            }
+            return foto.Count > 1 ? foto.ToJsonString() : null;
         }
         catch { return null; }
     }
