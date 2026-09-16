@@ -485,6 +485,17 @@ internal static class Textos
             "{0} を読み取れませんでした: {1}",
             "无法读取 {0}：{1}",
         ],
+        ["cerrando"] =
+        [
+            "Closing in {0} s… (any key closes it now)",
+            "Se cierra en {0} s… (cualquier tecla lo cierra ya)",
+            "Schließt in {0} s… (beliebige Taste schließt sofort)",
+            "Fermeture dans {0} s… (une touche ferme tout de suite)",
+            "Fecha em {0} s… (qualquer tecla fecha já)",
+            "Si chiude tra {0} s… (un tasto qualsiasi chiude subito)",
+            "{0} 秒後に閉じます…（キーを押すとすぐ閉じます）",
+            "{0} 秒后关闭…（按任意键立即关闭）",
+        ],
         ["pulsa_tecla"] =
         [
             "Press a key to close…",

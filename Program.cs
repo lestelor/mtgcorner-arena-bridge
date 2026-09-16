@@ -307,7 +307,7 @@ internal static class Program
         Console.WriteLine($"Review page for this computer's language: {Sitio}{RutaImportar()}?revisar=<id>");
         var log = LogArena.Leer(ficheros);
         Console.WriteLine($"Files read: {(log.Ficheros.Count == 0 ? "none" : string.Join(" | ", log.Ficheros))}");
-        Console.WriteLine($"Detailed data: {log.HayDetalle} · logins: {log.InicioSesion} · deck changes: {log.Ediciones}");
+        Console.WriteLine($"Detailed data: {log.HayDetalle} · logins: {log.InicioSesion} · deck changes: {log.Ediciones} · matches: {log.Partidas}");
         Console.WriteLine($"Would send: {(log.Fragmentos is null ? "nothing" : $"{Encoding.UTF8.GetByteCount(log.Fragmentos) / 1024} KB")}");
         if (salida is not null && log.Fragmentos is not null)
         {
@@ -418,12 +418,48 @@ internal static class Program
     [DllImport("kernel32.dll")]
     private static extern ushort GetUserDefaultUILanguage();
 
+    /// <summary>Segundos de cortesía antes de cerrarse solo cuando todo ha ido bien.</summary>
+    private const int SegundosParaCerrar = 10;
+
+    /// <summary>
+    /// El final: se cierra SOLO cuando ha ido bien, y espera cuando no.
+    ///
+    /// Antes se quedaba siempre en «pulsa una tecla», y una ventana negra que no
+    /// se va parece que aún hace falta algo, cuando el trabajo ya está hecho y
+    /// la persona está en el navegador eligiendo qué guardar. Con éxito cuenta
+    /// atrás y se cierra; cualquier tecla lo cierra ya.
+    ///
+    /// SI ALGO FALLÓ, SE QUEDA. El mensaje de error es lo único que explica qué
+    /// pasó —y lo que se copia para contarlo—, así que esa ventana no se cierra
+    /// sola pase lo que pase.
+    /// </summary>
     private static int Esperar(int codigo)
     {
         Console.WriteLine();
-        Textos.Linea("pulsa_tecla");
-        try { Console.ReadKey(); }
-        catch { /* sin consola interactiva (lanzado desde un script): no se espera */ }
+        if (codigo != 0)
+        {
+            Textos.Linea("pulsa_tecla");
+            try { Console.ReadKey(true); }
+            catch { /* sin consola interactiva (lanzado desde un script): no se espera */ }
+            return codigo;
+        }
+
+        try
+        {
+            for (var quedan = SegundosParaCerrar; quedan > 0; quedan--)
+            {
+                // `\r` y espacios al final: la cuenta atrás se reescribe sobre sí
+                // misma en vez de dejar diez líneas seguidas.
+                Console.Write("\r" + Textos.T("cerrando", quedan) + "   ");
+                for (var i = 0; i < 10; i++)
+                {
+                    if (Console.KeyAvailable) { Console.ReadKey(true); Console.WriteLine(); return codigo; }
+                    Thread.Sleep(100);
+                }
+            }
+            Console.WriteLine();
+        }
+        catch { /* sin consola interactiva no hay cuenta atrás: se cierra y ya */ }
         return codigo;
     }
 }
@@ -459,6 +495,7 @@ internal static partial class LogArena
         bool HayDetalle,
         int InicioSesion,
         int Ediciones,
+        int Partidas,
         IReadOnlyList<string> Ficheros);
 
     private static readonly string[] Comodines = ["WildCardCommons", "WildCardUnCommons", "WildCardRares", "WildCardMythics"];
@@ -496,7 +533,7 @@ internal static partial class LogArena
     public static Resultado Leer(IEnumerable<string> ficheros)
     {
         var sb = new StringBuilder();
-        int inicios = 0, ediciones = 0;
+        int inicios = 0, ediciones = 0, partidas = 0;
         bool hayLog = false, hayDetalle = false;
         var leidos = new List<string>();
 
@@ -534,13 +571,40 @@ internal static partial class LogArena
                     ediciones++;
                     continue;
                 }
+                /**
+                 * UNA PARTIDA TERMINADA, REDUCIDA AQUÍ Y NO EN EL SERVIDOR.
+                 *
+                 * El resto de líneas viajan tal cual —el servidor las analiza,
+                 * y así un cambio de formato se arregla en un solo sitio—, pero
+                 * ésta no puede: el aviso de fin de partida lleva el NOMBRE y el
+                 * identificador de tu rival, y eso no tiene por qué salir de tu
+                 * ordenador para contar quién ganó. Se queda el marcador: la
+                 * partida, el evento, tu equipo, el equipo que ganó y cuándo.
+                 *
+                 * QUIÉN ERES TÚ sale de la línea de cabecera —Arena escribe
+                 * "Match to <tu id>:"— y es la única forma de saber cuál de los
+                 * dos equipos es el tuyo una vez quitados los nombres.
+                 */
+                if (linea.Contains("\"finalMatchResult\"") || (linea.Contains("Match to ") && i + 1 < lineas.Length && lineas[i + 1].Contains("\"finalMatchResult\"")))
+                {
+                    hayDetalle = true;
+                    var conJson = linea.Contains("\"finalMatchResult\"") ? linea : lineas[i + 1];
+                    var cabecera = linea.Contains("\"finalMatchResult\"") && i > 0 ? lineas[i - 1] : linea;
+                    var llave = conJson.IndexOf('{');
+                    if (llave < 0) continue;
+                    var marcador = RecortarPartida(conJson[llave..], MiIdentificador(cabecera));
+                    if (marcador is null) continue;
+                    sb.Append("<== PartidaTerminada\n").Append(marcador).Append('\n');
+                    partidas++;
+                    continue;
+                }
                 // Cualquier llamada con JSON dice que los registros detallados
                 // están activados, aunque no haya inicio de sesión en este log.
                 if (!hayDetalle && (linea.Contains("==> ") || linea.Contains("<== "))) hayDetalle = true;
             }
         }
 
-        return new Resultado(sb.Length > 0 ? sb.ToString() : null, hayLog, hayDetalle, inicios, ediciones, leidos);
+        return new Resultado(sb.Length > 0 ? sb.ToString() : null, hayLog, hayDetalle, inicios, ediciones, partidas, leidos);
     }
 
     /// <summary>
@@ -552,6 +616,90 @@ internal static partial class LogArena
         using var fs = new FileStream(fichero, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         using var sr = new StreamReader(fs, Encoding.UTF8);
         return sr.ReadToEnd().Split('\n').Select(l => l.TrimEnd('\r')).ToArray();
+    }
+
+    /// <summary>
+    /// Tu identificador de Arena, sacado de la cabecera "Match to &lt;id&gt;:" que
+    /// el juego escribe delante del aviso. Es lo único que distingue tu equipo
+    /// del suyo cuando ya no hay nombres.
+    /// </summary>
+    private static string? MiIdentificador(string cabecera)
+    {
+        var i = cabecera.IndexOf("Match to ", StringComparison.Ordinal);
+        if (i < 0) return null;
+        var resto = cabecera[(i + 9)..];
+        var fin = resto.IndexOf(':');
+        var id = (fin > 0 ? resto[..fin] : resto).Trim();
+        return id.Length > 0 ? id : null;
+    }
+
+    /// <summary>
+    /// El marcador de una partida terminada: quién ganó, en qué evento y
+    /// cuándo. SIN NOMBRES NI IDENTIFICADORES DE NADIE — ni del rival ni tuyo:
+    /// del tuyo sólo se usa aquí dentro, para saber qué equipo era el tuyo, y
+    /// lo que sale es un número de equipo.
+    ///
+    /// <c>null</c> si la línea viene cortada, si no trae resultado de partida
+    /// (hay avisos intermedios con la misma forma) o si no se sabe cuál era tu
+    /// equipo: media partida no se puede contar.
+    /// </summary>
+    private static string? RecortarPartida(string json, string? miId)
+    {
+        try
+        {
+            var raiz = JsonNode.Parse(json)?.AsObject();
+            var sala = raiz?["matchGameRoomStateChangedEvent"]?["gameRoomInfo"];
+            var config = sala?["gameRoomConfig"];
+            var resultado = sala?["finalMatchResult"];
+            if (config is null || resultado is null) return null;
+
+            var matchId = Texto(resultado["matchId"]) ?? Texto(config["matchId"]);
+            if (matchId is null) return null;
+
+            int? miEquipo = null;
+            string? evento = null;
+            if (config["reservedPlayers"] is JsonArray jugadores)
+            {
+                foreach (var j in jugadores)
+                {
+                    var id = Texto(j?["userId"]);
+                    evento ??= Texto(j?["eventId"]);
+                    if (miId is not null && id == miId && j?["teamId"] is JsonValue t && t.TryGetValue<int>(out var equipo))
+                    {
+                        miEquipo = equipo;
+                        evento = Texto(j?["eventId"]) ?? evento;
+                    }
+                }
+            }
+            if (miEquipo is null) return null;
+
+            // El resultado de la PARTIDA, no el de cada juego suelto: un mejor
+            // de tres trae una línea por juego y otra del conjunto.
+            int? gana = null;
+            string? motivo = null;
+            if (resultado["resultList"] is JsonArray lista)
+            {
+                foreach (var r in lista)
+                {
+                    if (Texto(r?["scope"]) != "MatchScope_Match") continue;
+                    if (r?["winningTeamId"] is JsonValue w && w.TryGetValue<int>(out var equipo)) gana = equipo;
+                    motivo = Texto(r?["reason"]);
+                }
+            }
+            if (gana is null) return null;
+
+            var marcador = new JsonObject
+            {
+                ["id"] = matchId,
+                ["evento"] = evento,
+                ["mio"] = miEquipo,
+                ["gana"] = gana,
+                ["cuando"] = Texto(raiz?["timestamp"]),
+                ["motivo"] = motivo,
+            };
+            return marcador.ToJsonString();
+        }
+        catch { return null; }
     }
 
     private static string? Texto(JsonNode? n) =>
