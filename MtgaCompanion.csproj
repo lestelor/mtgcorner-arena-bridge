@@ -14,6 +14,25 @@
     <AssemblyName>MtgCornerArenaBridge</AssemblyName>
     <RootNamespace>MtgCornerArenaBridge</RootNamespace>
 
+    <!--
+      LA VERSIÓN, Y POR QUÉ IMPORTA.
+
+      El release se publicaba SIEMPRE con la etiqueta "latest" y el mismo nombre
+      de fichero, así que nada —ni el navegador, ni este programa— podía saber
+      si el .exe de ahí fuera era el mismo que ya tenías: quien lo había
+      descargado volvía a descargarlo por si acaso.
+
+      Con esto, cada publicación deja además un release `v<Version>` con el
+      fichero `MtgCornerArenaBridge-<Version>.exe`, y el programa compara su
+      propia versión con la última al arrancar (ComprobarVersion, en
+      Program.cs). La etiqueta `latest` se mantiene para que el botón de la web
+      no cambie nunca.
+
+      AL PUBLICAR UN CAMBIO, SUBIR ESTE NÚMERO. Si no, el release versionado se
+      pisa a sí mismo con contenido distinto y la comparación miente.
+    -->
+    <Version>1.4.0</Version>
+
     <!-- Autocontenido: quien lo descarga no necesita instalar el .NET runtime. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>

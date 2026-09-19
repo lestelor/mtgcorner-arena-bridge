@@ -89,6 +89,20 @@ internal static class Textos
             "MTG Corner — MTG Arena 連携ツール",
             "MTG Corner — MTG Arena 连接程序",
         ],
+        // Al arrancar, SÓLO si en GitHub hay una versión más nueva que ésta. Si
+        // es la misma no se dice nada: quien ya está al día no necesita una
+        // línea recordándoselo cada vez que abre el programa.
+        ["version_nueva"] =
+        [
+            "There's a newer version: v{0} (you have v{1}). Download it here: {2}",
+            "Hay una versión más nueva: v{0} (tienes la v{1}). Descárgala aquí: {2}",
+            "Es gibt eine neuere Version: v{0} (du hast v{1}). Hier herunterladen: {2}",
+            "Une version plus récente existe : v{0} (tu as la v{1}). À télécharger ici : {2}",
+            "Há uma versão mais recente: v{0} (tens a v{1}). Descarrega aqui: {2}",
+            "C'è una versione più recente: v{0} (hai la v{1}). Scaricala qui: {2}",
+            "新しいバージョンがあります: v{0}（お使いのバージョンは v{1}）。こちらからダウンロード: {2}",
+            "有更新的版本：v{0}（你当前是 v{1}）。在此下载：{2}",
+        ],
         ["sin_conexion"] =
         [
             "Couldn't reach MTG Corner: {0}",

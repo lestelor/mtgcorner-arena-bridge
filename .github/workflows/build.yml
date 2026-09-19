@@ -61,12 +61,52 @@ jobs:
           Write-Host $h
           Copy-Item LICENSE dist/LICENCIA-GPLv3.txt
 
+      # La versión sale del .csproj, que es el único sitio donde se escribe.
+      - name: Leer la versión
+        id: version
+        shell: pwsh
+        run: |
+          $v = ([xml](Get-Content MtgaCompanion.csproj)).Project.PropertyGroup.Version | Where-Object { $_ }
+          if (-not $v) { throw "MtgaCompanion.csproj no declara <Version>" }
+          $v = "$v".Trim()
+          Write-Host "versión: $v"
+          "version=$v" | Out-File -Encoding utf8 -Append $env:GITHUB_OUTPUT
+          Copy-Item dist/MtgCornerArenaBridge.exe "dist/MtgCornerArenaBridge-$v.exe"
+
+      # DOS RELEASES, Y CADA UNO PARA UNA COSA.
+      #
+      #  · `latest` — etiqueta móvil, nombre de fichero fijo. Es la que enlaza
+      #    el botón de la web, y por eso no puede cambiar nunca de nombre.
+      #  · `v<versión>` — inmutable. Da una URL distinta por versión, que es lo
+      #    que permite que el navegador cachee la descarga y que el propio
+      #    programa sepa si lo que hay fuera es lo que ya tiene (ComprobarVersion
+      #    en Program.cs). Sin esto, "latest" apuntaba a un fichero cambiante y
+      #    nadie podía distinguir una versión de otra.
+      #
+      # El versionado NO SE BORRA Y SE VUELVE A CREAR como `latest`: si ya
+      # existe, se deja como está y sólo se avisa. Machacarlo cambiaría, bajo
+      # una etiqueta que alguien ya enlazó, un binario distinto.
+      - name: Publicar el release versionado
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          if (gh release view "v$v" 2>$null) {
+            Write-Host "::warning::v$v ya está publicado; no se toca. Sube <Version> en el .csproj al cambiar el programa."
+          } else {
+            gh release create "v$v" "dist/MtgCornerArenaBridge-$v.exe" dist/LICENCIA-GPLv3.txt dist/SHA256.txt `
+              --title "Importar de MTG Arena v$v" `
+              --notes "Versión $v. Un único .exe, sin instalar nada: lee tu colección, tus mazos y tus comodines de MTG Arena y los sube a tu cuenta para que elijas qué guardar. GPLv3 — el código está en este repositorio e incluye, en vendor/, el lector de memoria de mtga-tracker-daemon (frcaton). SHA256 en SHA256.txt."
+          }
+
       - name: Publicar en el release "latest"
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $v = "${{ steps.version.outputs.version }}"
           gh release delete latest --yes --cleanup-tag 2>$null
           gh release create latest dist/MtgCornerArenaBridge.exe dist/LICENCIA-GPLv3.txt dist/SHA256.txt `
             --title "Importar de MTG Arena" `
-            --notes "Un único .exe, sin instalar nada: lee tu colección, tus mazos y tus comodines de MTG Arena y los sube a tu cuenta para que elijas qué guardar. Se recompila en cada cambio. GPLv3 — el código está en este repositorio e incluye, en vendor/, el lector de memoria de mtga-tracker-daemon (frcaton). SHA256 en SHA256.txt."
+            --notes "Versión $v. Un único .exe, sin instalar nada: lee tu colección, tus mazos y tus comodines de MTG Arena y los sube a tu cuenta para que elijas qué guardar. Se recompila en cada cambio; esta etiqueta apunta siempre a la última. GPLv3 — el código está en este repositorio e incluye, en vendor/, el lector de memoria de mtga-tracker-daemon (frcaton). SHA256 en SHA256.txt."

@@ -37,7 +37,63 @@ namespace MtgCornerArenaBridge;
 internal static class Program
 {
     private const string Sitio = "https://mtgcorner.com";
+    /// <summary>
+    /// La LISTA de releases, no `/releases/latest`.
+    ///
+    /// `/releases/latest` devuelve el más reciente por fecha, y ése es siempre
+    /// el de la etiqueta móvil `latest`, cuyo `tag_name` es literalmente
+    /// "latest": no es una versión y no hay nada que comparar. Los releases
+    /// versionados son los `vX.Y.Z`, así que se piden los últimos y se busca el
+    /// número más alto entre ellos.
+    /// </summary>
+    private const string ReleasesApi = "https://api.github.com/repos/lestelor/mtgcorner-arena-bridge/releases?per_page=20";
+    private const string PaginaDescarga = Sitio + "/importar-arena";
     private static readonly JsonSerializerOptions JsonOpciones = new(JsonSerializerDefaults.Web);
+
+    /// <summary>La versión de este ejecutable (&lt;Version&gt; del .csproj).</summary>
+    private static string VersionPropia =>
+        Assembly.GetExecutingAssembly().GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "0.0.0";
+
+    /// <summary>
+    /// ¿HAY UNA VERSIÓN MÁS NUEVA? Se pregunta una vez al arrancar.
+    ///
+    /// Es la razón de que ahora se publique con versión: antes el release era
+    /// siempre "latest" con el mismo nombre de fichero, así que nadie podía
+    /// saber si el .exe de ahí fuera ya lo tenías y se volvía a descargar por si
+    /// acaso.
+    ///
+    /// NO SE ACTUALIZA SOLO, sólo avisa: reemplazar el propio .exe en marcha se
+    /// pelea con Windows y con el antivirus, y este programa se ejecuta suelto
+    /// desde donde lo haya dejado cada uno.
+    ///
+    /// Y NO ESTORBA: dos segundos de espera como mucho, cualquier fallo se
+    /// traga —sin red, GitHub caído, un límite de peticiones— y si la versión
+    /// coincide no escribe nada. Nunca impide usar el programa.
+    /// </summary>
+    private static async Task ComprobarVersion()
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            // GitHub rechaza las peticiones sin User-Agent.
+            http.DefaultRequestHeaders.UserAgent.ParseAdd($"MtgCornerArenaBridge/{VersionPropia}");
+            var json = await http.GetStringAsync(ReleasesApi);
+            if (JsonNode.Parse(json) is not JsonArray releases) return;
+            Version? ultima = null;
+            foreach (var r in releases)
+            {
+                var etiqueta = r?["tag_name"]?.GetValue<string>();
+                // Se salta "latest" y cualquier otra etiqueta que no sea un
+                // número de versión.
+                if (etiqueta is null || !Version.TryParse(etiqueta.TrimStart('v', 'V'), out var v)) continue;
+                if (ultima is null || v > ultima) ultima = v;
+            }
+            if (ultima is null || !Version.TryParse(VersionPropia, out var mia) || ultima <= mia) return;
+            Textos.Linea("version_nueva", $"{ultima.Major}.{ultima.Minor}.{ultima.Build}", VersionPropia, PaginaDescarga);
+            Console.WriteLine();
+        }
+        catch { /* sin red o GitHub de morros: no es asunto de este programa */ }
+    }
 
     private static async Task<int> Main(string[] args)
     {
@@ -56,6 +112,10 @@ internal static class Program
         Textos.Linea("titulo");
         Console.WriteLine("==================================");
         Console.WriteLine();
+
+        // Antes de nada, y sin bloquear: si hay una más nueva, se dice aquí,
+        // que es donde se está mirando. Si no, no se nota que esto ha pasado.
+        await ComprobarVersion();
 
         // 10 s bastaba de sobra para iniciar/confirmar/consultar el vínculo,
         // pero la ÚLTIMA llamada —guardar— puede tardar de verdad: mtgcorner.com
