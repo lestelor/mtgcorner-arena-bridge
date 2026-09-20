@@ -305,6 +305,7 @@ internal static class Program
         // probar la lectura de la colección y volcar la licencia.
         if (args.Length > 0 && args[0] == "--probar-log") return ProbarLog(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--probar-coleccion") return ProbarColeccion();
+        if (args.Length > 0 && args[0] == "--probar-offsets") return ProbarOffsets.Ejecutar();
         if (args.Length > 0 && args[0] == "--licencia") return EscribirLicencia();
         // Poner o quitar el arranque con Windows. Son dos líneas en el registro
         // del usuario y no conectan con nada, como los de prueba de arriba.

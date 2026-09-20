@@ -11,6 +11,13 @@ namespace HackF5.UnitySpy.Offsets
         public static readonly UnityVersion Version2021_3_14 = new UnityVersion(2021, 3, 14);
         public static readonly UnityVersion Version2022_3_42 = new UnityVersion(2022, 3, 42);
 
+        /// <summary>
+        /// Unity 6, la que trae MTG Arena desde septiembre de 2026. Usa las
+        /// MISMAS posiciones que 2021/2022: no es una suposición por cercanía,
+        /// se comprobó leyendo la colección entera del juego con ellas.
+        /// </summary>
+        public static readonly UnityVersion Version6000_3_14 = new UnityVersion(6000, 3, 14);
+
         public UnityVersion(int year, int versionWithinYear, int subversionWithinYear)
         {
             this.Year = year;

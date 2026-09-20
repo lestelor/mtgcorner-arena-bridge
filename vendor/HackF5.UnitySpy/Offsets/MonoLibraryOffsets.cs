@@ -85,7 +85,13 @@ namespace HackF5.UnitySpy.Offsets
 
         public static readonly MonoLibraryOffsets Unity2021_3_2022_3_x64_PE_Offsets = new MonoLibraryOffsets
         {
-            UnityVersions = new List<UnityVersion>() { UnityVersion.Version2021_3_14, UnityVersion.Version2022_3_42 },
+            // Unity 6 va en esta lista porque sus posiciones son las mismas,
+            // comprobado leyendo la colección de un Arena real (2026-09-20).
+            // Sin esto, la librería avisaba de «versión no soportada» y elegía
+            // un perfil por cercanía de año, que daba la casualidad de ser el
+            // bueno: un acierto por accidente que el día menos pensado deja de
+            // serlo.
+            UnityVersions = new List<UnityVersion>() { UnityVersion.Version2021_3_14, UnityVersion.Version2022_3_42, UnityVersion.Version6000_3_14 },
             Is64Bits = true,
             Format = BinaryFormat.PE,
             MonoLibrary = "mono-2.0-bdwgc.dll",
@@ -249,6 +255,24 @@ namespace HackF5.UnitySpy.Offsets
 
         // MonoVTable Offsets
         public int VTable { get; private set; }
+
+        /// <summary>
+        /// Una copia de este perfil con algunos números cambiados.
+        ///
+        /// Existe para BUSCAR las posiciones de una versión de Unity que
+        /// todavía no está soportada (ver ProbarOffsets.cs): sin esto habría
+        /// que recompilar por cada número que se quiera probar. Los perfiles
+        /// publicados no se tocan nunca; esto devuelve otro objeto.
+        /// </summary>
+        public MonoLibraryOffsets Copia(int? vtable = null, int? runtimeInfo = null, int? domainVTables = null, int? vtableSize = null)
+        {
+            MonoLibraryOffsets copia = (MonoLibraryOffsets)this.MemberwiseClone();
+            if (vtable.HasValue) copia.VTable = vtable.Value;
+            if (runtimeInfo.HasValue) copia.TypeDefinitionRuntimeInfo = runtimeInfo.Value;
+            if (domainVTables.HasValue) copia.TypeDefinitionRuntimeInfoDomainVTables = domainVTables.Value;
+            if (vtableSize.HasValue) copia.TypeDefinitionVTableSize = vtableSize.Value;
+            return copia;
+        }
 
         public static MonoLibraryOffsets GetOffsets(string gameExecutableFilePath, bool force = true)
         {

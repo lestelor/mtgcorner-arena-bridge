@@ -37,6 +37,9 @@ internal static class LectorArena
 
     public static bool ArenaAbierto() => BuscarProceso() is not null;
 
+    /// <summary>El proceso de Arena, para la sonda de posiciones (ProbarOffsets.cs).</summary>
+    public static Process? BuscarProcesoPublico() => BuscarProceso();
+
     private static Process? BuscarProceso()
     {
         try { return Process.GetProcessesByName(NombreProceso).FirstOrDefault(); }
@@ -64,8 +67,48 @@ internal static class LectorArena
         return AssemblyImageFactory.Create(new UnityProcessFacade(acceso, posiciones), "Core");
     }
 
-    private static dynamic ServicioInventario(IAssemblyImage imagen) =>
-        imagen["WrapperController"]["<Instance>k__BackingField"]["<InventoryManager>k__BackingField"]["InventoryServiceWrapper"];
+    /// <summary>
+    /// EL SERVICIO DE INVENTARIO, POR DONDE ESTÉ HOY.
+    ///
+    /// Durante años colgó de `WrapperController.Instance`. Con la actualización
+    /// de Arena a Unity 6 (septiembre de 2026) ese campo estático se quedó NULO
+    /// para siempre: la clase sigue ahí y otros estáticos suyos se leen bien
+    /// —`wrapperSceneEverLoaded` devuelve `true`—, pero el juego ya no guarda
+    /// ahí su instancia. Se comprobó a mano con Arena abierto y en partida.
+    ///
+    /// Donde sí está es en `PAPA`, el objeto raíz del cliente, que expone el
+    /// mismo `InventoryManager`. Se prueban los dos por ese orden, y el viejo
+    /// se deja porque no cuesta nada y cubre a quien no haya actualizado el
+    /// juego.
+    ///
+    /// SI ALGÚN DÍA SE MUEVE OTRA VEZ, el camino para encontrarlo está en
+    /// ProbarOffsets.cs: lista los estáticos vivos y lo que cuelga de ellos.
+    /// </summary>
+    private static dynamic ServicioInventario(IAssemblyImage imagen)
+    {
+        foreach (var raiz in new Func<dynamic?>[]
+        {
+            () => imagen["PAPA"]["_instance"],
+            () => imagen["WrapperController"]["<Instance>k__BackingField"],
+        })
+        {
+            dynamic? objeto;
+            try { objeto = raiz(); }
+            catch { continue; }
+            if (objeto is null) continue;
+
+            try
+            {
+                dynamic? servicio = objeto["<InventoryManager>k__BackingField"]["InventoryServiceWrapper"];
+                if (servicio is not null) return servicio;
+            }
+            catch { /* esa raíz no lleva al inventario: se prueba la siguiente */ }
+        }
+
+        throw new InvalidOperationException(
+            "couldn't reach the inventory: neither PAPA nor WrapperController has it "
+            + "(run --probar-offsets with Arena open to find where it moved)");
+    }
 
     /// <summary>
     /// Las cartas con al menos una copia. <c>null</c> si no se pudo leer, con el
