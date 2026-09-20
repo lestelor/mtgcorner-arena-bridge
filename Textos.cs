@@ -164,6 +164,42 @@ internal static class Textos
             "インストールできませんでした（{0}）。このバージョンのまま続けます。",
             "无法安装（{0}）。继续使用当前版本。",
         ],
+        // EL AVISO QUE SE PINTA ENCIMA DE ARENA (ver Superposicion.cs). Frases
+        // cortas a propósito: se leen de reojo, en mitad de una partida y sin
+        // poder pulsarlas.
+        ["sup_titulo"] =
+        [
+            "Read from your Arena",
+            "Leído de tu Arena",
+            "Aus deinem Arena gelesen",
+            "Lu depuis votre Arena",
+            "Lido do teu Arena",
+            "Letto dal tuo Arena",
+            "Arena から読み取りました",
+            "已从你的 Arena 读取",
+        ],
+        ["sup_pendiente"] =
+        [
+            "{0} decks are waiting for your OK in the browser.",
+            "{0} mazos esperan tu visto bueno en el navegador.",
+            "{0} Decks warten im Browser auf dein OK.",
+            "{0} decks attendent votre feu vert dans le navigateur.",
+            "{0} baralhos esperam o teu OK no navegador.",
+            "{0} mazzi aspettano il tuo via libera nel browser.",
+            "{0} 個のデッキがブラウザーで確認を待っています。",
+            "{0} 个套牌正在浏览器中等待你确认。",
+        ],
+        ["sup_guardado"] =
+        [
+            "{0} cards saved to your account.",
+            "{0} cartas guardadas en tu cuenta.",
+            "{0} Karten in deinem Konto gespeichert.",
+            "{0} cartes enregistrées dans votre compte.",
+            "{0} cartas guardadas na tua conta.",
+            "{0} carte salvate nel tuo account.",
+            "{0} 枚のカードをアカウントに保存しました。",
+            "已将 {0} 张牌保存到你的账号。",
+        ],
         ["sin_conexion"] =
         [
             "Couldn't reach MTG Corner: {0}",

@@ -306,6 +306,14 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--probar-log") return ProbarLog(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--probar-coleccion") return ProbarColeccion();
         if (args.Length > 0 && args[0] == "--licencia") return EscribirLicencia();
+        // Ver el aviso que se pinta encima de Arena sin tener que importar
+        // nada. Con Arena abierto sale sobre su ventana; sin él, en la esquina
+        // de la pantalla.
+        if (args.Length > 0 && args[0] == "--probar-superposicion")
+        {
+            Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_guardado", 5343), 8);
+            return 0;
+        }
 
         // SIN NADIE MIRANDO LA CONSOLA. Es la bandera con la que arrancará el
         // modo de fondo, y de momento sólo cambia una cosa: lo que se preguntaría
@@ -450,6 +458,9 @@ internal static class Program
             Textos.Linea("nada_hasta_confirmar");
             try { Process.Start(new ProcessStartInfo(revisar) { UseShellExecute = true }); }
             catch { /* la URL de arriba basta si esto falla */ }
+            // Y encima de Arena, para quien esté jugando y no mirando esta
+            // ventana (ver Superposicion.cs).
+            Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_pendiente", respuesta.Mazos ?? 0));
             return Esperar(0);
         }
 
@@ -462,6 +473,7 @@ internal static class Program
         if (mazos.Length > 0) Textos.Linea("hecho_mazos", mazos.Length, string.Join(", ", mazos.Take(6)) + (mazos.Length > 6 ? ", …" : ""));
         if (respuesta?.ComodinesGuardados == true) Textos.Linea("hecho_comodines");
         if (respuesta?.SinTraducir > 0) Textos.Linea("hecho_sin_traducir", respuesta.SinTraducir);
+        Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_guardado", respuesta?.CartasGuardadas ?? 0));
         return Esperar(0);
     }
 
