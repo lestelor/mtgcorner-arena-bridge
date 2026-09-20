@@ -306,6 +306,13 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--probar-log") return ProbarLog(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--probar-coleccion") return ProbarColeccion();
         if (args.Length > 0 && args[0] == "--licencia") return EscribirLicencia();
+        // Poner o quitar el arranque con Windows. Son dos líneas en el registro
+        // del usuario y no conectan con nada, como los de prueba de arriba.
+        if (args.Length > 0 && args[0] == "--arrancar-solo") return Inicio(true);
+        if (args.Length > 0 && args[0] == "--no-arrancar-solo") return Inicio(false);
+        // Y el modo de fondo, que es donde vive todo lo demás de este programa
+        // sin que nadie tenga que lanzarlo.
+        if (args.Contains("--residente")) return await Residente();
         // Ver el aviso que se pinta encima de Arena sin tener que importar
         // nada. Con Arena abierto sale sobre su ventana; sin él, en la esquina
         // de la pantalla.
@@ -412,35 +419,28 @@ internal static class Program
         Console.WriteLine(coleccion is null
             ? Textos.T("enviando")
             : Textos.T("enviando_con_cartas", coleccion.Length));
-        var cuerpo = new PeticionImportar(codigo, null, [], coleccion, [], log.Fragmentos, Revisar: true);
-        HttpResponseMessage resp;
-        try
+        var (respuesta, estado, errorRed) = await SubirImportacion(http, codigo, coleccion, log.Fragmentos);
+        if (errorRed is not null)
         {
-            resp = await http.PostAsJsonAsync("/api/mtga-import", cuerpo, JsonOpciones);
-        }
-        catch (Exception ex)
-        {
-            Textos.Linea("sin_conexion_guardar", ex.Message);
+            Textos.Linea("sin_conexion_guardar", errorRed);
             return Esperar(1);
         }
-        if (!resp.IsSuccessStatusCode)
+        if (estado != 200)
         {
             // UN TOKEN QUE YA NO VALE responde 401: revocado desde la web, o de
             // una cuenta que ya no existe. Se borra el vínculo aquí mismo, que
             // si no este programa repetiría el mismo rechazo para siempre; sin
             // fichero, la próxima ejecución vuelve a vincular sola.
-            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized && token is not null)
+            if (estado == 401 && token is not null)
             {
                 Vinculo.Borrar();
                 Console.WriteLine();
                 Textos.Linea("vinculo_caducado");
                 return Esperar(1);
             }
-            Textos.Linea("rechazado", (int)resp.StatusCode);
+            Textos.Linea("rechazado", estado);
             return Esperar(1);
         }
-
-        var respuesta = await resp.Content.ReadFromJsonAsync<RespuestaImportar>(JsonOpciones);
 
         // ── 5. Tú eliges en el navegador qué se guarda ─────────────────────
         // Un log trae TODOS los mazos de la cuenta de Arena, y uno que ya exista
@@ -461,6 +461,7 @@ internal static class Program
             // Y encima de Arena, para quien esté jugando y no mirando esta
             // ventana (ver Superposicion.cs).
             Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_pendiente", respuesta.Mazos ?? 0));
+            await OfrecerArranqueSolo();
             return Esperar(0);
         }
 
@@ -474,7 +475,217 @@ internal static class Program
         if (respuesta?.ComodinesGuardados == true) Textos.Linea("hecho_comodines");
         if (respuesta?.SinTraducir > 0) Textos.Linea("hecho_sin_traducir", respuesta.SinTraducir);
         Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_guardado", respuesta?.CartasGuardadas ?? 0));
+        await OfrecerArranqueSolo();
         return Esperar(0);
+    }
+
+    /// <summary>
+    /// LA SUBIDA, EN UN SOLO SITIO. La usan el modo normal y el residente, que
+    /// hacen cosas muy distintas con el resultado (consola y navegador el uno,
+    /// silencio y aviso sobre el juego el otro) pero mandan exactamente lo
+    /// mismo.
+    ///
+    /// Siempre con <c>Revisar: true</c>: nada se guarda sin que la persona diga
+    /// qué mazos quiere. Un log trae TODOS los de la cuenta de Arena, y los que
+    /// ya existan en la web con el mismo nombre se reescribirían enteros.
+    ///
+    /// Devuelve el código de estado y, si hubo un fallo de red, su mensaje. No
+    /// escribe nada por consola: quien llama decide cómo contarlo.
+    /// </summary>
+    private static async Task<(RespuestaImportar? Respuesta, int Estado, string? Error)> SubirImportacion(
+        HttpClient http, string? codigo, CartaColeccion[]? coleccion, string? fragmentos)
+    {
+        var cuerpo = new PeticionImportar(codigo, null, [], coleccion, [], fragmentos, Revisar: true);
+        try
+        {
+            var resp = await http.PostAsJsonAsync("/api/mtga-import", cuerpo, JsonOpciones);
+            if (!resp.IsSuccessStatusCode) return (null, (int)resp.StatusCode, null);
+            return (await resp.Content.ReadFromJsonAsync<RespuestaImportar>(JsonOpciones), 200, null);
+        }
+        catch (Exception ex)
+        {
+            return (null, 0, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Una pregunta de sí o no por consola, con el mismo medio minuto de plazo
+    /// que la de actualizar: quien lanzó esto puede haberse ido, y ninguna
+    /// pregunta puede dejar el programa colgado. Sin consola interactiva
+    /// contesta que no, que es lo que no cambia nada.
+    /// </summary>
+    private static async Task<bool> PreguntarSiNo(string clave)
+    {
+        try
+        {
+            if (Console.IsInputRedirected) return false;
+            Console.WriteLine();
+            Textos.Linea(clave);
+            Textos.Linea("residente_teclas");
+            for (var i = 0; i < 300; i++)
+            {
+                if (Console.KeyAvailable)
+                {
+                    var k = Console.ReadKey(true);
+                    Console.WriteLine();
+                    return k.Key != ConsoleKey.N && k.Key != ConsoleKey.Escape;
+                }
+                await Task.Delay(100);
+            }
+            Console.WriteLine();
+            return false;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// SE OFRECE AL FINAL, NO AL PRINCIPIO, y sólo si no está ya puesto.
+    ///
+    /// Al terminar una importación se acaba de ver para qué sirve el programa,
+    /// que es el momento en que «¿lo dejo funcionando solo?» significa algo.
+    /// Preguntarlo al arrancar, antes de haber hecho nada, es pedir permiso
+    /// para instalarse.
+    /// </summary>
+    private static async Task OfrecerArranqueSolo()
+    {
+        if (ArrancaSolo()) return;
+        if (await PreguntarSiNo("residente_ofrecer")) Inicio(true);
+    }
+
+    /// <summary>
+    /// EL MODO RESIDENTE: se queda de fondo y sincroniza SOLO, cuando abres
+    /// Arena. Es lo que esta herramienta prometía desde el principio y no podía
+    /// cumplir mientras cada ejecución pidiera confirmar en el navegador; con el
+    /// ordenador ya vinculado (ver Vinculo.cs) sube con su token y no pregunta
+    /// nada.
+    ///
+    /// EL CICLO, Y POR QUÉ SON DOS SUBIDAS:
+    ///   · Al ABRIR Arena, en cuanto la colección está cargada en memoria: es el
+    ///     único momento en que se puede leer la colección entera.
+    ///   · Al CERRARLO, del log: los mazos que hayas tocado durante la sesión se
+    ///     escriben ahí, y a media partida todavía no están.
+    ///
+    /// NO ABRE EL NAVEGADOR NUNCA. Lo leído se queda pendiente en tu cuenta y la
+    /// web avisa cuando entras. Una pestaña nueva cada vez que abres el juego es
+    /// exactamente lo que hace que un programa así se desinstale.
+    ///
+    /// SIN VENTANA: se esconde la consola. Arrancado desde el registro de
+    /// Windows saldría una ventana negra en cada inicio de sesión.
+    ///
+    /// NO TERMINA NUNCA por su cuenta, salvo si el vínculo deja de valer: ahí no
+    /// hay nada que hacer sin una persona delante.
+    /// </summary>
+    private static async Task<int> Residente()
+    {
+        try { ShowWindow(GetConsoleWindow(), 0); } catch { /* SW_HIDE; sin consola, mejor */ }
+
+        var vinculo = Vinculo.Leer();
+        if (vinculo is null) return 1;   // sin vincular no hay a quién subir
+        Textos.Escoger(vinculo.Idioma);
+
+        using var http = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(4) };
+        http.DefaultRequestHeaders.Add("X-Bridge-Version", VersionPropia);
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculo.Token);
+
+        while (true)
+        {
+            while (!LectorArena.ArenaAbierto()) await Task.Delay(TimeSpan.FromSeconds(20));
+
+            // Arena tarda en dejar la colección lista; se reintenta en vez de
+            // adivinar un plazo. Si no sale, se sube igual lo del log.
+            var coleccion = await EsperarColeccion();
+            var log = LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta()));
+            if (!await SubirDeFondo(http, coleccion, log.Fragmentos)) return 1;
+
+            while (LectorArena.ArenaAbierto()) await Task.Delay(TimeSpan.FromSeconds(30));
+
+            var alCerrar = LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta()));
+            if (alCerrar.Fragmentos is not null && !await SubirDeFondo(http, null, alCerrar.Fragmentos)) return 1;
+        }
+    }
+
+    /// <summary>
+    /// La colección, reintentando mientras Arena siga abierto (hasta cinco
+    /// minutos). Recién arrancado el juego todavía no hay nada que leer, y
+    /// quedarse con el «no se pudo» de los primeros segundos sería perder la
+    /// única lectura buena de la sesión.
+    /// </summary>
+    private static async Task<CartaColeccion[]?> EsperarColeccion()
+    {
+        var limite = DateTime.UtcNow.AddMinutes(5);
+        while (DateTime.UtcNow < limite && LectorArena.ArenaAbierto())
+        {
+            var cartas = LectorArena.LeerColeccion(out _);
+            if (cartas is not null && cartas.Length > 0) return cartas;
+            await Task.Delay(TimeSpan.FromSeconds(20));
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Sube sin consola y avisa encima del juego. Devuelve false SÓLO cuando el
+    /// vínculo ha dejado de valer, que es lo único que hace inútil seguir
+    /// despierto: lo demás (sin red, un rechazo, nada que subir) se reintenta en
+    /// la siguiente sesión de Arena.
+    /// </summary>
+    private static async Task<bool> SubirDeFondo(HttpClient http, CartaColeccion[]? coleccion, string? fragmentos)
+    {
+        if (coleccion is null && fragmentos is null) return true;
+
+        var (respuesta, estado, _) = await SubirImportacion(http, null, coleccion, fragmentos);
+        if (estado == 401) { Vinculo.Borrar(); return false; }
+        if (estado != 200 || respuesta?.Pendiente is null) return true;
+
+        Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_pendiente", respuesta.Mazos ?? 0));
+        return true;
+    }
+
+    /// <summary>La clave de Windows que arranca programas al iniciar sesión.</summary>
+    private const string ClaveInicio = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string NombreInicio = "MtgCornerArenaBridge";
+
+    /// <summary>¿Está puesto para arrancar solo?</summary>
+    private static bool ArrancaSolo()
+    {
+        try
+        {
+            using var clave = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(ClaveInicio);
+            return clave?.GetValue(NombreInicio) is not null;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Poner o quitar el arranque automático. En la clave del USUARIO y no en la
+    /// de la máquina: no hace falta ser administrador, no afecta a nadie más y
+    /// se quita igual de fácil. Windows lo lanza al iniciar sesión y el programa
+    /// se queda esperando a que abras Arena.
+    /// </summary>
+    private static int Inicio(bool poner)
+    {
+        try
+        {
+            using var clave = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(ClaveInicio, writable: true);
+            if (clave is null) return 1;
+            if (poner)
+            {
+                var exe = Environment.ProcessPath;
+                if (exe is null) return 1;
+                clave.SetValue(NombreInicio, "\"" + exe + "\" --residente");
+                Textos.Linea("residente_puesto");
+            }
+            else
+            {
+                clave.DeleteValue(NombreInicio, throwOnMissingValue: false);
+                Textos.Linea("residente_quitado");
+            }
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Textos.Linea("residente_fallo", ex.Message);
+            return 1;
+        }
     }
 
     /// <summary>

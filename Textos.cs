@@ -200,6 +200,63 @@ internal static class Textos
             "{0} 枚のカードをアカウントに保存しました。",
             "已将 {0} 张牌保存到你的账号。",
         ],
+        // EL MODO DE FONDO. Se ofrece al terminar una importación, cuando ya se
+        // ha visto para qué sirve el programa.
+        ["residente_ofrecer"] =
+        [
+            "Want it to run by itself whenever you open Arena? It syncs in the background and the site tells you when there's something new.",
+            "¿Quieres que se ejecute solo cada vez que abras Arena? Sincroniza de fondo y la web te avisa cuando haya algo nuevo.",
+            "Soll es künftig von selbst starten, wenn du Arena öffnest? Es synchronisiert im Hintergrund und die Website sagt dir, wenn es etwas Neues gibt.",
+            "Voulez-vous qu'il se lance tout seul quand vous ouvrez Arena ? Il synchronise en arrière-plan et le site vous prévient quand il y a du nouveau.",
+            "Queres que se execute sozinho sempre que abrires o Arena? Sincroniza em segundo plano e o site avisa-te quando houver novidades.",
+            "Vuoi che parta da solo ogni volta che apri Arena? Sincronizza in background e il sito ti avvisa quando c'è qualcosa di nuovo.",
+            "Arena を開くたびに自動で実行しますか？ バックグラウンドで同期し、新しいデータがあるとサイトが知らせます。",
+            "要让它在你每次打开 Arena 时自动运行吗？它会在后台同步，有新数据时网站会提醒你。",
+        ],
+        ["residente_teclas"] =
+        [
+            "Enter for yes, N for no (it carries on by itself in 30 seconds).",
+            "Intro para sí, N para no (en 30 segundos sigue sin hacer nada).",
+            "Enter für ja, N für nein (nach 30 Sekunden geht es ohne weiter).",
+            "Entrée pour oui, N pour non (au bout de 30 secondes, ça continue sans).",
+            "Enter para sim, N para não (ao fim de 30 segundos segue sem fazer nada).",
+            "Invio per sì, N per no (dopo 30 secondi prosegue senza).",
+            "はいは Enter、いいえは N（30秒で先に進みます）。",
+            "是按 Enter，否按 N（30 秒后自动继续）。",
+        ],
+        ["residente_puesto"] =
+        [
+            "Done. It'll start with Windows and wait for Arena, quietly. To undo it, run this program with --no-arrancar-solo.",
+            "Hecho. Arrancará con Windows y esperará a Arena, sin molestar. Para deshacerlo, ejecuta este programa con --no-arrancar-solo.",
+            "Erledigt. Es startet mit Windows und wartet unauffällig auf Arena. Zum Rückgängigmachen dieses Programm mit --no-arrancar-solo starten.",
+            "C'est fait. Il démarrera avec Windows et attendra Arena, sans déranger. Pour annuler, lancez ce programme avec --no-arrancar-solo.",
+            "Feito. Vai arrancar com o Windows e esperar pelo Arena, sem incomodar. Para desfazer, executa este programa com --no-arrancar-solo.",
+            "Fatto. Partirà con Windows e aspetterà Arena, senza disturbare. Per annullare, esegui questo programma con --no-arrancar-solo.",
+            "完了です。Windows の起動時に始まり、静かに Arena を待ちます。解除するには --no-arrancar-solo を付けて実行してください。",
+            "完成。它会随 Windows 启动并安静地等待 Arena。要取消，请用 --no-arrancar-solo 运行本程序。",
+        ],
+        ["residente_quitado"] =
+        [
+            "It won't start with Windows any more.",
+            "Ya no arrancará con Windows.",
+            "Es startet nicht mehr mit Windows.",
+            "Il ne démarrera plus avec Windows.",
+            "Já não arranca com o Windows.",
+            "Non partirà più con Windows.",
+            "Windows 起動時には実行されなくなりました。",
+            "已不再随 Windows 启动。",
+        ],
+        ["residente_fallo"] =
+        [
+            "Couldn't change the Windows startup setting ({0}).",
+            "No se ha podido cambiar el arranque con Windows ({0}).",
+            "Der Windows-Autostart konnte nicht geändert werden ({0}).",
+            "Impossible de modifier le démarrage avec Windows ({0}).",
+            "Não foi possível alterar o arranque com o Windows ({0}).",
+            "Non è stato possibile cambiare l'avvio con Windows ({0}).",
+            "Windows の自動起動設定を変更できませんでした（{0}）。",
+            "无法修改随 Windows 启动的设置（{0}）。",
+        ],
         ["sin_conexion"] =
         [
             "Couldn't reach MTG Corner: {0}",
