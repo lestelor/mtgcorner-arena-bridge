@@ -103,6 +103,67 @@ internal static class Textos
             "新しいバージョンがあります: v{0}（お使いのバージョンは v{1}）。こちらからダウンロード: {2}",
             "有更新的版本：v{0}（你当前是 v{1}）。在此下载：{2}",
         ],
+        // La pregunta de la actualización. {0} es la versión nueva y {1} la de
+        // ahora. Por consola se lee en la ventana; en el modo de fondo es el
+        // texto del cuadro de Windows, y por eso se aguanta solo, sin la línea
+        // de teclas de debajo.
+        ["actualizar_pregunta"] =
+        [
+            "Version {0} is out (you have {1}). Install it now? The program will restart on its own.",
+            "Está la versión {0} (tienes la {1}). ¿La instalo ahora? El programa se reinicia solo.",
+            "Version {0} ist da (du hast {1}). Jetzt installieren? Das Programm startet von selbst neu.",
+            "La version {0} est disponible (tu as la {1}). L'installer maintenant ? Le programme redémarre tout seul.",
+            "Saiu a versão {0} (tens a {1}). Instalo agora? O programa reinicia sozinho.",
+            "È uscita la versione {0} (hai la {1}). La installo adesso? Il programma si riavvia da solo.",
+            "バージョン {0} が公開されました（お使いのバージョンは {1}）。今すぐ入れますか？ プログラムは自動で再起動します。",
+            "已发布版本 {0}（你当前是 {1}）。现在安装吗？程序会自动重启。",
+        ],
+        ["actualizar_teclas"] =
+        [
+            "Press Enter to install, N to skip (it carries on by itself in 30 seconds).",
+            "Pulsa Intro para instalarla o N para dejarlo (en 30 segundos sigue sin instalar).",
+            "Enter zum Installieren, N zum Überspringen (nach 30 Sekunden geht es ohne weiter).",
+            "Entrée pour installer, N pour passer (au bout de 30 secondes, ça continue sans).",
+            "Carrega em Enter para instalar ou N para deixar (ao fim de 30 segundos segue sem instalar).",
+            "Premi Invio per installarla o N per lasciar perdere (dopo 30 secondi prosegue senza).",
+            "インストールするには Enter、やめるには N を押してください（30秒で先に進みます）。",
+            "按 Enter 安装，按 N 跳过（30 秒后自动继续）。",
+        ],
+        ["actualizando"] =
+        [
+            "Downloading the new version…",
+            "Descargando la versión nueva…",
+            "Die neue Version wird heruntergeladen…",
+            "Téléchargement de la nouvelle version…",
+            "A descarregar a versão nova…",
+            "Sto scaricando la nuova versione…",
+            "新しいバージョンをダウンロードしています…",
+            "正在下载新版本…",
+        ],
+        // Lo descargado no coincide con lo que el release dice que es. No se
+        // instala: se dice y se sigue con la de ahora, que funciona.
+        ["actualizar_huella"] =
+        [
+            "The download doesn't match what GitHub published, so it wasn't installed.",
+            "Lo descargado no coincide con lo que GitHub publicó, así que no se ha instalado.",
+            "Der Download stimmt nicht mit dem überein, was GitHub veröffentlicht hat, also wurde er nicht installiert.",
+            "Le fichier téléchargé ne correspond pas à ce que GitHub a publié : il n'a pas été installé.",
+            "O ficheiro descarregado não corresponde ao que o GitHub publicou, por isso não foi instalado.",
+            "Il file scaricato non corrisponde a quello pubblicato su GitHub, quindi non è stato installato.",
+            "ダウンロードしたファイルが GitHub の公開内容と一致しないため、インストールしませんでした。",
+            "下载的文件与 GitHub 发布的内容不一致，因此没有安装。",
+        ],
+        ["actualizar_fallo"] =
+        [
+            "Couldn't install it ({0}). Carrying on with this version.",
+            "No se ha podido instalar ({0}). Se sigue con esta versión.",
+            "Installation nicht möglich ({0}). Es geht mit dieser Version weiter.",
+            "Installation impossible ({0}). On continue avec cette version.",
+            "Não foi possível instalar ({0}). Continua-se com esta versão.",
+            "Non è stato possibile installarla ({0}). Si prosegue con questa versione.",
+            "インストールできませんでした（{0}）。このバージョンのまま続けます。",
+            "无法安装（{0}）。继续使用当前版本。",
+        ],
         ["sin_conexion"] =
         [
             "Couldn't reach MTG Corner: {0}",
@@ -168,6 +229,45 @@ internal static class Textos
             "Confermato.",
             "確認できました。",
             "已确认。",
+        ],
+        // Al confirmar por primera vez, cuando el código se cambia por el token
+        // que se queda en este ordenador (ver Vinculo.cs).
+        ["vinculo_guardado"] =
+        [
+            "Linked. This computer won't ask again: you can unlink it from the site whenever you want.",
+            "Vinculado. Este ordenador ya no vuelve a preguntar: puedes desvincularlo desde la web cuando quieras.",
+            "Verknüpft. Dieser Computer fragt nicht mehr: Du kannst die Verknüpfung jederzeit auf der Website aufheben.",
+            "Lié. Cet ordinateur ne redemandera plus : vous pouvez le délier depuis le site quand vous voulez.",
+            "Ligado. Este computador não volta a perguntar: podes desligá-lo no site quando quiseres.",
+            "Collegato. Questo computer non chiede più: puoi scollegarlo dal sito quando vuoi.",
+            "連携しました。今後このパソコンでは確認を求めません。サイトからいつでも解除できます。",
+            "已绑定。这台电脑不再询问，你随时可以在网站上解除绑定。",
+        ],
+        // Y en las ejecuciones siguientes, en lugar de abrir el navegador.
+        ["ya_vinculado"] =
+        [
+            "This computer is already linked to your MTG Corner account.",
+            "Este ordenador ya está vinculado a tu cuenta de MTG Corner.",
+            "Dieser Computer ist bereits mit deinem MTG-Corner-Konto verknüpft.",
+            "Cet ordinateur est déjà lié à votre compte MTG Corner.",
+            "Este computador já está ligado à tua conta do MTG Corner.",
+            "Questo computer è già collegato al tuo account MTG Corner.",
+            "このパソコンはすでに MTG Corner のアカウントと連携済みです。",
+            "这台电脑已经和你的 MTG Corner 账号绑定。",
+        ],
+        // Cuando el servidor rechaza el token: revocado desde la web, o de una
+        // cuenta que ya no existe. El fichero se borra, así que "vuelve a
+        // ejecutar" basta de verdad.
+        ["vinculo_caducado"] =
+        [
+            "This computer is no longer linked to your account. Run the program again to link it.",
+            "Este ordenador ya no está vinculado a tu cuenta. Vuelve a ejecutar el programa para vincularlo.",
+            "Dieser Computer ist nicht mehr mit deinem Konto verknüpft. Starte das Programm erneut, um ihn zu verknüpfen.",
+            "Cet ordinateur n'est plus lié à votre compte. Relancez le programme pour le lier.",
+            "Este computador já não está ligado à tua conta. Executa o programa outra vez para o ligar.",
+            "Questo computer non è più collegato al tuo account. Esegui di nuovo il programma per collegarlo.",
+            "このパソコンの連携は解除されています。もう一度プログラムを実行して連携してください。",
+            "这台电脑的绑定已解除。请重新运行程序进行绑定。",
         ],
         ["leyendo_log"] =
         [

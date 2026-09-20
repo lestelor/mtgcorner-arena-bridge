@@ -31,7 +31,7 @@
       AL PUBLICAR UN CAMBIO, SUBIR ESTE NÚMERO. Si no, el release versionado se
       pisa a sí mismo con contenido distinto y la comparación miente.
     -->
-    <Version>1.4.0</Version>
+    <Version>1.5.0</Version>
 
     <!-- Autocontenido: quien lo descarga no necesita instalar el .NET runtime. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

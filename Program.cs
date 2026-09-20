@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -54,6 +55,16 @@ internal static class Program
     private static string VersionPropia =>
         Assembly.GetExecutingAssembly().GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "0.0.0";
 
+    /// <summary>Una versión más nueva publicada en GitHub, con su fichero.</summary>
+    /// <param name="Version">La etiqueta `vX.Y.Z` del release, ya en número.</param>
+    /// <param name="Url">El .exe de ese release.</param>
+    /// <param name="Sha256">La huella que publica GitHub, si la trae. Es lo que
+    /// permite comprobar que lo descargado es exactamente lo publicado.</param>
+    private sealed record Novedad(Version Version, string Url, string? Sha256)
+    {
+        public string Numero => $"{Version.Major}.{Version.Minor}.{Version.Build}";
+    }
+
     /// <summary>
     /// ¿HAY UNA VERSIÓN MÁS NUEVA? Se pregunta una vez al arrancar.
     ///
@@ -62,38 +73,225 @@ internal static class Program
     /// saber si el .exe de ahí fuera ya lo tenías y se volvía a descargar por si
     /// acaso.
     ///
-    /// NO SE ACTUALIZA SOLO, sólo avisa: reemplazar el propio .exe en marcha se
-    /// pelea con Windows y con el antivirus, y este programa se ejecuta suelto
-    /// desde donde lo haya dejado cada uno.
-    ///
-    /// Y NO ESTORBA: dos segundos de espera como mucho, cualquier fallo se
-    /// traga —sin red, GitHub caído, un límite de peticiones— y si la versión
-    /// coincide no escribe nada. Nunca impide usar el programa.
+    /// NO ESTORBA: tres segundos de espera como mucho, cualquier fallo se traga
+    /// —sin red, GitHub caído, un límite de peticiones— y si la versión coincide
+    /// no escribe nada. Nunca impide usar el programa.
     /// </summary>
-    private static async Task ComprobarVersion()
+    private static async Task<Novedad?> BuscarVersionNueva()
     {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
             // GitHub rechaza las peticiones sin User-Agent.
             http.DefaultRequestHeaders.UserAgent.ParseAdd($"MtgCornerArenaBridge/{VersionPropia}");
             var json = await http.GetStringAsync(ReleasesApi);
-            if (JsonNode.Parse(json) is not JsonArray releases) return;
+            if (JsonNode.Parse(json) is not JsonArray releases) return null;
+
             Version? ultima = null;
+            JsonNode? mejor = null;
             foreach (var r in releases)
             {
                 var etiqueta = r?["tag_name"]?.GetValue<string>();
                 // Se salta "latest" y cualquier otra etiqueta que no sea un
                 // número de versión.
                 if (etiqueta is null || !Version.TryParse(etiqueta.TrimStart('v', 'V'), out var v)) continue;
-                if (ultima is null || v > ultima) ultima = v;
+                if (r?["draft"]?.GetValue<bool>() == true || r?["prerelease"]?.GetValue<bool>() == true) continue;
+                if (ultima is null || v > ultima) { ultima = v; mejor = r; }
             }
-            if (ultima is null || !Version.TryParse(VersionPropia, out var mia) || ultima <= mia) return;
-            Textos.Linea("version_nueva", $"{ultima.Major}.{ultima.Minor}.{ultima.Build}", VersionPropia, PaginaDescarga);
-            Console.WriteLine();
+            if (ultima is null || !Version.TryParse(VersionPropia, out var mia) || ultima <= mia) return null;
+
+            // El .exe de ESE release, no el de la etiqueta móvil: así lo que se
+            // descarga es exactamente la versión con la que se ha comparado.
+            foreach (var a in (mejor?["assets"] as JsonArray) ?? new JsonArray())
+            {
+                var nombre = a?["name"]?.GetValue<string>() ?? "";
+                if (!nombre.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
+                var url = a?["browser_download_url"]?.GetValue<string>();
+                if (url is null) continue;
+                // `digest` llega como "sha256:abc…" cuando GitHub lo publica.
+                var digest = a?["digest"]?.GetValue<string>();
+                var sha = digest is not null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase)
+                    ? digest[7..] : null;
+                return new Novedad(ultima, url, sha);
+            }
+            // Release sin fichero (raro): al menos se puede avisar.
+            return new Novedad(ultima, PaginaDescarga, null);
         }
         catch { /* sin red o GitHub de morros: no es asunto de este programa */ }
+        return null;
     }
+
+    /// <summary>
+    /// LA ACTUALIZACIÓN, PREGUNTANDO PRIMERO.
+    ///
+    /// Antes esto sólo avisaba, y avisar deja el trabajo hecho a medias: había
+    /// que ir a la web, descargar, encontrar el fichero viejo y reemplazarlo a
+    /// mano. Ahora se baja, se comprueba y se relanza solo.
+    ///
+    /// CÓMO SE REEMPLAZA UN .EXE EN MARCHA. Windows no deja escribir encima del
+    /// ejecutable de un proceso vivo, pero sí deja RENOMBRARLO: el fichero
+    /// abierto sigue siendo el mismo, sólo cambia su nombre. Así que el actual
+    /// pasa a `.old`, el nuevo ocupa su sitio, se lanza y este proceso se va. El
+    /// `.old` lo borra el siguiente arranque (<see cref="LimpiarViejo"/>), que es
+    /// cuando ya no lo tiene nadie abierto. Sin programa auxiliar, que es justo
+    /// lo que hace que un actualizador dé problemas.
+    ///
+    /// LO QUE SE COMPRUEBA ANTES DE EJECUTAR NADA: que venga de la API de GitHub
+    /// por HTTPS y que su sha256 sea el que el propio release publica. Este
+    /// programa no va firmado, así que la huella es la única garantía de que lo
+    /// descargado es lo publicado, y por eso si no cuadra NO se instala.
+    ///
+    /// DE REGALO, UN AVISO MENOS: lo que baja un navegador queda marcado como
+    /// «de internet» y Windows enseña el cartel de SmartScreen al abrirlo. Lo
+    /// que baja este programa, no.
+    ///
+    /// Devuelve true si se ha lanzado la versión nueva: entonces aquí ya no hay
+    /// nada más que hacer y este proceso se cierra.
+    /// </summary>
+    private static async Task<bool> Actualizar(Novedad novedad, bool silencioso)
+    {
+        // El .exe de este proceso. En un publicado de un solo fichero,
+        // ProcessPath es el .exe de verdad (Assembly.Location viene vacío).
+        var propio = Environment.ProcessPath;
+        var puedeSolo = propio is not null
+            && novedad.Url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            && novedad.Sha256 is not null;
+
+        if (!puedeSolo)
+        {
+            // Sin huella que comprobar o sin saber dónde está uno mismo, se
+            // avisa y se deja la página, que es lo que se hacía hasta ahora.
+            Textos.Linea("version_nueva", novedad.Numero, VersionPropia, PaginaDescarga);
+            Console.WriteLine();
+            return false;
+        }
+
+        if (!await Preguntar(novedad, silencioso)) return false;
+
+        try
+        {
+            Textos.Linea("actualizando");
+            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd($"MtgCornerArenaBridge/{VersionPropia}");
+            var datos = await http.GetByteArrayAsync(novedad.Url);
+
+            var huella = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(datos)).ToLowerInvariant();
+            if (!string.Equals(huella, novedad.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                Textos.Linea("actualizar_huella");
+                Textos.Linea("version_nueva", novedad.Numero, VersionPropia, PaginaDescarga);
+                Console.WriteLine();
+                return false;
+            }
+
+            var viejo = propio + ".old";
+            if (File.Exists(viejo)) File.Delete(viejo);
+            File.Move(propio!, viejo);           // permitido aunque esté en marcha
+            await File.WriteAllBytesAsync(propio!, datos);
+
+            Process.Start(new ProcessStartInfo(propio!) { UseShellExecute = true });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // Lo más probable: el .exe está en una carpeta donde no se puede
+            // escribir. Se deshace lo que se pueda y se sigue con la versión de
+            // ahora, que funciona igual.
+            try
+            {
+                var viejo = propio + ".old";
+                if (File.Exists(viejo) && !File.Exists(propio!)) File.Move(viejo, propio!);
+            }
+            catch { /* ya se dice abajo que hay que hacerlo a mano */ }
+            Textos.Linea("actualizar_fallo", ex.Message);
+            Textos.Linea("version_nueva", novedad.Numero, VersionPropia, PaginaDescarga);
+            Console.WriteLine();
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// ¿La instalo? Por consola cuando hay alguien mirándola, y con un cuadro de
+    /// Windows cuando no lo hay.
+    ///
+    /// EL CUADRO ES PARA CUANDO NO HAY VENTANA QUE MIRAR: el modo de fondo
+    /// (<c>--silencioso</c>) y cualquier arranque con la entrada redirigida, que
+    /// es como queda si se deja programado. Una línea de consola ahí no la lee
+    /// nadie.
+    ///
+    /// POR CONSOLA HAY MEDIO MINUTO Y SE SIGUE SIN ACTUALIZAR: quien lo ha
+    /// lanzado puede haberse ido a por café, y la pregunta no puede dejar el
+    /// programa colgado para siempre. Enter o cualquier tecla que no sea N
+    /// acepta, porque la respuesta que casi siempre se quiere es sí y la letra
+    /// del sí cambia con el idioma.
+    /// </summary>
+    private static async Task<bool> Preguntar(Novedad novedad, bool silencioso)
+    {
+        // Sin ventana que leer no vale preguntar por consola: ni con la bandera
+        // del modo de fondo ni cuando la entrada viene de un script o de una
+        // tarea programada, que es como se deja esto corriendo solo antes de
+        // que exista el modo residente.
+        if (silencioso || Console.IsInputRedirected) return Dialogo(novedad);
+
+        try
+        {
+            Textos.Linea("actualizar_pregunta", novedad.Numero, VersionPropia);
+            Textos.Linea("actualizar_teclas");
+            for (var i = 0; i < 300; i++)
+            {
+                if (Console.KeyAvailable)
+                {
+                    var k = Console.ReadKey(true);
+                    Console.WriteLine();
+                    return k.Key != ConsoleKey.N && k.Key != ConsoleKey.Escape;
+                }
+                await Task.Delay(100);
+            }
+            Console.WriteLine();
+            return false;
+        }
+        catch
+        {
+            // La consola dijo que sí la había y luego no dejó leer teclas. El
+            // cuadro de Windows es lo que queda, y sigue siendo una pregunta.
+            return Dialogo(novedad);
+        }
+    }
+
+    /// <summary>
+    /// La misma pregunta, en un cuadro de Windows: «Aceptar» instala.
+    ///
+    /// Es un MessageBox y no una notificación del sistema a propósito. Una
+    /// notificación depende de que el usuario las tenga encendidas, se apila
+    /// con las demás y se va sola; esto sale delante, espera, y tiene los dos
+    /// botones que hacen falta.
+    /// </summary>
+    private static bool Dialogo(Novedad novedad)
+    {
+        const uint OkCancelar = 0x1, Info = 0x40, AlFrente = 0x10000, Encima = 0x40000;
+        const int Aceptar = 1;
+        return MessageBoxW(IntPtr.Zero,
+            Textos.T("actualizar_pregunta", novedad.Numero, VersionPropia),
+            Textos.T("titulo"), OkCancelar | Info | AlFrente | Encima) == Aceptar;
+    }
+
+    /// <summary>
+    /// El ejecutable que la actualización anterior dejó renombrado. Se borra en
+    /// el siguiente arranque, que es cuando ya no lo tiene abierto nadie. Si no
+    /// se deja (un antivirus mirándolo), no pasa nada: se intentará otra vez.
+    /// </summary>
+    private static void LimpiarViejo()
+    {
+        try
+        {
+            var viejo = Environment.ProcessPath + ".old";
+            if (File.Exists(viejo)) File.Delete(viejo);
+        }
+        catch { /* el fichero sobra, no molesta */ }
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
 
     private static async Task<int> Main(string[] args)
     {
@@ -109,13 +307,26 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--probar-coleccion") return ProbarColeccion();
         if (args.Length > 0 && args[0] == "--licencia") return EscribirLicencia();
 
+        // SIN NADIE MIRANDO LA CONSOLA. Es la bandera con la que arrancará el
+        // modo de fondo, y de momento sólo cambia una cosa: lo que se preguntaría
+        // por consola se pregunta con un cuadro de Windows, que es lo único que
+        // se ve cuando no hay ventana.
+        var silencioso = args.Contains("--silencioso");
+
         Textos.Linea("titulo");
         Console.WriteLine("==================================");
         Console.WriteLine();
 
-        // Antes de nada, y sin bloquear: si hay una más nueva, se dice aquí,
-        // que es donde se está mirando. Si no, no se nota que esto ha pasado.
-        await ComprobarVersion();
+        // Lo que dejó la actualización anterior, cuando ya no lo tiene abierto
+        // nadie.
+        LimpiarViejo();
+
+        // ANTES DE NADA, LA VERSIÓN. Si hay una más nueva se ofrece instalarla
+        // aquí mismo, y si se acepta este proceso se va: sigue el que se acaba
+        // de lanzar, que ya es la versión nueva. Si no hay novedad, no se nota
+        // que esto ha pasado.
+        var novedad = await BuscarVersionNueva();
+        if (novedad is not null && await Actualizar(novedad, silencioso)) return 0;
 
         // 10 s bastaba de sobra para iniciar/confirmar/consultar el vínculo,
         // pero la ÚLTIMA llamada —guardar— puede tardar de verdad: mtgcorner.com
@@ -123,43 +334,39 @@ internal static class Program
         // miles. Con 10 s este cliente cortaba la petición antes de que el
         // servidor pudiera terminar.
         using var http = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(4) };
+        // QUÉ VERSIÓN ES ESTA, en cada petición. Con ella la web puede decir
+        // «este ordenador tiene la 1.4.0 y hay la 1.5.0» sabiéndolo de verdad,
+        // en vez de adivinarlo por lo que recuerde el navegador. Se guarda en
+        // el dispositivo vinculado (ver /api/mtga-import).
+        http.DefaultRequestHeaders.Add("X-Bridge-Version", VersionPropia);
 
-        // ── 1. Quién eres, confirmado en tu navegador — nunca aquí ─────────
-        string codigo;
-        try
+        // ── 1. Quién eres ─────────────────────────────────────────────────
+        //
+        // La PRIMERA vez, confirmado en tu navegador y nunca aquí. Las demás,
+        // con el token que quedó guardado de esa vez (ver Vinculo.cs): sin
+        // pestaña, sin esperas y sin nada que teclear. Ese es justo el paso que
+        // impedía que este programa pudiera quedarse de fondo.
+        var vinculo = Vinculo.Leer();
+        string? token = vinculo?.Token;
+        string? codigo = null;
+        if (token is null)
         {
-            var r = await http.PostAsync("/api/mtga-device/iniciar", null);
-            r.EnsureSuccessStatusCode();
-            var d = await r.Content.ReadFromJsonAsync<RespuestaIniciar>(JsonOpciones);
-            if (d is null) throw new Exception("respuesta vacía");
-            codigo = d.Codigo;
+            (token, codigo) = await Vincular(http);
+            if (token is null && codigo is null) return Esperar(1);
         }
-        catch (Exception ex)
+        else
         {
-            Textos.Linea("sin_conexion", ex.Message);
-            return Esperar(1);
-        }
-
-        var url = $"{Sitio}/vincular-dispositivo?codigo={codigo}";
-        Textos.Linea("abriendo_navegador");
-        Textos.Linea("si_no_abre", url);
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-        catch { /* el aviso de arriba con la URL ya basta si esto falla */ }
-
-        Textos.Linea("esperando_confirmacion");
-        var confirmado = await EsperarConfirmacion(http, codigo, TimeSpan.FromMinutes(3));
-        if (!confirmado)
-        {
+            // El idioma en el que se vinculó, que sin navegador ya no hay quien
+            // lo diga. Si el fichero es de una versión anterior y no lo trae, se
+            // queda el de Windows, que es lo que había antes de esto.
+            Textos.Escoger(vinculo!.Idioma);
+            Textos.Linea("ya_vinculado");
             Console.WriteLine();
-            Textos.Linea("no_confirmado");
-            return Esperar(1);
         }
-        // Tras confirmar, el visitante está mirando el navegador y aquí sigue
-        // habiendo trabajo: esta ventana se trae al frente y, si Windows no deja,
-        // al menos parpadea en la barra de tareas.
-        TraerAlFrente();
-        Textos.Linea("confirmado");
-        Console.WriteLine();
+        if (token is not null)
+        {
+            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
 
         // ── 2. La colección, de la memoria de Arena ────────────────────────
         var coleccion = await LeerColeccion();
@@ -210,6 +417,17 @@ internal static class Program
         }
         if (!resp.IsSuccessStatusCode)
         {
+            // UN TOKEN QUE YA NO VALE responde 401: revocado desde la web, o de
+            // una cuenta que ya no existe. Se borra el vínculo aquí mismo, que
+            // si no este programa repetiría el mismo rechazo para siempre; sin
+            // fichero, la próxima ejecución vuelve a vincular sola.
+            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized && token is not null)
+            {
+                Vinculo.Borrar();
+                Console.WriteLine();
+                Textos.Linea("vinculo_caducado");
+                return Esperar(1);
+            }
             Textos.Linea("rechazado", (int)resp.StatusCode);
             return Esperar(1);
         }
@@ -245,6 +463,78 @@ internal static class Program
         if (respuesta?.ComodinesGuardados == true) Textos.Linea("hecho_comodines");
         if (respuesta?.SinTraducir > 0) Textos.Linea("hecho_sin_traducir", respuesta.SinTraducir);
         return Esperar(0);
+    }
+
+    /// <summary>
+    /// LA VINCULACIÓN DE LA PRIMERA VEZ: un código de un solo uso, confirmado
+    /// en el navegador, que se cambia aquí por un token de larga duración.
+    ///
+    /// Devuelve el token si el canje salió. Si no salió pero sí la confirmación
+    /// —una web anterior a /api/mtga-device/token, o un corte de red en el peor
+    /// momento— devuelve el CÓDIGO, que sigue sin gastar: esta ejecución sube
+    /// igual, como se hacía antes, y la siguiente volverá a intentarlo. Los dos
+    /// nulos significan que no hay nada que hacer, y por qué ya está dicho por
+    /// consola.
+    /// </summary>
+    private static async Task<(string? Token, string? Codigo)> Vincular(HttpClient http)
+    {
+        string codigo;
+        try
+        {
+            var r = await http.PostAsync("/api/mtga-device/iniciar", null);
+            r.EnsureSuccessStatusCode();
+            var d = await r.Content.ReadFromJsonAsync<RespuestaIniciar>(JsonOpciones);
+            if (d is null) throw new Exception("respuesta vacía");
+            codigo = d.Codigo;
+        }
+        catch (Exception ex)
+        {
+            Textos.Linea("sin_conexion", ex.Message);
+            return (null, null);
+        }
+
+        var url = $"{Sitio}/vincular-dispositivo?codigo={codigo}";
+        Textos.Linea("abriendo_navegador");
+        Textos.Linea("si_no_abre", url);
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch { /* el aviso de arriba con la URL ya basta si esto falla */ }
+
+        Textos.Linea("esperando_confirmacion");
+        var confirmado = await EsperarConfirmacion(http, codigo, TimeSpan.FromMinutes(3));
+        if (!confirmado)
+        {
+            Console.WriteLine();
+            Textos.Linea("no_confirmado");
+            return (null, null);
+        }
+        // Tras confirmar, el visitante está mirando el navegador y aquí sigue
+        // habiendo trabajo: esta ventana se trae al frente y, si Windows no deja,
+        // al menos parpadea en la barra de tareas.
+        TraerAlFrente();
+        Textos.Linea("confirmado");
+
+        // EL CANJE. El nombre del equipo viaja para que en la web se puedan
+        // distinguir dos ordenadores y revocar el que toque.
+        try
+        {
+            var r = await http.PostAsJsonAsync("/api/mtga-device/token",
+                new PeticionToken(codigo, Environment.MachineName), JsonOpciones);
+            if (r.IsSuccessStatusCode)
+            {
+                var d = await r.Content.ReadFromJsonAsync<RespuestaToken>(JsonOpciones);
+                if (!string.IsNullOrWhiteSpace(d?.Token))
+                {
+                    Vinculo.Guardar(d!.Token!, Textos.Idioma);
+                    Textos.Linea("vinculo_guardado");
+                    Console.WriteLine();
+                    return (d.Token, null);
+                }
+            }
+        }
+        catch { /* sin token se sigue con el código, que es lo de siempre */ }
+
+        Console.WriteLine();
+        return (null, codigo);
     }
 
     /// <summary>
@@ -895,6 +1185,17 @@ internal static partial class LogArena
 // ─── mtgcorner.com — el vínculo de dispositivo ──────────────────────────────
 
 internal sealed record RespuestaIniciar([property: JsonPropertyName("codigo")] string Codigo);
+
+/// <summary>Lo que se manda a /api/mtga-device/token para canjear el código ya
+/// confirmado por el token de este ordenador. <c>Nombre</c> es el del equipo,
+/// para poder distinguirlos en la web.</summary>
+internal sealed record PeticionToken(
+    [property: JsonPropertyName("codigo")] string Codigo,
+    [property: JsonPropertyName("nombre")] string? Nombre);
+
+/// <summary>El token, que se enseña UNA sola vez: en el servidor sólo queda su
+/// huella. Ver Vinculo.cs.</summary>
+internal sealed record RespuestaToken([property: JsonPropertyName("token")] string? Token);
 /// <summary>
 /// El estado del código de vinculación. <c>Idioma</c> es el del SITIO donde se
 /// confirmó ("es", "ja"…), no el de Windows: con él, el resto del proceso —esta
@@ -925,7 +1226,9 @@ internal sealed record CartaColeccion(
 /// <summary>El cuerpo de /api/mtga-import. <c>FragmentosLog</c> son los trozos
 /// del Player.log que analiza el servidor (ver <see cref="LogArena"/>).</summary>
 internal sealed record PeticionImportar(
-    [property: JsonPropertyName("codigo")] string Codigo,
+    // Nulo en cuanto el ordenador está vinculado: entonces quien dice quién
+    // eres es la cabecera Authorization: Bearer (ver Vinculo.cs).
+    [property: JsonPropertyName("codigo")] string? Codigo,
     [property: JsonPropertyName("comodines")] object? Comodines,
     [property: JsonPropertyName("mazos")] object[] Mazos,
     [property: JsonPropertyName("coleccion")] CartaColeccion[]? Coleccion,
