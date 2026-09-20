@@ -457,12 +457,27 @@ internal static class Program
             Textos.Linea("abriendo_revision");
             Textos.Linea("si_no_abre", revisar);
             Textos.Linea("nada_hasta_confirmar");
+
+            /**
+             * LA OFERTA DEL MODO DE FONDO VA AQUÍ, ANTES DEL NAVEGADOR.
+             *
+             * Estaba después, y por eso no la veía nadie: abrir el navegador se
+             * lleva el foco, y la pregunta se imprimía en una ventana que ya
+             * estaba detrás. Se comprobó en una ejecución real: la consola pasó
+             * de «nada se guarda hasta que confirmes» a la cuenta atrás sin que
+             * la pregunta llegara a leerse.
+             *
+             * Aquí todavía está delante y acaba de leerse lo que hizo el
+             * programa, que es el momento en que «¿lo dejo funcionando solo?»
+             * significa algo.
+             */
+            await OfrecerArranqueSolo();
+
             try { Process.Start(new ProcessStartInfo(revisar) { UseShellExecute = true }); }
             catch { /* la URL de arriba basta si esto falla */ }
             // Y encima de Arena, para quien esté jugando y no mirando esta
             // ventana (ver Superposicion.cs).
             Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_pendiente", respuesta.Mazos ?? 0));
-            await OfrecerArranqueSolo();
             return Esperar(0);
         }
 

@@ -8,26 +8,14 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <!-- `-windows` porque WinForms lo exige (el aviso que se pinta sobre
-         Arena). No cambia nada más: esto ya sólo se publicaba para win-x64. -->
+    <!-- `-windows` por las dos cosas que sólo existen en Windows y que este
+         programa usa de serie: el registro (el arranque automático) y las
+         llamadas a user32/gdi32 del aviso que se pinta sobre Arena. NO trae
+         WinForms: eso se quitó a propósito, porque doblaba el tamaño del
+         ejecutable (ver Superposicion.cs). -->
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
 
-    <!--
-      WINFORMS, SÓLO PARA EL AVISO QUE SE PINTA ENCIMA DE ARENA.
-
-      Esto sigue siendo un programa de consola: el OutputType no cambia y todo
-      lo demás se escribe en la ventana negra de siempre. Lo único que necesita
-      ventanas es Superposicion.cs, que dibuja un recuadro sin bordes sobre la
-      ventana del juego, y para eso hace falta un formulario de verdad: una
-      consola no se puede poner encima de nada ni dejarse atravesar por el
-      ratón.
-
-      Cuesta unos megas en el .exe. La alternativa era pintar a mano sobre una
-      ventana de Win32 con P/Invoke, que es el mismo trabajo tres veces más
-      largo y con tres veces más sitios donde fallar.
-    -->
-    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <AssemblyName>MtgCornerArenaBridge</AssemblyName>
     <RootNamespace>MtgCornerArenaBridge</RootNamespace>
@@ -49,7 +37,7 @@
       AL PUBLICAR UN CAMBIO, SUBIR ESTE NÚMERO. Si no, el release versionado se
       pisa a sí mismo con contenido distinto y la comparación miente.
     -->
-    <Version>1.8.0</Version>
+    <Version>1.9.0</Version>
 
     <!-- Autocontenido: quien lo descarga no necesita instalar el .NET runtime. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
