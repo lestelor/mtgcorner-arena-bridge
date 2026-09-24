@@ -337,10 +337,28 @@ internal static class Program
         {
             Columna.SiempreVisible = true;
             Columna.ForzarAbierta = args.Contains("--abierta");
-            Columna.Iniciar(a => { Console.WriteLine($"pulsado: {a}"); return Task.CompletedTask; }, ArrancaSolo);
+            Columna.Iniciar((a, d) => { Console.WriteLine($"pulsado: {a} {d}"); return Task.CompletedTask; }, ArrancaSolo);
+            // --contexto: con las filas que pone el juego, para verlas sin jugar.
+            if (args.Contains("--contexto"))
+            {
+                Columna.FilasDeContexto(
+                    (Columna.Accion.Mejorar, "Mono-White Auras (2)", Textos.T("col_mejorar", "Mono-White Auras (2)")),
+                    (Columna.Accion.Similares, "58437", Textos.T("col_similares", "Plains")),
+                    (Columna.Accion.Combos, "58437", Textos.T("col_combos", "Plains")));
+            }
             Console.WriteLine("Columna sobre Arena durante 40 s…");
             await Task.Delay(TimeSpan.FromSeconds(40));
             Columna.Cerrar();
+            return 0;
+        }
+        // Ver qué saca el vigía del registro (Contexto.cs) con Arena en marcha:
+        // mazo actual, carta bajo el ratón, si hay partida. Sesenta segundos.
+        if (args.Length > 0 && args[0] == "--probar-contexto")
+        {
+            Contexto.Cambio += () => Console.WriteLine($"{DateTime.Now:HH:mm:ss}  mazo={Contexto.Mazo ?? "-"}  carta={Contexto.Carta?.ToString() ?? "-"}  partida={Contexto.EnPartida}");
+            Contexto.Iniciar(Path.Combine(LogArena.Carpeta(), "Player.log"));
+            Console.WriteLine("Vigilando el registro durante 60 s…");
+            await Task.Delay(TimeSpan.FromSeconds(60));
             return 0;
         }
 
@@ -637,20 +655,38 @@ internal static class Program
         // Las subidas, de una en una: la del ciclo y la que pide el icono
         // «Importar ahora» pueden coincidir.
         var subiendo = new SemaphoreSlim(1, 1);
-        async Task<bool> Subir(CartaColeccion[]? col, string? frag, bool avisar = true)
+        async Task<bool> Subir(CartaColeccion[]? col, string? frag, bool avisar = true, Action<Subida>? alTerminar = null)
         {
             await subiendo.WaitAsync();
-            try { return await SubirDeFondo(http, col, frag, avisar); }
+            try { return await SubirDeFondo(http, col, frag, avisar, alTerminar); }
             finally { subiendo.Release(); }
         }
 
         // LA COLUMNA DE ICONOS SOBRE EL JUEGO (ver Columna.cs): lo que hace cada uno.
-        Columna.Iniciar(async accion =>
+        Columna.Iniciar(async (accion, dato) =>
         {
             switch (accion)
             {
                 case Columna.Accion.Importar:
-                    await Subir(LectorArena.LeerColeccion(out _), LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta())).Fragmentos);
+                    /**
+                     * CON RESPUESTA EN PANTALLA, siempre. Antes sólo salía el aviso
+                     * cuando había mazos que revisar: si todo estaba ya al día el
+                     * icono parecía no hacer nada («no sale nada en pantalla», el
+                     * usuario, 2026-09-24). Ahora dice que está subiendo y luego
+                     * cómo ha ido: pendiente de tu OK, al día, o que falló.
+                     */
+                    Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("col_subiendo"), 30);
+                    await Subir(LectorArena.LeerColeccion(out _), LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta())).Fragmentos,
+                        alTerminar: fin =>
+                        {
+                            switch (fin)
+                            {
+                                case Subida.AlDia: Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("col_al_dia")); break;
+                                case Subida.Nada: Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("col_sin_datos")); break;
+                                case Subida.Fallo: Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("col_fallo")); break;
+                                // Pendiente: SubirDeFondo ya ha puesto su aviso.
+                            }
+                        });
                     break;
                 case Columna.Accion.Coleccion:
                     Abrir(Sitio + RutaWeb("coleccion"));
@@ -663,12 +699,65 @@ internal static class Program
                     Inicio(!ArrancaSolo(), lanzar: false);
                     Columna.Refrescar();
                     break;
+                // Las filas que pone el juego (ver más abajo): abren la web en el
+                // sitio exacto, que es quien sabe traducir nombre de mazo → mazo
+                // tuyo y arena_id → carta (rutas /api/puente/*).
+                case Columna.Accion.Mejorar:
+                    if (dato is not null) Abrir($"{Sitio}/api/puente/mazo?nombre={Uri.EscapeDataString(dato)}&idioma={Textos.Idioma}");
+                    break;
+                case Columna.Accion.Similares:
+                    if (dato is not null) Abrir($"{Sitio}/api/puente/carta/{dato}?abrir=similares&idioma={Textos.Idioma}");
+                    break;
+                case Columna.Accion.Combos:
+                    if (dato is not null) Abrir($"{Sitio}/api/puente/carta/{dato}?abrir=combos&idioma={Textos.Idioma}");
+                    break;
                 case Columna.Accion.Salir:
                     Columna.Cerrar();
                     Environment.Exit(0);
                     break;
             }
         }, ArrancaSolo);
+
+        /**
+         * LO QUE PASA EN EL JUEGO, EN LA COLUMNA (ver Contexto.cs): el mazo que
+         * acabas de guardar o de llevar a la cola, y la carta que señalas en la
+         * mesa. El programa sólo conoce el arena_id de la carta; el nombre se le
+         * pide a la web una vez y se recuerda, y mientras llega la fila dice
+         * «esta carta».
+         */
+        var nombres = new Dictionary<int, string>();
+        var pidiendo = new HashSet<int>();
+        void ActualizarColumna()
+        {
+            var filas = new List<(Columna.Accion, string, string)>();
+            if (Contexto.Mazo is { } mazo) filas.Add((Columna.Accion.Mejorar, mazo, Textos.T("col_mejorar", mazo)));
+            if (Contexto.Carta is { } grp)
+            {
+                string? nombre;
+                lock (nombres) nombres.TryGetValue(grp, out nombre);
+                if (nombre is null) { nombre = Textos.T("col_esta_carta"); _ = NombrarCarta(grp); }
+                filas.Add((Columna.Accion.Similares, grp.ToString(), Textos.T("col_similares", nombre)));
+                filas.Add((Columna.Accion.Combos, grp.ToString(), Textos.T("col_combos", nombre)));
+            }
+            Columna.FilasDeContexto(filas.ToArray());
+        }
+        async Task NombrarCarta(int grp)
+        {
+            lock (pidiendo) { if (!pidiendo.Add(grp)) return; }
+            try
+            {
+                var c = await http.GetFromJsonAsync<CartaPuente>($"/api/puente/carta/{grp}", JsonOpciones);
+                if (c?.Nombre is { Length: > 0 } n)
+                {
+                    lock (nombres) nombres[grp] = n;
+                    if (Contexto.Carta == grp) ActualizarColumna();
+                }
+            }
+            catch { /* sin nombre se queda «esta carta» */ }
+            finally { lock (pidiendo) pidiendo.Remove(grp); }
+        }
+        Contexto.Cambio += ActualizarColumna;
+        Contexto.Iniciar(Path.Combine(LogArena.Carpeta(), "Player.log"));
 
         // Lo acaba de lanzar una ejecución normal, que ya ha subido: la primera
         // vuelta no sube nada y se pone a vigilar directamente.
@@ -791,16 +880,21 @@ internal static class Program
     /// despierto: lo demás (sin red, un rechazo, nada que subir) se reintenta en
     /// la siguiente sesión de Arena.
     /// </summary>
-    private static async Task<bool> SubirDeFondo(HttpClient http, CartaColeccion[]? coleccion, string? fragmentos, bool avisar = true)
+    /// <summary>Cómo acabó una subida de fondo, para quien la pidió con un icono.</summary>
+    private enum Subida { Nada, Pendiente, AlDia, Fallo }
+
+    private static async Task<bool> SubirDeFondo(HttpClient http, CartaColeccion[]? coleccion, string? fragmentos, bool avisar = true, Action<Subida>? alTerminar = null)
     {
-        if (coleccion is null && fragmentos is null) return true;
+        if (coleccion is null && fragmentos is null) { alTerminar?.Invoke(Subida.Nada); return true; }
 
         var (respuesta, estado, _) = await SubirImportacion(http, null, coleccion, fragmentos);
-        if (estado == 401) { Vinculo.Borrar(); return false; }
-        if (estado != 200 || respuesta?.Pendiente is null) return true;
+        if (estado == 401) { Vinculo.Borrar(); alTerminar?.Invoke(Subida.Fallo); return false; }
+        if (estado != 200) { alTerminar?.Invoke(Subida.Fallo); return true; }
+        if (respuesta?.Pendiente is null) { alTerminar?.Invoke(Subida.AlDia); return true; }
 
         // `avisar` en falso: a media partida (ver Residente), el aviso se guarda para el cierre.
-        if (avisar) Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_pendiente", respuesta.Mazos ?? 0));
+        if (avisar) Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_pendiente", respuesta.Mazos ?? 0));
+        alTerminar?.Invoke(Subida.Pendiente);
         return true;
     }
 
@@ -1726,6 +1820,9 @@ internal sealed record RespuestaEstado(
 
 /// <summary>La respuesta de /api/mtga-import: con el paso de revisión, <c>pendiente</c>
 /// y los recuentos; un servidor anterior, el resumen de lo guardado.</summary>
+/// <summary>Lo que devuelve /api/puente/carta/&lt;arena_id&gt;: el nombre para la columna.</summary>
+internal sealed record CartaPuente([property: JsonPropertyName("nombre")] string? Nombre);
+
 internal sealed record RespuestaImportar(
     [property: JsonPropertyName("pendiente")] string? Pendiente,
     [property: JsonPropertyName("mazos")] int? Mazos,

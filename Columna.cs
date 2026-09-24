@@ -36,9 +36,10 @@ namespace MtgCornerArenaBridge;
 /// </summary>
 internal static class Columna
 {
-    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir }
+    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos }
 
-    private sealed record Fila(Accion Accion, string Glifo, string Clave);
+    /// <summary>Una fila. Las de contexto traen su etiqueta hecha y un dato (nombre del mazo, id de la carta).</summary>
+    private sealed record Fila(Accion Accion, string Glifo, string Clave, string? Dato = null, string? Etiqueta = null);
 
     // ── Lo que hace falta de Windows ──────────────────────────────────────
 
@@ -106,6 +107,12 @@ internal static class Columna
     [DllImport("gdi32.dll")] private static extern int SetBkMode(IntPtr hdc, int modo);
     [DllImport("gdi32.dll")] private static extern uint SetTextColor(IntPtr hdc, uint color);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandle(string? nombre);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr LoadImage(IntPtr instancia, string nombre, uint tipo, int cx, int cy, uint banderas);
+    [DllImport("user32.dll")]
+    private static extern bool DrawIconEx(IntPtr hdc, int x, int y, IntPtr icono, int cx, int cy, uint paso, IntPtr pincel, uint banderas);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint ExtractIconEx(string fichero, int indice, out IntPtr grandes, out IntPtr pequenos, uint cuantos);
 
     private const uint WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000;
     private const uint WS_POPUP = 0x80000000;
@@ -127,6 +134,7 @@ internal static class Columna
 
     /// <summary>Cerrada, sólo iconos; abierta, con su nombre al lado.</summary>
     private const int ANCHO_CERRADA = 46, ANCHO_ABIERTA = 238;
+    private const uint IMAGE_ICON = 1, LR_DEFAULTCOLOR = 0, DI_NORMAL = 3;
     private const int ALTO_CABECERA = 40, ALTO_FILA = 44, AIRE_ABAJO = 8;
     /// <summary>Separación con el borde derecho de Arena.</summary>
     private const int MARGEN = 10;
@@ -135,7 +143,7 @@ internal static class Columna
     /// Qué se puede hacer, en orden. Los glifos son de «Segoe MDL2 Assets»:
     /// descargar, biblioteca, editar, encendido, cerrar.
     /// </summary>
-    private static readonly Fila[] Filas =
+    private static readonly Fila[] Fijas =
     [
         new(Accion.Importar, "", "col_importar"),
         new(Accion.Coleccion, "", "col_coleccion"),
@@ -144,6 +152,43 @@ internal static class Columna
         new(Accion.Salir, "", "col_salir"),
     ];
 
+    /// <summary>
+    /// LAS FILAS QUE SE VEN: primero las de CONTEXTO, luego las fijas.
+    ///
+    /// Las de contexto las pone quien vigila el juego (Contexto.cs, desde el
+    /// residente): «Mejorar “tal mazo”» cuando acabas de guardarlo o llevarlo a
+    /// la cola, «Similares a X» y «Combos con X» cuando señalas una carta en la
+    /// mesa. Van arriba porque son lo que cambia y lo que se busca en el momento;
+    /// las cinco de siempre siguen debajo, en su orden.
+    ///
+    /// Se sustituye el array entero y de golpe (volatile): quien pinta y quien
+    /// atiende el ratón toman su copia y trabajan con ella, y el hilo del vigía
+    /// nunca escribe dentro de lo que otro está leyendo. La altura de la ventana
+    /// sale de cuántas filas hay; el latido de medio segundo la recoloca.
+    /// </summary>
+    private static volatile Fila[] Filas = Fijas;
+    private static volatile int cuantasDeContexto;
+
+    public static void FilasDeContexto(params (Accion Accion, string Dato, string Etiqueta)[] contexto)
+    {
+        var nuevas = new Fila[contexto.Length + Fijas.Length];
+        for (var i = 0; i < contexto.Length; i++)
+            nuevas[i] = new Fila(contexto[i].Accion, GlifoDe(contexto[i].Accion), "", contexto[i].Dato, contexto[i].Etiqueta);
+        Array.Copy(Fijas, 0, nuevas, contexto.Length, Fijas.Length);
+        cuantasDeContexto = contexto.Length;
+        Filas = nuevas;
+        Refrescar();
+    }
+
+    /// <summary>Glifos de «Segoe MDL2 Assets» de las filas de contexto: estrella, copiar, enlace.</summary>
+    private static string GlifoDe(Accion a) => a switch
+    {
+        Accion.Mejorar => "\uE735",
+        Accion.Similares => "\uE8C8",
+        Accion.Combos => "\uE71B",
+        _ => "",
+    };
+
     private static int Alto => ALTO_CABECERA + Filas.Length * ALTO_FILA + AIRE_ABAJO;
 
     // El procedimiento en un campo estático a propósito: Windows guarda su
@@ -151,12 +196,47 @@ internal static class Columna
     // saltaría a memoria liberada.
     private static WndProc? procedimiento;
     private static IntPtr ventana;
+
+    /// <summary>
+    /// LA FLOR DE LA MARCA, que es el icono del propio ejecutable.
+    ///
+    /// Antes iba un cuadrado ámbar con las letras «MC»: se entendía, pero sobre
+    /// el juego una marca se reconoce por el dibujo, no leyéndola (pedido por
+    /// el usuario el 2026-09-24). No hace falta meter ninguna imagen nueva: el
+    /// .exe ya lleva `mtgcorner.ico` con la flor en seis tamaños, y de ahí se
+    /// saca.
+    ///
+    /// Primero por el recurso del módulo —el apphost de .NET guarda el icono de
+    /// la aplicación con el identificador 32512—, que deja escoger el tamaño y
+    /// coge el fotograma que mejor le va. Si eso fallara, se extrae del fichero
+    /// del ejecutable, que devuelve el de 32×32. Y si tampoco, se pinta el
+    /// cuadro de letras de siempre: la columna nunca se queda sin cabecera.
+    /// </summary>
+    private static IntPtr iconoMarca;
+    private static bool iconoBuscado;
+
+    private static IntPtr IconoMarca(int tam)
+    {
+        if (iconoBuscado) return iconoMarca;
+        iconoBuscado = true;
+        try
+        {
+            iconoMarca = LoadImage(GetModuleHandle(null), "#32512", IMAGE_ICON, tam, tam, LR_DEFAULTCOLOR);
+            if (iconoMarca == IntPtr.Zero && Environment.ProcessPath is { } exe
+                && ExtractIconEx(exe, 0, out var grande, out var pequeno, 1) > 0)
+            {
+                iconoMarca = grande != IntPtr.Zero ? grande : pequeno;
+            }
+        }
+        catch { iconoMarca = IntPtr.Zero; }
+        return iconoMarca;
+    }
     private static Thread? hilo;
     private static bool abierta;
     private static bool siguiendoRaton;
     private static int filaBajoRaton = -1;
     private static bool visible;
-    private static Func<Accion, Task>? alPulsar;
+    private static Func<Accion, string?, Task>? alPulsar;
     private static Func<bool>? arrancaSolo;
     /// <summary>Modo de prueba: se ve aunque Arena no sea la ventana activa (para
     /// mirarla desde otra ventana). En el residente, nunca.</summary>
@@ -171,7 +251,7 @@ internal static class Columna
     /// <paramref name="arranque"/> dice si el arranque automático está puesto,
     /// para el texto de ese icono.
     /// </summary>
-    public static void Iniciar(Func<Accion, Task> pulsar, Func<bool> arranque)
+    public static void Iniciar(Func<Accion, string?, Task> pulsar, Func<bool> arranque)
     {
         if (hilo is not null) return;
         alPulsar = pulsar;
@@ -346,13 +426,15 @@ internal static class Columna
             case WM_LBUTTONUP:
             {
                 var fila = FilaEn(lParam);
-                if (fila >= 0 && alPulsar is { } pulsar)
+                var filas = Filas;
+                if (fila >= 0 && fila < filas.Length && alPulsar is { } pulsar)
                 {
-                    var accion = Filas[fila].Accion;
+                    var accion = filas[fila].Accion;
+                    var dato = filas[fila].Dato;
                     // Fuera del hilo de la ventana: lo que hace un icono puede
                     // tardar (subir la colección), y el bucle de mensajes no
                     // puede pararse a esperarlo.
-                    _ = Task.Run(async () => { try { await pulsar(accion); } catch { /* lo cuenta quien la lanzó */ } });
+                    _ = Task.Run(async () => { try { await pulsar(accion, dato); } catch { /* lo cuenta quien la lanzó */ } });
                 }
                 return IntPtr.Zero;
             }
@@ -389,12 +471,22 @@ internal static class Columna
             FillRect(hdc, ref todo, fondo);
             SetBkMode(hdc, TRANSPARENT_BK);
 
-            // La marca: un cuadrado ámbar con «MC», centrado en la parte estrecha.
+            // La marca: la flor del programa, centrada en la parte estrecha. Si
+            // el icono no se pudiera cargar, el cuadro ámbar con «MC» de antes.
             var cuadro = new RECT { Left = 11, Top = 9, Right = 35, Bottom = 33 };
-            FillRect(hdc, ref cuadro, ambar);
-            SelectObject(hdc, marca);
-            SetTextColor(hdc, Rgb(15, 16, 34));
-            DrawText(hdc, "MC", -1, ref cuadro, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            var flor = IconoMarca(cuadro.Right - cuadro.Left);
+            if (flor != IntPtr.Zero)
+            {
+                DrawIconEx(hdc, cuadro.Left, cuadro.Top, flor,
+                    cuadro.Right - cuadro.Left, cuadro.Bottom - cuadro.Top, 0, IntPtr.Zero, DI_NORMAL);
+            }
+            else
+            {
+                FillRect(hdc, ref cuadro, ambar);
+                SelectObject(hdc, marca);
+                SetTextColor(hdc, Rgb(15, 16, 34));
+                DrawText(hdc, "MC", -1, ref cuadro, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            }
             if (abierta)
             {
                 SetTextColor(hdc, Rgb(252, 211, 77));
@@ -402,9 +494,17 @@ internal static class Columna
                 DrawText(hdc, "MTG CORNER", -1, ref rMarca, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
             }
 
-            for (var i = 0; i < Filas.Length; i++)
+            var filas = Filas;
+            var contexto = cuantasDeContexto;
+            for (var i = 0; i < filas.Length; i++)
             {
                 var arriba = ALTO_CABECERA + i * ALTO_FILA;
+                // Una raya fina entre lo del momento y lo de siempre.
+                if (contexto > 0 && i == contexto)
+                {
+                    var raya = new RECT { Left = 8, Top = arriba - 1, Right = ancho - 8, Bottom = arriba };
+                    FillRect(hdc, ref raya, resalte);
+                }
                 if (abierta && i == filaBajoRaton)
                 {
                     var r = new RECT { Left = 4, Top = arriba + 2, Right = ancho - 4, Bottom = arriba + ALTO_FILA - 2 };
@@ -413,14 +513,14 @@ internal static class Columna
                 SelectObject(hdc, glifos);
                 SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : Rgb(186, 196, 214));
                 var rGlifo = new RECT { Left = 0, Top = arriba, Right = ANCHO_CERRADA, Bottom = arriba + ALTO_FILA };
-                DrawText(hdc, Filas[i].Glifo, -1, ref rGlifo, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                DrawText(hdc, filas[i].Glifo, -1, ref rGlifo, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
                 if (abierta)
                 {
                     SelectObject(hdc, texto);
                     SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : Rgb(226, 232, 240));
                     var rTexto = new RECT { Left = ANCHO_CERRADA + 2, Top = arriba, Right = ancho - 10, Bottom = arriba + ALTO_FILA };
-                    DrawText(hdc, Etiqueta(Filas[i]), -1, ref rTexto, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                    DrawText(hdc, Etiqueta(filas[i]), -1, ref rTexto, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 }
             }
         }
@@ -438,7 +538,7 @@ internal static class Columna
 
     /// <summary>El nombre de cada icono; el del arranque dice si está puesto.</summary>
     private static string Etiqueta(Fila f) =>
-        f.Accion == Accion.Arranque
+        f.Etiqueta ?? (f.Accion == Accion.Arranque
             ? Textos.T(arrancaSolo?.Invoke() == true ? "col_arranque_si" : "col_arranque_no")
-            : Textos.T(f.Clave);
+            : Textos.T(f.Clave));
 }

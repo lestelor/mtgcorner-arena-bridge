@@ -759,6 +759,48 @@ internal static class Textos
             "MTG Corner はバックグラウンドに残ります。Arena を前面にすると右端に列が表示されます。消すには、そこで「MTG Corner を終了」を選んでください。",
             "MTG Corner 会留在后台：当 Arena 在前台时，右侧边缘会出现它的图标列。要移除，请在那里选择“关闭 MTG Corner”。",
         ],
+        // Las filas que pone el juego en la columna (Contexto.cs). {0} = mazo o carta.
+        ["col_mejorar"] =
+        [
+            "Improve “{0}”", "Mejorar «{0}»", "„{0}“ verbessern", "Améliorer « {0} »",
+            "Melhorar «{0}»", "Migliorare «{0}»", "「{0}」を改善", "改进“{0}”",
+        ],
+        ["col_similares"] =
+        [
+            "Similar to {0}", "Similares a {0}", "Ähnlich wie {0}", "Similaires à {0}",
+            "Semelhantes a {0}", "Simili a {0}", "{0} に似たカード", "与 {0} 相似的牌",
+        ],
+        ["col_combos"] =
+        [
+            "Combos with {0}", "Combos con {0}", "Combos mit {0}", "Combos avec {0}",
+            "Combos com {0}", "Combo con {0}", "{0} のコンボ", "{0} 的组合技",
+        ],
+        ["col_esta_carta"] =
+        [
+            "this card", "esta carta", "diese Karte", "cette carte",
+            "esta carta", "questa carta", "このカード", "这张牌",
+        ],
+        // Lo que dice el aviso al pulsar «Importar ahora» en la columna.
+        ["col_subiendo"] =
+        [
+            "Reading Arena and uploading…", "Leyendo Arena y subiendo…", "Arena wird gelesen und hochgeladen…", "Lecture d'Arena et envoi…",
+            "A ler o Arena e a enviar…", "Lettura di Arena e invio…", "Arena を読み取ってアップロード中…", "正在读取 Arena 并上传…",
+        ],
+        ["col_al_dia"] =
+        [
+            "Everything was already up to date on the site.", "Todo estaba ya al día en la web.", "Auf der Website war schon alles aktuell.", "Tout était déjà à jour sur le site.",
+            "Já estava tudo em dia no site.", "Era già tutto aggiornato sul sito.", "サイトはすでに最新でした。", "网站上的内容已是最新。",
+        ],
+        ["col_sin_datos"] =
+        [
+            "Nothing to upload: Arena's collection and log weren't readable.", "Nada que subir: no se pudo leer la colección ni el registro de Arena.", "Nichts hochzuladen: Sammlung und Protokoll von Arena waren nicht lesbar.", "Rien à envoyer : la collection et le journal d'Arena n'étaient pas lisibles.",
+            "Nada para enviar: não foi possível ler a coleção nem o registo do Arena.", "Niente da inviare: collezione e registro di Arena non erano leggibili.", "アップロードするものがありません。Arena のコレクションとログを読み取れませんでした。", "没有可上传的内容：无法读取 Arena 的收藏和日志。",
+        ],
+        ["col_fallo"] =
+        [
+            "The upload failed. Try again in a moment.", "La subida falló. Prueba otra vez en un momento.", "Das Hochladen ist fehlgeschlagen. Versuch es gleich noch einmal.", "L'envoi a échoué. Réessayez dans un instant.",
+            "O envio falhou. Tenta outra vez daqui a um momento.", "L'invio non è riuscito. Riprova tra un momento.", "アップロードに失敗しました。しばらくしてからもう一度お試しください。", "上传失败。请稍后再试。",
+        ],
         // El arranque automático apuntaba a una descarga anterior: se corrige.
         ["arranque_actualizado"] =
         [

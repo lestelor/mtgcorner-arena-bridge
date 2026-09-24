@@ -95,6 +95,7 @@ internal static class Superposicion
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr DispatchMessage(ref MSG msg);
     [DllImport("user32.dll")] private static extern void PostQuitMessage(int codigo);
+    [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern IntPtr SetTimer(IntPtr hWnd, IntPtr id, uint ms, IntPtr fn);
     [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint clave, byte alfa, uint banderas);
     [DllImport("user32.dll")] private static extern IntPtr BeginPaint(IntPtr hWnd, out PAINTSTRUCT ps);
@@ -125,7 +126,7 @@ internal static class Superposicion
     private const uint WS_EX_TOPMOST = 0x8, WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80;
     private const uint WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000;
     private const uint WS_POPUP = 0x80000000;
-    private const uint WM_DESTROY = 0x2, WM_PAINT = 0xF, WM_TIMER = 0x113;
+    private const uint WM_DESTROY = 0x2, WM_CLOSE = 0x10, WM_PAINT = 0xF, WM_TIMER = 0x113;
     private const int SW_SHOWNOACTIVATE = 4;
     private const uint LWA_ALPHA = 0x2;
     private const int TRANSPARENT_BK = 1;
@@ -173,13 +174,43 @@ internal static class Superposicion
     {
         try
         {
-            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos); } catch { /* sin escritorio */ } });
-            hilo.IsBackground = true;
-            hilo.Start();
-            hilo.Join(TimeSpan.FromSeconds(segundos + 3));
+            var hilo = MostrarSinEsperar(titulo, texto, segundos);
+            hilo?.Join(TimeSpan.FromSeconds(segundos + 3));
         }
         catch { /* ni con esas: el programa sigue igual */ }
     }
+
+    /// <summary>
+    /// El mismo aviso, pero SIN esperar a que se apague: para quien tiene
+    /// trabajo que hacer mientras se lee («Subiendo…» y a subir). Devuelve el
+    /// hilo, por si alguien quiere esperarlo igual.
+    ///
+    /// UNO SOLO A LA VEZ: el que hubiera se quita antes de poner el nuevo. Sin
+    /// esto, un «subiendo» de veinte segundos y un «hecho» de seis se apilarían
+    /// en el mismo sitio y el de encima taparía al otro.
+    /// </summary>
+    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6)
+    {
+        try
+        {
+            Ocultar();
+            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos); } catch { /* sin escritorio */ } });
+            hilo.IsBackground = true;
+            hilo.Start();
+            return hilo;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Quita el aviso que haya, si hay alguno. Desde cualquier hilo.</summary>
+    public static void Ocultar()
+    {
+        var v = ventanaActual;
+        if (v != IntPtr.Zero) PostMessage(v, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    /// <summary>La ventana del aviso que está en pantalla, o cero.</summary>
+    private static volatile IntPtr ventanaActual;
 
     private static void Correr(string titulo, string texto, int segundos)
     {
@@ -217,6 +248,7 @@ internal static class Superposicion
         SetLayeredWindowAttributes(ventana, 0, 240, LWA_ALPHA);
 
         SetTimer(ventana, new IntPtr(1), (uint)Math.Max(1, segundos) * 1000, IntPtr.Zero);
+        ventanaActual = ventana;
         ShowWindow(ventana, SW_SHOWNOACTIVATE);   // sin robarle el foco al juego
         UpdateWindow(ventana);
 
@@ -236,6 +268,8 @@ internal static class Superposicion
                 return IntPtr.Zero;
 
             case WM_TIMER:
+            case WM_CLOSE:
+                if (ventanaActual == ventana) ventanaActual = IntPtr.Zero;
                 DestroyWindow(ventana);
                 return IntPtr.Zero;
 
