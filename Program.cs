@@ -410,7 +410,7 @@ internal static class Program
         // mazo actual, carta bajo el ratón, si hay partida. Sesenta segundos.
         if (args.Length > 0 && args[0] == "--probar-contexto")
         {
-            Contexto.Cambio += () => Console.WriteLine($"{DateTime.Now:HH:mm:ss}  mazo={Contexto.Mazo ?? "-"}  carta={Contexto.Carta?.ToString() ?? "-"}  partida={Contexto.EnPartida}");
+            Contexto.Cambio += () => Console.WriteLine($"{DateTime.Now:HH:mm:ss}  mazo={Contexto.Mazo ?? "-"}  tu carta={Contexto.Carta?.ToString() ?? "-"}  rival mira={Contexto.RivalMira?.ToString() ?? "-"}  partida={Contexto.EnPartida}");
             Contexto.Iniciar(Path.Combine(LogArena.Carpeta(), "Player.log"));
             Console.WriteLine("Vigilando el registro durante 60 s…");
             await Task.Delay(TimeSpan.FromSeconds(60));
@@ -817,7 +817,7 @@ internal static class Program
                  */
                 string? nombre;
                 lock (nombres) nombres.TryGetValue(grp, out nombre);
-                if (nombre is null) { _ = NombrarCarta(grp); }
+                if (nombre is null) { _ = NombrarCarta(grp, Contexto.CartaOtraCara); }
                 else if (nombre.Length == 0) { /* preguntada y de verdad desconocida (404) */ }
                 // El dato lleva las DOS caras si la carta está transformada
                 // («96052:96051»): sólo la frontal existe en Scryfall.
@@ -830,9 +830,22 @@ internal static class Program
                     filas.Add((Columna.Accion.Combos, cual, Textos.T("col_combos", nombre)));
                 }
             }
+            // Lo que mira el rival, dicho como tal: es lo único que el registro
+            // sabe del ratón (ver Contexto.cs). Pulsarlo abre sus parecidas.
+            if (Contexto.RivalMira is { } grpRival && grpRival != Contexto.Carta)
+            {
+                string? nombreRival;
+                lock (nombres) nombres.TryGetValue(grpRival, out nombreRival);
+                if (nombreRival is null) { _ = NombrarCarta(grpRival, Contexto.RivalMiraOtraCara); }
+                else if (nombreRival.Length > 0)
+                {
+                    var cual = Contexto.RivalMiraOtraCara is { } otra ? $"{grpRival}:{otra}" : grpRival.ToString();
+                    filas.Add((Columna.Accion.Similares, cual, Textos.T("col_rival_mira", nombreRival)));
+                }
+            }
             Columna.FilasDeContexto(filas.ToArray());
         }
-        async Task NombrarCarta(int grp)
+        async Task NombrarCarta(int grp, int? otraCara)
         {
             lock (pidiendo)
             {
@@ -845,7 +858,7 @@ internal static class Program
             {
                 // /api/mtga-device/…, no /api/puente/…: el cortafuegos de Vercel
                 // sólo deja pasar al programa por ese prefijo (ver PuertaDevice).
-                using var r = await http.GetAsync($"{PuertaDevice}/carta/{grp}{Caras(Contexto.CartaOtraCara)}");
+                using var r = await http.GetAsync($"{PuertaDevice}/carta/{grp}{Caras(otraCara)}");
                 if (r.StatusCode == System.Net.HttpStatusCode.NotFound)
                 {
                     /**
@@ -881,7 +894,7 @@ internal static class Program
             finally
             {
                 lock (pidiendo) pidiendo.Remove(grp);
-                if (Contexto.Carta == grp) ActualizarColumna();
+                if (Contexto.Carta == grp || Contexto.RivalMira == grp) ActualizarColumna();
             }
         }
         Contexto.Cambio += ActualizarColumna;

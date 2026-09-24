@@ -775,6 +775,11 @@ internal static class Textos
             "Combos with {0}", "Combos con {0}", "Combos mit {0}", "Combos avec {0}",
             "Combos com {0}", "Combo con {0}", "{0} のコンボ", "{0} 的组合技",
         ],
+        ["col_rival_mira"] =
+        [
+            "Opponent is looking at {0}", "El rival mira {0}", "Gegner schaut auf {0}", "L'adversaire regarde {0}",
+            "O adversário olha para {0}", "L'avversario guarda {0}", "対戦相手が見ているカード: {0}", "对手正在查看 {0}",
+        ],
         ["col_esta_carta"] =
         [
             "this card", "esta carta", "diese Karte", "cette carte",
