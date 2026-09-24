@@ -372,8 +372,8 @@ internal static class Columna
     private static void Recortar(int ancho) =>
         SetWindowRgn(ventana, CreateRoundRectRgn(0, 0, ancho + 1, Alto + 1, 14, 14), true);
 
-    /// <summary>La ventana principal de Arena, o cero.</summary>
-    private static IntPtr VentanaDeArena()
+    /// <summary>La ventana principal de Arena, o cero. La usa también el panel de cartas.</summary>
+    internal static IntPtr VentanaDeArena()
     {
         try
         {

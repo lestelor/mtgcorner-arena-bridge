@@ -38,7 +38,13 @@ namespace MtgCornerArenaBridge;
 /// </summary>
 internal static class Program
 {
-    private const string Sitio = "https://mtgcorner.com";
+    /// <summary>
+    /// La web. Se puede apuntar a otra con la variable de entorno
+    /// `MTGCORNER_SITIO` para probar contra un servidor de desarrollo sin
+    /// tocar el código; sin ella, la de siempre.
+    /// </summary>
+    private static readonly string Sitio =
+        Environment.GetEnvironmentVariable("MTGCORNER_SITIO") is { Length: > 0 } otro ? otro.TrimEnd('/') : "https://mtgcorner.com";
     /// <summary>
     /// La LISTA de releases, no `/releases/latest`.
     ///
@@ -49,7 +55,7 @@ internal static class Program
     /// número más alto entre ellos.
     /// </summary>
     private const string ReleasesApi = "https://api.github.com/repos/lestelor/mtgcorner-arena-bridge/releases?per_page=20";
-    private const string PaginaDescarga = Sitio + "/importar-arena";
+    private static readonly string PaginaDescarga = Sitio + "/importar-arena";
     private static readonly JsonSerializerOptions JsonOpciones = new(JsonSerializerDefaults.Web);
 
     /// <summary>La versión de este ejecutable (&lt;Version&gt; del .csproj).</summary>
@@ -349,6 +355,21 @@ internal static class Program
             Console.WriteLine("Columna sobre Arena durante 40 s…");
             await Task.Delay(TimeSpan.FromSeconds(40));
             Columna.Cerrar();
+            return 0;
+        }
+        // Ver el panel de cartas encima de Arena sin jugar: con el arena_id que
+        // se le pase, o el de una carta cualquiera de la partida de pruebas.
+        if (args.Length > 0 && args[0] == "--probar-panel")
+        {
+            var vinculoPanel = Vinculo.Leer();
+            using var httpPanel = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(2) };
+            if (vinculoPanel is not null) httpPanel.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoPanel.Token);
+            PanelCartas.SiempreVisible = true;
+            var cual = args.Length > 1 ? args[1] : "91550";
+            Console.WriteLine($"Panel de similares de {cual}...");
+            Console.WriteLine(await PanelSimilares(httpPanel, cual) ? "ensenado" : "no se pudo");
+            await Task.Delay(TimeSpan.FromSeconds(40));
+            PanelCartas.Cerrar();
             return 0;
         }
         // Ver qué saca el vigía del registro (Contexto.cs) con Arena en marcha:
@@ -706,10 +727,22 @@ internal static class Program
                     if (dato is not null) Abrir($"{Sitio}/api/puente/mazo?nombre={Uri.EscapeDataString(dato)}&idioma={Textos.Idioma}");
                     break;
                 case Columna.Accion.Similares:
-                    if (dato is not null) Abrir($"{Sitio}/api/puente/carta/{dato}?abrir=similares&idioma={Textos.Idioma}");
+                    // EN EL JUEGO, no en el navegador: el panel con las cartas
+                    // grandes encima de Arena (ver PanelCartas.cs). Si algo
+                    // falla -sin red, sin parecidas- se abre la web, que es lo
+                    // que hacia antes y sigue valiendo.
+                    if (dato is not null && !await PanelSimilares(http, dato))
+                    {
+                        var (cara, otraCara) = Caras(dato);
+                        Abrir($"{Sitio}/api/puente/carta/{cara}?abrir=similares&idioma={Textos.Idioma}{otraCara}");
+                    }
                     break;
                 case Columna.Accion.Combos:
-                    if (dato is not null) Abrir($"{Sitio}/api/puente/carta/{dato}?abrir=combos&idioma={Textos.Idioma}");
+                    if (dato is not null)
+                    {
+                        var (cara, otraCara) = Caras(dato);
+                        Abrir($"{Sitio}/api/puente/carta/{cara}?abrir=combos&idioma={Textos.Idioma}{otraCara}");
+                    }
                     break;
                 case Columna.Accion.Salir:
                     Columna.Cerrar();
@@ -733,11 +766,31 @@ internal static class Program
             if (Contexto.Mazo is { } mazo) filas.Add((Columna.Accion.Mejorar, mazo, Textos.T("col_mejorar", mazo)));
             if (Contexto.Carta is { } grp)
             {
+                /**
+                 * SIN NOMBRE NO SE OFRECE NADA.
+                 *
+                 * Decía «Similares a esta carta» mientras llegaba el nombre —o
+                 * para siempre, si la carta no se podía resolver—, y eso no
+                 * sirve: «no me queda claro cuál es la carta seleccionada»
+                 * (el usuario, 2026-09-24). Ahora la fila aparece cuando se
+                 * sabe cómo se llama, un instante después, y si no hay manera
+                 * de saberlo no aparece: mejor una fila menos que una fila que
+                 * no se sabe a qué lleva.
+                 */
                 string? nombre;
                 lock (nombres) nombres.TryGetValue(grp, out nombre);
-                if (nombre is null) { nombre = Textos.T("col_esta_carta"); _ = NombrarCarta(grp); }
-                filas.Add((Columna.Accion.Similares, grp.ToString(), Textos.T("col_similares", nombre)));
-                filas.Add((Columna.Accion.Combos, grp.ToString(), Textos.T("col_combos", nombre)));
+                if (nombre is null) { _ = NombrarCarta(grp); }
+                else if (nombre.Length == 0) { /* preguntada y desconocida */ }
+                // El dato lleva las DOS caras si la carta está transformada
+                // («96052:96051»): sólo la frontal existe en Scryfall.
+                else
+                {
+                    // El dato lleva las DOS caras si la carta está transformada
+                    // («96052:96051»): sólo la frontal existe en Scryfall.
+                    var cual = Contexto.CartaOtraCara is { } otra ? $"{grp}:{otra}" : grp.ToString();
+                    filas.Add((Columna.Accion.Similares, cual, Textos.T("col_similares", nombre)));
+                    filas.Add((Columna.Accion.Combos, cual, Textos.T("col_combos", nombre)));
+                }
             }
             Columna.FilasDeContexto(filas.ToArray());
         }
@@ -746,14 +799,18 @@ internal static class Program
             lock (pidiendo) { if (!pidiendo.Add(grp)) return; }
             try
             {
-                var c = await http.GetFromJsonAsync<CartaPuente>($"/api/puente/carta/{grp}", JsonOpciones);
-                if (c?.Nombre is { Length: > 0 } n)
-                {
-                    lock (nombres) nombres[grp] = n;
-                    if (Contexto.Carta == grp) ActualizarColumna();
-                }
+                var c = await http.GetFromJsonAsync<CartaPuente>($"/api/puente/carta/{grp}{Caras(Contexto.CartaOtraCara)}", JsonOpciones);
+                // Cadena vacía = preguntada y no hay manera de saberlo (una
+                // ficha, un emblema, una carta demasiado nueva). Se recuerda
+                // igual, que si no se preguntaría por ella cada segundo.
+                lock (nombres) nombres[grp] = c?.Nombre is { Length: > 0 } n ? n : "";
+                if (Contexto.Carta == grp) ActualizarColumna();
             }
-            catch { /* sin nombre se queda «esta carta» */ }
+            catch
+            {
+                lock (nombres) nombres[grp] = "";
+                if (Contexto.Carta == grp) ActualizarColumna();
+            }
             finally { lock (pidiendo) pidiendo.Remove(grp); }
         }
         Contexto.Cambio += ActualizarColumna;
@@ -822,6 +879,94 @@ internal static class Program
     /// <summary>La huella de los fragmentos del registro: igual huella, nada nuevo que subir.</summary>
     private static string Huella(string? fragmentos) =>
         fragmentos is null ? "" : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fragmentos)));
+
+    /// <summary>
+    /// «96052:96051» → la cara señalada y, como parámetro, la otra. Una carta
+    /// transformada tiene un número por cara y sólo la frontal existe fuera de
+    /// Arena, así que se mandan las dos y la web se queda con la que encuentre.
+    /// </summary>
+    private static (string Cara, string Otra) Caras(string dato)
+    {
+        var corte = dato.IndexOf(':');
+        return corte < 0 ? (dato, "") : (dato[..corte], $"&otra={dato[(corte + 1)..]}");
+    }
+
+    /// <summary>La otra cara como parámetro suelto, para la consulta del nombre.</summary>
+    private static string Caras(int? otra) => otra is { } o ? $"?otra={o}" : "";
+
+    /// <summary>
+    /// EL PANEL DE CARTAS PARECIDAS, ENCIMA DE ARENA.
+    ///
+    /// La web hace el trabajo —qué se parece a qué, con qué imagen y a dónde
+    /// lleva cada carta— en `/api/puente/similares`, y aquí sólo se bajan las
+    /// ilustraciones y se pintan. Las imágenes se guardan en %TEMP%: señalar
+    /// dos veces la misma carta no las vuelve a bajar, y borrarlas no rompe
+    /// nada.
+    ///
+    /// Mientras tanto se avisa, que bajar ocho cartas tarda un segundo largo y
+    /// un icono que no contesta parece roto. Devuelve si se llegó a enseñar;
+    /// quien llama decide qué hacer si no.
+    /// </summary>
+    private static async Task<bool> PanelSimilares(HttpClient http, string arena)
+    {
+        Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("panel_buscando"), 20);
+        try
+        {
+            var (cara, otra) = Caras(arena);
+            var datos = await http.GetFromJsonAsync<RespuestaSimilares>(
+                $"/api/puente/similares?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}", JsonOpciones);
+            var lista = datos?.Cartas ?? [];
+            if (lista.Length == 0) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("panel_nada")); return true; }
+
+            var bajadas = await Task.WhenAll(lista.Select(async c => (Carta: c, Fichero: await BajarImagen(c.Imagen))));
+            var cartas = bajadas
+                .Where(b => b.Fichero is not null)
+                .Select(b => new PanelCartas.Carta(b.Carta.Nombre ?? "", b.Fichero!, b.Carta.Ruta, b.Carta.PrecioUsd))
+                .ToArray();
+            if (cartas.Length == 0) return false;
+
+            PanelCartas.AlPulsar = c => { if (c.Ruta is not null) Abrir(Sitio + c.Ruta); };
+            PanelCartas.Mostrar(Textos.T("col_similares", datos?.Fuente?.Nombre ?? Textos.T("col_esta_carta")), cartas);
+            Superposicion.Ocultar();
+            return true;
+        }
+        catch
+        {
+            Superposicion.Ocultar();
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// La ilustración de una carta, en disco. Ya bajada, se reutiliza: el
+    /// nombre del fichero es la huella de su dirección, así que dos cartas
+    /// distintas no se pisan y la misma no se baja dos veces.
+    /// </summary>
+    private static async Task<string?> BajarImagen(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        try
+        {
+            var carpeta = Path.Combine(Path.GetTempPath(), "MtgCorner", "cartas");
+            Directory.CreateDirectory(carpeta);
+            var nombre = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url)))[..24] + ".jpg";
+            var destino = Path.Combine(carpeta, nombre);
+            if (File.Exists(destino) && new FileInfo(destino).Length > 0) return destino;
+
+            // Un cliente aparte: las imágenes están en scryfall.io y no llevan
+            // —ni deben llevar— el token de la cuenta.
+            using var img = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            img.DefaultRequestHeaders.Add("User-Agent", "MtgCornerArenaBridge/" + VersionPropia);
+            var bytes = await img.GetByteArrayAsync(url);
+            if (bytes.Length == 0) return null;
+            await File.WriteAllBytesAsync(destino, bytes);
+            return destino;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     /// <summary>Abre una dirección en el navegador de siempre; si falla, nada.</summary>
     private static void Abrir(string url)
@@ -1843,6 +1988,21 @@ internal sealed record RespuestaEstado(
 
 /// <summary>La respuesta de /api/mtga-import: con el paso de revisión, <c>pendiente</c>
 /// y los recuentos; un servidor anterior, el resumen de lo guardado.</summary>
+/// <summary>Lo que devuelve /api/puente/similares: de qué carta se parte y las parecidas.</summary>
+internal sealed record RespuestaSimilares(
+    [property: JsonPropertyName("fuente")] FuenteSimilares? Fuente,
+    [property: JsonPropertyName("cartas")] CartaSimilar[]? Cartas);
+
+internal sealed record FuenteSimilares(
+    [property: JsonPropertyName("nombre")] string? Nombre,
+    [property: JsonPropertyName("ruta")] string? Ruta);
+
+internal sealed record CartaSimilar(
+    [property: JsonPropertyName("nombre")] string? Nombre,
+    [property: JsonPropertyName("imagen")] string? Imagen,
+    [property: JsonPropertyName("precioUsd")] double? PrecioUsd,
+    [property: JsonPropertyName("ruta")] string? Ruta);
+
 /// <summary>Lo que devuelve /api/puente/carta/&lt;arena_id&gt;: el nombre para la columna.</summary>
 internal sealed record CartaPuente([property: JsonPropertyName("nombre")] string? Nombre);
 

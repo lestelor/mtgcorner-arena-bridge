@@ -39,6 +39,17 @@ internal static class Contexto
     /// <summary>La carta bajo el ratón en la mesa (su <c>grpId</c> = arena_id), o null.</summary>
     public static int? Carta { get; private set; }
 
+    /// <summary>
+    /// LA OTRA CARA de esa carta, si está transformada, o null.
+    ///
+    /// Arena numera por separado las dos caras —una Saga vuelta criatura tiene
+    /// un número distinto del de la Saga— y sólo la frontal existe en
+    /// Scryfall: señalando la cara vuelta, la web contestaba «desconocida»
+    /// (visto el 2026-09-24 con el 96052). El propio objeto del registro dice
+    /// cuál es la otra, así que se guarda y se manda con ella.
+    /// </summary>
+    public static int? CartaOtraCara { get; private set; }
+
     /// <summary>Si hay una partida en marcha.</summary>
     public static bool EnPartida { get; private set; }
 
@@ -49,11 +60,14 @@ internal static class Contexto
     // de una cadena JSON: las comillas llegan como \" . Se acepta cualquier
     // escape dentro del nombre (\" o \), y se desescapa después.
     private static readonly Regex NombreMazo = new(@"\\\x22Name\\\x22:\\\x22((?:[^\x22\\]|\\.)*?)\\\x22", RegexOptions.Compiled);
-    private static readonly Regex Objeto = new(@"""instanceId"":\s*(\d+),\s*""grpId"":\s*(\d+)", RegexOptions.Compiled);
+    // Hasta `othersideGrpId` si lo hay, sin salirse del objeto: `[^{]` frena en
+    // cuanto empieza el siguiente, que es lo que separa uno de otro.
+    private static readonly Regex Objeto = new(@"""instanceId"":\s*(\d+),\s*""grpId"":\s*(\d+)(?:[^{]*?""othersideGrpId"":\s*(\d+))?", RegexOptions.Compiled);
     private static readonly Regex BajoRaton = new(@"""onHover"":\s*\{\s*""objectId"":\s*(\d+)", RegexOptions.Compiled);
     private const string PrefijoPrecon = "?=?Loc/";
 
-    private static readonly Dictionary<int, int> objetos = new();
+    /// <summary>Instancia en la mesa → la carta que es y, si está transformada, su otra cara.</summary>
+    private static readonly Dictionary<int, (int Grp, int? Otra)> objetos = new();
     private static string? fichero;
     private static long posicion;
     private static Thread? hilo;
@@ -86,7 +100,7 @@ internal static class Contexto
             // Arena lo ha vuelto a empezar: sesión nueva, mesa nueva.
             posicion = 0;
             objetos.Clear();
-            Cambiar(mazo: null, carta: null, enPartida: false);
+            Cambiar(null, null, null, false);
         }
         if (fs.Length == posicion) return;
         fs.Seek(posicion, SeekOrigin.Begin);
@@ -94,7 +108,7 @@ internal static class Contexto
         var texto = sr.ReadToEnd();
         posicion = fs.Length;
 
-        string? mazo = Mazo; int? carta = Carta; bool enPartida = EnPartida;
+        string? mazo = Mazo; int? carta = Carta; int? otraCara = CartaOtraCara; bool enPartida = EnPartida;
         foreach (var linea in texto.Split('\n'))
         {
             if (linea.Contains("DeckUpsertDeckV3", StringComparison.Ordinal) || linea.Contains("EventSetDeckV3", StringComparison.Ordinal))
@@ -113,29 +127,35 @@ internal static class Contexto
                     // Sin límite crecería toda la partida; las instancias viejas no
                     // vuelven a señalarse.
                     if (objetos.Count > 5000) objetos.Clear();
-                    objetos[int.Parse(m.Groups[1].Value)] = int.Parse(m.Groups[2].Value);
+                    int? otra = m.Groups[3].Success ? int.Parse(m.Groups[3].Value) : null;
+                    objetos[int.Parse(m.Groups[1].Value)] = (int.Parse(m.Groups[2].Value), otra);
                 }
             }
             if (linea.Contains("onHover", StringComparison.Ordinal))
             {
                 var m = BajoRaton.Match(linea);
-                if (m.Success && objetos.TryGetValue(int.Parse(m.Groups[1].Value), out var grp)) carta = grp;
+                if (m.Success && objetos.TryGetValue(int.Parse(m.Groups[1].Value), out var obj))
+                {
+                    carta = obj.Grp;
+                    otraCara = obj.Otra;
+                }
             }
             if (linea.Contains("MatchGameRoomStateType_Playing", StringComparison.Ordinal)) enPartida = true;
             if (linea.Contains("MatchGameRoomStateType_MatchCompleted", StringComparison.Ordinal))
             {
                 enPartida = false;
                 carta = null;
+                otraCara = null;
                 objetos.Clear();
             }
         }
-        Cambiar(mazo, carta, enPartida);
+        Cambiar(mazo, carta, otraCara, enPartida);
     }
 
-    private static void Cambiar(string? mazo, int? carta, bool enPartida)
+    private static void Cambiar(string? mazo, int? carta, int? otraCara, bool enPartida)
     {
-        if (mazo == Mazo && carta == Carta && enPartida == EnPartida) return;
-        Mazo = mazo; Carta = carta; EnPartida = enPartida;
+        if (mazo == Mazo && carta == Carta && otraCara == CartaOtraCara && enPartida == EnPartida) return;
+        Mazo = mazo; Carta = carta; CartaOtraCara = otraCara; EnPartida = enPartida;
         try { Cambio?.Invoke(); } catch { /* lo que haga quien escucha es cosa suya */ }
     }
 

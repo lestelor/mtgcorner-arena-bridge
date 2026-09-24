@@ -767,8 +767,8 @@ internal static class Textos
         ],
         ["col_similares"] =
         [
-            "Similar to {0}", "Similares a {0}", "Ähnlich wie {0}", "Similaires à {0}",
-            "Semelhantes a {0}", "Simili a {0}", "{0} に似たカード", "与 {0} 相似的牌",
+            "Cards similar to {0}", "Cartas similares a {0}", "Karten ähnlich wie {0}", "Cartes similaires à {0}",
+            "Cartas semelhantes a {0}", "Carte simili a {0}", "{0} に似たカード", "与 {0} 相似的牌",
         ],
         ["col_combos"] =
         [
@@ -779,6 +779,22 @@ internal static class Textos
         [
             "this card", "esta carta", "diese Karte", "cette carte",
             "esta carta", "questa carta", "このカード", "这张牌",
+        ],
+        // El panel de cartas parecidas encima del juego (PanelCartas.cs).
+        ["panel_buscando"] =
+        [
+            "Looking for similar cards...", "Buscando cartas parecidas...", "Ähnliche Karten werden gesucht...", "Recherche de cartes similaires...",
+            "À procura de cartas parecidas...", "Ricerca di carte simili...", "似たカードを探しています...", "正在查找相似的牌...",
+        ],
+        ["panel_nada"] =
+        [
+            "No similar cards found for this one.", "No he encontrado cartas parecidas a ésta.", "Zu dieser Karte wurde nichts Ähnliches gefunden.", "Aucune carte similaire trouvée pour celle-ci.",
+            "Não encontrei cartas parecidas com esta.", "Nessuna carta simile a questa.", "このカードに似たカードは見つかりませんでした。", "没有找到与这张牌相似的牌。",
+        ],
+        ["panel_pie"] =
+        [
+            "Click a card to open it on the site", "Pulsa una carta para abrirla en la web", "Klicke eine Karte an, um sie auf der Website zu öffnen", "Cliquez sur une carte pour l'ouvrir sur le site",
+            "Clica numa carta para a abrires no site", "Clicca una carta per aprirla sul sito", "カードをクリックするとサイトで開きます", "点击一张牌即可在网站上打开",
         ],
         // Lo que dice el aviso al pulsar «Importar ahora» en la columna.
         ["col_subiendo"] =
