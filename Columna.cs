@@ -96,6 +96,8 @@ internal static class Columna
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern IntPtr LoadCursor(IntPtr instancia, int cursor);
+    [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr contexto);
 
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
@@ -122,7 +124,7 @@ internal static class Columna
     private const int SW_HIDE = 0, SW_SHOWNOACTIVATE = 4;
     private const uint LWA_ALPHA = 0x2;
     private const int TRANSPARENT_BK = 1;
-    private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_SINGLELINE = 0x20, DT_END_ELLIPSIS = 0x8000;
+    private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_SINGLELINE = 0x20, DT_CALCRECT = 0x400, DT_END_ELLIPSIS = 0x8000;
     private const uint TME_LEAVE = 0x2;
     private const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_HIDEWINDOW = 0x80;
     private static readonly IntPtr HWND_TOPMOST = new(-1);
@@ -133,7 +135,17 @@ internal static class Columna
     // ── Medidas ───────────────────────────────────────────────────────────
 
     /// <summary>Cerrada, sólo iconos; abierta, con su nombre al lado.</summary>
-    private const int ANCHO_CERRADA = 46, ANCHO_ABIERTA = 238;
+    /// <summary>
+    /// Cerrada, y abierta: lo que mide de ancho como mínimo y como máximo.
+    ///
+    /// Antes era un ancho fijo de 238 px y el nombre del mazo se cortaba —
+    /// «Improve "Mono-White Aur…"» (visto por el usuario el 2026-09-24). Ahora
+    /// se mide la etiqueta más larga con la fuente con la que se va a pintar y
+    /// la columna se abre lo que haga falta, con un tope: lo que pase de ahí
+    /// sí se corta con puntos suspensivos, porque una columna de media
+    /// pantalla tapa el juego, que es lo que se ha venido a jugar.
+    /// </summary>
+    private const int ANCHO_CERRADA = 46, ANCHO_ABIERTA = 238, ANCHO_MAXIMO = 420;
     private const uint IMAGE_ICON = 1, LR_DEFAULTCOLOR = 0, DI_NORMAL = 3;
     private const int ALTO_CABECERA = 40, ALTO_FILA = 44, AIRE_ABAJO = 8;
     /// <summary>Separación con el borde derecho de Arena.</summary>
@@ -168,6 +180,42 @@ internal static class Columna
     /// </summary>
     private static volatile Fila[] Filas = Fijas;
     private static volatile int cuantasDeContexto;
+    /// <summary>Lo que mide abierta: lo que pida la etiqueta más larga, entre el mínimo y el tope.</summary>
+    private static volatile int anchoAbierta = ANCHO_ABIERTA;
+
+    /// <summary>
+    /// Mide las etiquetas con la MISMA fuente con la que se pintan (Segoe UI
+    /// 16) y ajusta el ancho abierto. `DT_CALCRECT` no dibuja: rellena el
+    /// rectángulo con lo que ocuparía, que es justo lo que hace falta y lo
+    /// único que acierta con nombres en japonés o en chino, donde contar
+    /// caracteres no vale de nada.
+    /// </summary>
+    private static void MedirAncho()
+    {
+        var hdc = GetDC(IntPtr.Zero);
+        if (hdc == IntPtr.Zero) return;
+        var fuente = CreateFont(16, 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        var anterior = SelectObject(hdc, fuente);
+        try
+        {
+            var ancho = ANCHO_ABIERTA;
+            foreach (var f in Filas)
+            {
+                var r = new RECT();
+                DrawText(hdc, Etiqueta(f), -1, ref r, DT_CALCRECT | DT_SINGLELINE);
+                // El hueco del icono, el texto, y el aire de la derecha.
+                ancho = Math.Max(ancho, ANCHO_CERRADA + 2 + (r.Right - r.Left) + 16);
+            }
+            anchoAbierta = Math.Min(ancho, ANCHO_MAXIMO);
+        }
+        catch { /* sin medir se queda el de siempre */ }
+        finally
+        {
+            SelectObject(hdc, anterior);
+            DeleteObject(fuente);
+            ReleaseDC(IntPtr.Zero, hdc);
+        }
+    }
 
     public static void FilasDeContexto(params (Accion Accion, string Dato, string Etiqueta)[] contexto)
     {
@@ -177,6 +225,7 @@ internal static class Columna
         Array.Copy(Fijas, 0, nuevas, contexto.Length, Fijas.Length);
         cuantasDeContexto = contexto.Length;
         Filas = nuevas;
+        MedirAncho();   // el nombre del mazo o de la carta cambia lo que mide
         Refrescar();
     }
 
@@ -295,7 +344,8 @@ internal static class Columna
             RegisterClassEx(ref clase);
 
             abierta = ForzarAbierta;
-            var anchoInicial = abierta ? ANCHO_ABIERTA : ANCHO_CERRADA;
+            MedirAncho();
+            var anchoInicial = abierta ? anchoAbierta : ANCHO_CERRADA;
             var (x, y, ver) = Donde();
             ventana = CreateWindowEx(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
@@ -363,7 +413,7 @@ internal static class Columna
 
     private static void Recolocar()
     {
-        var ancho = abierta ? ANCHO_ABIERTA : ANCHO_CERRADA;
+        var ancho = abierta ? anchoAbierta : ANCHO_CERRADA;
         var (x, y, ver) = Donde();
         if (ver != visible)
         {
@@ -458,7 +508,7 @@ internal static class Columna
     private static void Pintar(IntPtr hWnd)
     {
         var hdc = BeginPaint(hWnd, out var ps);
-        var ancho = abierta ? ANCHO_ABIERTA : ANCHO_CERRADA;
+        var ancho = abierta ? anchoAbierta : ANCHO_CERRADA;
         var fondo = CreateSolidBrush(Rgb(9, 13, 24));
         var resalte = CreateSolidBrush(Rgb(26, 34, 54));
         var ambar = CreateSolidBrush(Rgb(245, 158, 11));

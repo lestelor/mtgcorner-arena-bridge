@@ -977,6 +977,10 @@ internal static class Program
                     if (p.Id == yo) continue;
                     if (string.Equals(p.MainModule?.FileName, exe, StringComparison.OrdinalIgnoreCase)) continue;
                     p.Kill();
+                    // A que termine de verdad: mientras agoniza sigue teniendo
+                    // cogido el mutex del residente, y quien pregunte por él se
+                    // creerá que hay uno funcionando.
+                    p.WaitForExit(3000);
                 }
                 catch { /* sin permiso o ya cerrado: el mutex se encarga del resto */ }
                 finally { p.Dispose(); }
@@ -1049,19 +1053,38 @@ internal static class Program
         // fichero (una versión anterior), se corrige y se cierra aquél. Si no,
         // el mutex de abajo vería vivo al viejo y se dejaría todo como estaba.
         RefrescarArranque();
-        try
-        {
-            // Si se puede abrir, hay un residente vivo: no hace falta otro.
-            using var yaHay = Mutex.OpenExisting(@"Local\MtgCornerArenaBridgeResidente");
-            return;
-        }
-        catch (WaitHandleCannotBeOpenedException) { /* no hay ninguno: se lanza */ }
-        catch { return; /* cualquier otro problema con el mutex: no insistir */ }
+        if (HayResidente()) return;
         // `--recien-subido`: sin esto el residente subiría otra vez, al segundo
         // de hacerlo esta ejecución, y en la web quedarían DOS revisiones
         // idénticas esperando.
         LanzarResidente("--recien-subido");
         Textos.Linea("columna_puesta");
+    }
+
+    /// <summary>
+    /// ¿Hay ya un residente vivo? Lo dice su mutex.
+    ///
+    /// CON REINTENTOS, y no de adorno: justo antes de esto se ha podido cerrar
+    /// un residente de una versión anterior, y `Kill()` no espera a que el
+    /// proceso termine. Entre que muere y suelta el mutex pasan unos
+    /// milisegundos en los que preguntar una sola vez contesta «sí lo hay»: se
+    /// daba por hecho que quedaba uno funcionando, no se lanzaba ninguno y la
+    /// columna desaparecía del juego (el usuario, 2026-09-24: «he vuelto a
+    /// ejecutar el programa y me ha desaparecido la barra vertical»).
+    /// </summary>
+    private static bool HayResidente()
+    {
+        for (var intento = 0; ; intento++)
+        {
+            try
+            {
+                using var vivo = Mutex.OpenExisting(@"Local\MtgCornerArenaBridgeResidente");
+            }
+            catch (WaitHandleCannotBeOpenedException) { return false; }   // no hay ninguno
+            catch { return true; }                                        // otro problema: no tocar nada
+            if (intento >= 10) return true;
+            Thread.Sleep(200);
+        }
     }
 
     /// <summary>Arranca el modo de fondo en este momento, escondido.</summary>
