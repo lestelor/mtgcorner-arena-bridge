@@ -216,7 +216,7 @@ internal static class Columna
 
             abierta = ForzarAbierta;
             var anchoInicial = abierta ? ANCHO_ABIERTA : ANCHO_CERRADA;
-            var (x, y, ver) = Donde(anchoInicial);
+            var (x, y, ver) = Donde();
             ventana = CreateWindowEx(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
                 "MtgCornerColumna", "MTG Corner", WS_POPUP,
@@ -257,25 +257,34 @@ internal static class Columna
     }
 
     /// <summary>
-    /// Pegada al borde derecho de Arena, en el TERCIO SUPERIOR y no a media
-    /// altura: a media altura, a la derecha, es donde Arena amplía la carta que
-    /// tienes bajo el ratón en la partida, y taparla es lo último que puede
-    /// hacer un accesorio. Y si se ve: sólo con Arena delante (o la propia
-    /// columna, que al pulsarla es lo que hay debajo del ratón) y sin minimizar.
+    /// Pegada al borde IZQUIERDO de Arena, en el TERCIO SUPERIOR.
+    ///
+    /// A la izquierda porque es donde la pone Untapped y es lo que la gente
+    /// tiene aprendido (pedido por el usuario el 2026-09-24), y porque el lado
+    /// derecho es justo donde Arena amplía la carta que tienes bajo el ratón
+    /// en la partida: ahí un accesorio siempre acaba estorbando. En el tercio
+    /// superior y no a media altura por lo mismo.
+    ///
+    /// La posición NO depende de lo ancha que esté: anclada a la izquierda, al
+    /// abrirse crece hacia la derecha y los iconos no se mueven de su sitio.
+    ///
+    /// Y si se ve: sólo con Arena delante (o la propia columna, que al pulsarla
+    /// es lo que hay debajo del ratón) y sin minimizar. No mira en qué pantalla
+    /// del juego estás: sale igual en la home, en los mazos y en la partida.
     /// </summary>
-    private static (int X, int Y, bool Ver) Donde(int ancho)
+    private static (int X, int Y, bool Ver) Donde()
     {
         var arena = VentanaDeArena();
         if (arena == IntPtr.Zero || IsIconic(arena) || !GetWindowRect(arena, out var r) || r.Right <= r.Left) return (0, 0, false);
         var delante = GetForegroundWindow();
         var ver = SiempreVisible || delante == arena || delante == ventana;
-        return (r.Right - ancho - MARGEN, r.Top + (r.Bottom - r.Top) * 18 / 100, ver);
+        return (r.Left + MARGEN, r.Top + (r.Bottom - r.Top) * 18 / 100, ver);
     }
 
     private static void Recolocar()
     {
         var ancho = abierta ? ANCHO_ABIERTA : ANCHO_CERRADA;
-        var (x, y, ver) = Donde(ancho);
+        var (x, y, ver) = Donde();
         if (ver != visible)
         {
             visible = ver;

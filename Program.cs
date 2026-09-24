@@ -493,6 +493,7 @@ internal static class Program
              * significa algo.
              */
             await OfrecerArranqueSolo();
+            DejarResidenteEnMarcha();
 
             try { Process.Start(new ProcessStartInfo(revisar) { UseShellExecute = true }); }
             catch { /* la URL de arriba basta si esto falla */ }
@@ -513,6 +514,7 @@ internal static class Program
         if (respuesta?.SinTraducir > 0) Textos.Linea("hecho_sin_traducir", respuesta.SinTraducir);
         Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_guardado", respuesta?.CartasGuardadas ?? 0));
         await OfrecerArranqueSolo();
+        DejarResidenteEnMarcha();
         return Esperar(0);
     }
 
@@ -586,7 +588,9 @@ internal static class Program
     private static async Task OfrecerArranqueSolo()
     {
         if (ArrancaSolo()) return;
-        if (await PreguntarSiNo("residente_ofrecer")) Inicio(true);
+        // `lanzar: false`: el residente lo pone en marcha DejarResidenteEnMarcha,
+        // que es quien sabe que la subida de esta ejecución ya está hecha.
+        if (await PreguntarSiNo("residente_ofrecer")) Inicio(true, lanzar: false);
     }
 
     /// <summary>
@@ -666,15 +670,25 @@ internal static class Program
             }
         }, ArrancaSolo);
 
+        // Lo acaba de lanzar una ejecución normal, que ya ha subido: la primera
+        // vuelta no sube nada y se pone a vigilar directamente.
+        var recienSubido = Environment.GetCommandLineArgs().Contains("--recien-subido");
+
         while (true)
         {
             while (!LectorArena.ArenaAbierto()) await Task.Delay(TimeSpan.FromSeconds(20));
 
-            // Arena tarda en dejar la colección lista; se reintenta en vez de
-            // adivinar un plazo. Si no sale, se sube igual lo del log.
-            var coleccion = await EsperarColeccion();
+            if (!recienSubido)
+            {
+                // Arena tarda en dejar la colección lista; se reintenta en vez de
+                // adivinar un plazo. Si no sale, se sube igual lo del log.
+                var coleccion = await EsperarColeccion();
+                var primera = LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta()));
+                if (!await Subir(coleccion, primera.Fragmentos)) return 1;
+            }
+            recienSubido = false;
+
             var log = LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta()));
-            if (!await Subir(coleccion, log.Fragmentos)) return 1;
 
             /**
              * DURANTE LA PARTIDA SE VIGILA EL REGISTRO. Cada minuto se relee; si
@@ -805,6 +819,78 @@ internal static class Program
         catch { return false; }
     }
 
+    /// <summary>Lo que hay escrito en el arranque automático, tal cual, o null.</summary>
+    private static string? MandatoDeArranque()
+    {
+        try
+        {
+            using var clave = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(ClaveInicio);
+            return clave?.GetValue(NombreInicio) as string;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// EL ARRANQUE AUTOMÁTICO APUNTA A UN .EXE CONCRETO, Y LA GENTE DESCARGA OTRO.
+    ///
+    /// Aquí no hay instalador: el programa es un fichero suelto que se vuelve a
+    /// descargar con cada versión, y el navegador lo guarda al lado del
+    /// anterior con otro nombre —«MtgCornerArenaBridge (9).exe»—. El arranque
+    /// automático se escribió una vez con la ruta de aquel día y ahí se quedó,
+    /// porque la oferta sólo se hace cuando NO está puesto. Resultado: se usa
+    /// la versión nueva a mano y en cada inicio de sesión sigue levantándose la
+    /// vieja, que no tiene ni las correcciones ni la columna.
+    ///
+    /// Visto en una máquina real el 2026-09-24: la 1.10.0 recién descargada y
+    /// el registro llamando a una 1.8.0 de hacía cuatro días.
+    ///
+    /// Así que cuando el arranque está puesto y apunta a OTRO fichero, se
+    /// reescribe con el que se está ejecutando ahora y se cierra el residente
+    /// viejo, que no sabe apartarse solo: es de antes del mutex.
+    /// </summary>
+    private static void RefrescarArranque()
+    {
+        var exe = Environment.ProcessPath;
+        if (exe is null) return;
+        var mandato = MandatoDeArranque();
+        if (mandato is null) return;                                            // no está puesto: no es asunto de aquí
+        if (mandato.Contains(exe, StringComparison.OrdinalIgnoreCase)) return;  // ya es éste
+
+        Inicio(true, lanzar: false);
+        Textos.Linea("arranque_actualizado");
+        CerrarResidentesViejos(exe);
+    }
+
+    /// <summary>
+    /// Cierra los residentes que sean de OTRO ejecutable. Los de antes de la
+    /// 1.10.0 no comparten el mutex, así que dos copias se pisarían: las dos
+    /// subiendo lo mismo y, desde la 1.10.0, dos columnas sobre el juego.
+    /// </summary>
+    private static void CerrarResidentesViejos(string exe)
+    {
+        try
+        {
+            var yo = Environment.ProcessId;
+            // POR PREFIJO, no por el nombre exacto: cada descarga se llama de
+            // su manera —«MtgCornerArenaBridge (7)»— y buscar el nombre del
+            // ejecutable de ahora no encontraría precisamente a los viejos,
+            // que son los que hay que cerrar.
+            foreach (var p in Process.GetProcesses()
+                         .Where(p => p.ProcessName.StartsWith("MtgCornerArenaBridge", StringComparison.OrdinalIgnoreCase)))
+            {
+                try
+                {
+                    if (p.Id == yo) continue;
+                    if (string.Equals(p.MainModule?.FileName, exe, StringComparison.OrdinalIgnoreCase)) continue;
+                    p.Kill();
+                }
+                catch { /* sin permiso o ya cerrado: el mutex se encarga del resto */ }
+                finally { p.Dispose(); }
+            }
+        }
+        catch { /* si no se puede enumerar, se sigue igual */ }
+    }
+
     /// <summary>
     /// Poner o quitar el arranque automático. En la clave del USUARIO y no en la
     /// de la máquina: no hace falta ser administrador, no afecta a nadie más y
@@ -842,14 +928,56 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// AL TERMINAR, DEJAR LA COLUMNA PUESTA.
+    ///
+    /// La columna de iconos sobre Arena (ver Columna.cs) vive en el modo
+    /// residente, y hasta la 1.10.0 el residente sólo arrancaba al iniciar
+    /// sesión en Windows o al aceptar el arranque automático. Así que quien
+    /// abría el programa a mano con Arena delante —que es lo normal la primera
+    /// vez— importaba sus mazos y no veía ninguna capa por ningún lado
+    /// (comunicado por el usuario el 2026-09-24: «lo he ejecutado y voy a Arena
+    /// y no veo nada superpuesto»).
+    ///
+    /// Ahora, al acabar una ejecución normal, el modo de fondo se queda puesto
+    /// PARA ESTA SESIÓN DE WINDOWS. Es cosa distinta del arranque automático,
+    /// que es el permiso para volver solo después de reiniciar y se sigue
+    /// preguntando aparte: decir «no» a aquello no obliga a cerrar esto, y para
+    /// quitarlo está «Cerrar MTG Corner» en la propia columna.
+    ///
+    /// No se lanza si ya hay uno —el residente se protege con este mismo
+    /// mutex—, ni sin vínculo, porque sin token el residente se cierra solo.
+    /// </summary>
+    private static void DejarResidenteEnMarcha()
+    {
+        if (Vinculo.Leer() is null) return;
+        // Antes de mirar si hay uno vivo: si el que arranca con Windows es otro
+        // fichero (una versión anterior), se corrige y se cierra aquél. Si no,
+        // el mutex de abajo vería vivo al viejo y se dejaría todo como estaba.
+        RefrescarArranque();
+        try
+        {
+            // Si se puede abrir, hay un residente vivo: no hace falta otro.
+            using var yaHay = Mutex.OpenExisting(@"Local\MtgCornerArenaBridgeResidente");
+            return;
+        }
+        catch (WaitHandleCannotBeOpenedException) { /* no hay ninguno: se lanza */ }
+        catch { return; /* cualquier otro problema con el mutex: no insistir */ }
+        // `--recien-subido`: sin esto el residente subiría otra vez, al segundo
+        // de hacerlo esta ejecución, y en la web quedarían DOS revisiones
+        // idénticas esperando.
+        LanzarResidente("--recien-subido");
+        Textos.Linea("columna_puesta");
+    }
+
     /// <summary>Arranca el modo de fondo en este momento, escondido.</summary>
-    private static void LanzarResidente()
+    private static void LanzarResidente(string banderas = "")
     {
         try
         {
             var exe = Environment.ProcessPath;
             if (exe is null) return;
-            Process.Start(new ProcessStartInfo(exe, "--residente") { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden });
+            Process.Start(new ProcessStartInfo(exe, ("--residente " + banderas).Trim()) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden });
             Textos.Linea("residente_lanzado");
         }
         catch { /* si no arranca ahora, arrancará con Windows */ }

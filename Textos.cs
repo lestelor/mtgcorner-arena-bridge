@@ -746,6 +746,31 @@ internal static class Textos
             "すでにバックグラウンドで動いています。再起動や再ログインは不要です。",
             "已经在后台运行：无需重启或重新登录。",
         ],
+        // Al acabar una ejecución normal: el programa se queda de fondo y la
+        // columna aparece sobre Arena. Dice DÓNDE mirar, que es lo que faltaba.
+        ["columna_puesta"] =
+        [
+            "MTG Corner stays in the background: with Arena in front you'll see its column on the right edge. To remove it, use \"Close MTG Corner\" there.",
+            "MTG Corner se queda de fondo: con Arena delante verás su columna en el borde derecho. Para quitarla, pulsa «Cerrar MTG Corner» ahí mismo.",
+            "MTG Corner läuft im Hintergrund weiter: Wenn Arena im Vordergrund ist, siehst du seine Leiste am rechten Rand. Zum Entfernen dort „MTG Corner schließen“ wählen.",
+            "MTG Corner reste en arrière-plan : avec Arena au premier plan, sa colonne apparaît sur le bord droit. Pour l'enlever, choisissez « Fermer MTG Corner » dessus.",
+            "O MTG Corner fica em segundo plano: com o Arena à frente vês a coluna na margem direita. Para a tirar, usa «Fechar o MTG Corner» aí.",
+            "MTG Corner resta in background: con Arena in primo piano vedrai la sua colonna sul bordo destro. Per toglierla, usa «Chiudi MTG Corner» lì.",
+            "MTG Corner はバックグラウンドに残ります。Arena を前面にすると右端に列が表示されます。消すには、そこで「MTG Corner を終了」を選んでください。",
+            "MTG Corner 会留在后台：当 Arena 在前台时，右侧边缘会出现它的图标列。要移除，请在那里选择“关闭 MTG Corner”。",
+        ],
+        // El arranque automático apuntaba a una descarga anterior: se corrige.
+        ["arranque_actualizado"] =
+        [
+            "Windows was still starting an older copy: it now starts this one.",
+            "Windows seguía arrancando una copia anterior: ahora arranca ésta.",
+            "Windows startete noch eine ältere Kopie: Jetzt startet es diese.",
+            "Windows lançait encore une copie plus ancienne : il lance désormais celle-ci.",
+            "O Windows ainda arrancava uma cópia anterior: agora arranca esta.",
+            "Windows avviava ancora una copia precedente: ora avvia questa.",
+            "Windows は以前のコピーを起動していました。これからはこちらを起動します。",
+            "Windows 之前启动的是旧副本：现在会启动这一个。",
+        ],
         // El aviso que se aguantó durante la partida, al cerrar Arena.
         ["sup_actualizado"] =
         [
