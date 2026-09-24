@@ -184,6 +184,28 @@ internal static class Columna
     private static volatile int anchoAbierta = ANCHO_ABIERTA;
 
     /// <summary>
+    /// LA FILA CUYA ACCIÓN ESTÁ EN CURSO (bajando las cartas parecidas), por su
+    /// dato, o null. Mientras dura, esa fila cambia el glifo por un reloj y a
+    /// su nombre se le van sumando puntos con el latido de la columna.
+    ///
+    /// Es el indicador de carga, y está AQUÍ y no en un panel a propósito: el
+    /// panel grande tapa el juego, y quien está en mitad de una partida no
+    /// quiere que le tapen la mesa mientras se bajan ocho imágenes. La columna
+    /// ya está en pantalla y ocupa lo que ocupa (el usuario, 2026-09-24: «la
+    /// gente puede estar jugando y no queremos tapar mientras está recuperando
+    /// las cartas»).
+    /// </summary>
+    private static volatile string? enCurso;
+    private static int faseCurso;
+
+    public static void EnCurso(string? dato)
+    {
+        enCurso = dato;
+        faseCurso = 0;
+        Refrescar();
+    }
+
+    /// <summary>
     /// Mide las etiquetas con la MISMA fuente con la que se pintan (Segoe UI
     /// 16) y ajusta el ancho abierto. `DT_CALCRECT` no dibuja: rellena el
     /// rectángulo con lo que ocuparía, que es justo lo que hace falta y lo
@@ -442,6 +464,8 @@ internal static class Columna
 
             case WM_TIMER:
                 Recolocar();
+                // Los puntos del indicador de carga andan con este latido.
+                if (enCurso is not null) { faseCurso++; InvalidateRect(hWnd, IntPtr.Zero, false); }
                 return IntPtr.Zero;
 
             // Pulsar la columna NO activa la columna: el teclado y el foco
@@ -563,14 +587,16 @@ internal static class Columna
                 SelectObject(hdc, glifos);
                 SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : Rgb(186, 196, 214));
                 var rGlifo = new RECT { Left = 0, Top = arriba, Right = ANCHO_CERRADA, Bottom = arriba + ALTO_FILA };
-                DrawText(hdc, filas[i].Glifo, -1, ref rGlifo, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                var ocupada = enCurso is not null && filas[i].Dato == enCurso;
+                DrawText(hdc, ocupada ? "" : filas[i].Glifo, -1, ref rGlifo, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
                 if (abierta)
                 {
                     SelectObject(hdc, texto);
                     SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : Rgb(226, 232, 240));
                     var rTexto = new RECT { Left = ANCHO_CERRADA + 2, Top = arriba, Right = ancho - 10, Bottom = arriba + ALTO_FILA };
-                    DrawText(hdc, Etiqueta(filas[i]), -1, ref rTexto, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                    var rotulo = ocupada ? Etiqueta(filas[i]) + new string('.', 1 + faseCurso % 3) : Etiqueta(filas[i]);
+                    DrawText(hdc, rotulo, -1, ref rTexto, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 }
             }
         }

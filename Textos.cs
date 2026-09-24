@@ -796,6 +796,11 @@ internal static class Textos
             "No similar cards found for this one.", "No he encontrado cartas parecidas a ésta.", "Zu dieser Karte wurde nichts Ähnliches gefunden.", "Aucune carte similaire trouvée pour celle-ci.",
             "Não encontrei cartas parecidas com esta.", "Nessuna carta simile a questa.", "このカードに似たカードは見つかりませんでした。", "没有找到与这张牌相似的牌。",
         ],
+        ["panel_sin_combos"] =
+        [
+            "No known combos for this card.", "Esta carta no tiene combos conocidos.", "Für diese Karte sind keine Combos bekannt.", "Aucun combo connu pour cette carte.",
+            "Esta carta não tem combos conhecidos.", "Nessun combo conosciuto per questa carta.", "このカードの既知のコンボはありません。", "这张牌没有已知的组合技。",
+        ],
         ["panel_pie"] =
         [
             "Click a card to open it on the site", "Pulsa una carta para abrirla en la web", "Klicke eine Karte an, um sie auf der Website zu öffnen", "Cliquez sur une carte pour l'ouvrir sur le site",

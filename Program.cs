@@ -765,17 +765,34 @@ internal static class Program
                     // grandes encima de Arena (ver PanelCartas.cs). Si algo
                     // falla -sin red, sin parecidas- se abre la web, que es lo
                     // que hacia antes y sigue valiendo.
-                    if (dato is not null && !await PanelSimilares(http, dato))
+                    if (dato is not null)
                     {
-                        var (cara, otraCara) = Caras(dato);
-                        Abrir($"{Sitio}/api/puente/carta/{cara}?abrir=similares&idioma={Textos.Idioma}{otraCara}");
+                        // La fila pulsada enseña que está en ello (ver Columna.EnCurso);
+                        // el panel sólo sale cuando están las ocho cartas, para no
+                        // tapar la partida mientras bajan.
+                        Columna.EnCurso(dato);
+                        bool hecho;
+                        try { hecho = await PanelSimilares(http, dato); }
+                        finally { Columna.EnCurso(null); }
+                        if (!hecho)
+                        {
+                            var (cara, otraCara) = Caras(dato);
+                            Abrir($"{Sitio}/api/puente/carta/{cara}?abrir=similares&idioma={Textos.Idioma}{otraCara}");
+                        }
                     }
                     break;
                 case Columna.Accion.Combos:
                     if (dato is not null)
                     {
-                        var (cara, otraCara) = Caras(dato);
-                        Abrir($"{Sitio}/api/puente/carta/{cara}?abrir=combos&idioma={Textos.Idioma}{otraCara}");
+                        Columna.EnCurso(dato);
+                        bool hecho;
+                        try { hecho = await PanelCombos(http, dato); }
+                        finally { Columna.EnCurso(null); }
+                        if (!hecho)
+                        {
+                            var (cara, otraCara) = Caras(dato);
+                            Abrir($"{Sitio}/api/puente/carta/{cara}?abrir=combos&idioma={Textos.Idioma}{otraCara}");
+                        }
                     }
                     break;
                 case Columna.Accion.Salir:
@@ -828,6 +845,9 @@ internal static class Program
                     var cual = Contexto.CartaOtraCara is { } otra ? $"{grp}:{otra}" : grp.ToString();
                     filas.Add((Columna.Accion.Similares, cual, Textos.T("col_similares", nombre)));
                     filas.Add((Columna.Accion.Combos, cual, Textos.T("col_combos", nombre)));
+                    // Y POR ADELANTADO: similares y combos de esa carta, con sus
+                    // imágenes, antes de que nadie pulse nada (ver Precalentar).
+                    _ = Precalentar(http, cual);
                 }
             }
             // Lo que mira el rival, dicho como tal: es lo único que el registro
@@ -991,14 +1011,84 @@ internal static class Program
     /// un icono que no contesta parece roto. Devuelve si se llegó a enseñar;
     /// quien llama decide qué hacer si no.
     /// </summary>
-    private static async Task<bool> PanelSimilares(HttpClient http, string arena)
+    /// <summary>
+    /// LO QUE YA ESTÁ PEDIDO, para no pedirlo dos veces. Similares y combos por
+    /// carta (su dato «grp» o «grp:otra»), y qué se está calentando ahora.
+    /// </summary>
+    private static readonly Dictionary<string, RespuestaSimilares> SimilaresListos = new();
+    private static readonly Dictionary<string, RespuestaCombos> CombosListos = new();
+    private static readonly HashSet<string> Calentando = new();
+
+    /// <summary>
+    /// POR ADELANTADO. Medido el 2026-09-24: la primera consulta de similares de
+    /// una carta tarda 2–3 s (la web tiene que preguntar a Scryfall), la misma
+    /// en caché 0,1 s, y bajar las ocho imágenes 0,2 s. Como la columna sabe
+    /// cuál es tu carta en cuanto la juegas —segundos antes de que pulses
+    /// nada—, se piden entonces similares y combos y se dejan las imágenes en
+    /// disco: al pulsar, el panel sale al momento. Y de paso queda caliente la
+    /// caché de la web para el siguiente que pregunte por esa carta. Sólo para
+    /// TU carta: la que mira el rival cambia con cada movimiento de su ratón.
+    /// </summary>
+    private static async Task Precalentar(HttpClient http, string arena)
     {
-        Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("panel_buscando"), 20);
+        lock (Calentando) { if (!Calentando.Add(arena)) return; }
         try
         {
-            var (cara, otra) = Caras(arena);
-            var datos = await http.GetFromJsonAsync<RespuestaSimilares>(
-                $"{PuertaDevice}/similares?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}", JsonOpciones);
+            await Task.WhenAll(
+                Task.Run(async () =>
+                {
+                    var d = await Similares(http, arena);
+                    if (d?.Cartas is { } c) await Task.WhenAll(c.Select(x => BajarImagen(x.Imagen)));
+                }),
+                Task.Run(async () =>
+                {
+                    var d = await Combos(http, arena);
+                    if (d?.Combos is { } cs) await Task.WhenAll(cs.SelectMany(x => x.Piezas ?? []).Select(p => BajarImagen(p.Imagen)));
+                }));
+        }
+        catch { /* si no se pudo calentar, al pulsar se pide como siempre */ }
+        finally { lock (Calentando) Calentando.Remove(arena); }
+    }
+
+    private static async Task<RespuestaSimilares?> Similares(HttpClient http, string arena)
+    {
+        lock (SimilaresListos) { if (SimilaresListos.TryGetValue(arena, out var ya)) return ya; }
+        var (cara, otra) = Caras(arena);
+        var d = await http.GetFromJsonAsync<RespuestaSimilares>(
+            $"{PuertaDevice}/similares?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}", JsonOpciones);
+        if (d is not null) lock (SimilaresListos) SimilaresListos[arena] = d;
+        return d;
+    }
+
+    private static async Task<RespuestaCombos?> Combos(HttpClient http, string arena)
+    {
+        lock (CombosListos) { if (CombosListos.TryGetValue(arena, out var ya)) return ya; }
+        var (cara, otra) = Caras(arena);
+        var d = await http.GetFromJsonAsync<RespuestaCombos>(
+            $"{PuertaDevice}/combos?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}", JsonOpciones);
+        if (d is not null) lock (CombosListos) CombosListos[arena] = d;
+        return d;
+    }
+
+    /// <summary>Abre una ruta del panel: las de la web son relativas; las de Commander Spellbook, absolutas.</summary>
+    private static void AbrirDelPanel(string ruta) =>
+        Abrir(ruta.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? ruta : Sitio + ruta);
+
+    /// <summary>
+    /// EL PANEL DE CARTAS PARECIDAS, ENCIMA DE ARENA.
+    ///
+    /// La web hace el trabajo —qué se parece a qué, con qué imagen y a dónde
+    /// lleva cada carta— en `/api/puente/similares`, y aquí sólo se bajan las
+    /// ilustraciones y se pintan. Sin aviso emergente: quien avisa de que se está
+    /// buscando es la fila de la columna (Columna.EnCurso), que no tapa nada. El
+    /// panel se abre sólo con las cartas ya bajadas, de golpe. Devuelve si se
+    /// llegó a enseñar; quien llama decide qué hacer si no.
+    /// </summary>
+    private static async Task<bool> PanelSimilares(HttpClient http, string arena)
+    {
+        try
+        {
+            var datos = await Similares(http, arena);
             var lista = datos?.Cartas ?? [];
             if (lista.Length == 0) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("panel_nada")); return true; }
 
@@ -1009,14 +1099,49 @@ internal static class Program
                 .ToArray();
             if (cartas.Length == 0) return false;
 
-            PanelCartas.AlPulsar = c => { if (c.Ruta is not null) Abrir(Sitio + c.Ruta); };
+            PanelCartas.AlAbrir = AbrirDelPanel;
             PanelCartas.Mostrar(Textos.T("col_similares", datos?.Fuente?.Nombre ?? Textos.T("col_esta_carta")), cartas);
-            Superposicion.Ocultar();
             return true;
         }
         catch
         {
-            Superposicion.Ocultar();
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// EL PANEL DE COMBOS: una sección por combo, con lo que produce de rótulo
+    /// (pulsable: abre el combo en Commander Spellbook) y sus otras piezas
+    /// debajo, compactas para que tres combos quepan en una pantalla de 1080.
+    /// </summary>
+    private static async Task<bool> PanelCombos(HttpClient http, string arena)
+    {
+        try
+        {
+            var datos = await Combos(http, arena);
+            var combos = datos?.Combos ?? [];
+            if (combos.Length == 0) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("panel_sin_combos")); return true; }
+
+            var secciones = new List<PanelCartas.Seccion>();
+            foreach (var combo in combos)
+            {
+                var piezas = combo.Piezas ?? [];
+                var bajadas = await Task.WhenAll(piezas.Select(async p => (Pieza: p, Fichero: await BajarImagen(p.Imagen))));
+                var cartas = bajadas
+                    .Where(b => b.Fichero is not null)
+                    .Select(b => new PanelCartas.Carta(b.Pieza.Nombre ?? "", b.Fichero!, b.Pieza.Ruta, b.Pieza.PrecioUsd))
+                    .ToArray();
+                if (cartas.Length == 0) continue;
+                secciones.Add(new PanelCartas.Seccion(combo.Resultado ?? "", combo.Url, cartas));
+            }
+            if (secciones.Count == 0) return false;
+
+            PanelCartas.AlAbrir = AbrirDelPanel;
+            PanelCartas.Mostrar(Textos.T("col_combos", datos?.Fuente?.Nombre ?? Textos.T("col_esta_carta")), secciones, compacto: true);
+            return true;
+        }
+        catch
+        {
             return false;
         }
     }
@@ -2072,6 +2197,17 @@ internal sealed record RespuestaEstado(
 
 /// <summary>La respuesta de /api/mtga-import: con el paso de revisión, <c>pendiente</c>
 /// y los recuentos; un servidor anterior, el resumen de lo guardado.</summary>
+/// <summary>Lo que devuelve /api/puente/combos: de qué carta se parte y sus combos, cada uno con lo que produce y sus otras piezas.</summary>
+internal sealed record RespuestaCombos(
+    [property: JsonPropertyName("fuente")] FuenteSimilares? Fuente,
+    [property: JsonPropertyName("combos")] ComboPuente[]? Combos);
+
+internal sealed record ComboPuente(
+    [property: JsonPropertyName("id")] string? Id,
+    [property: JsonPropertyName("resultado")] string? Resultado,
+    [property: JsonPropertyName("url")] string? Url,
+    [property: JsonPropertyName("piezas")] CartaSimilar[]? Piezas);
+
 /// <summary>Lo que devuelve /api/puente/similares: de qué carta se parte y las parecidas.</summary>
 internal sealed record RespuestaSimilares(
     [property: JsonPropertyName("fuente")] FuenteSimilares? Fuente,
