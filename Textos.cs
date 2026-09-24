@@ -703,6 +703,61 @@ internal static class Textos
             "{0} 秒後に閉じます…（キーを押すとすぐ閉じます）",
             "{0} 秒后关闭…（按任意键立即关闭）",
         ],
+        // La columna de iconos sobre el juego (Columna.cs): un nombre por icono.
+        ["col_importar"] =
+        [
+            "Import now", "Importar ahora", "Jetzt importieren", "Importer maintenant",
+            "Importar agora", "Importa adesso", "今すぐ取り込む", "立即导入",
+        ],
+        ["col_coleccion"] =
+        [
+            "My collection", "Mi colección", "Meine Sammlung", "Ma collection",
+            "A minha coleção", "La mia collezione", "マイコレクション", "我的收藏",
+        ],
+        ["col_constructor"] =
+        [
+            "Deck builder", "Constructor de mazos", "Deckbuilder", "Constructeur de deck",
+            "Construtor de baralhos", "Costruttore di mazzi", "デッキビルダー", "套牌构筑器",
+        ],
+        ["col_arranque_si"] =
+        [
+            "Starts with Windows: on", "Arranque automático: sí", "Autostart: an", "Démarrage auto : oui",
+            "Arranque automático: sim", "Avvio automatico: sì", "自動起動：オン", "自动启动：开",
+        ],
+        ["col_arranque_no"] =
+        [
+            "Starts with Windows: off", "Arranque automático: no", "Autostart: aus", "Démarrage auto : non",
+            "Arranque automático: não", "Avvio automatico: no", "自動起動：オフ", "自动启动：关",
+        ],
+        ["col_salir"] =
+        [
+            "Close MTG Corner", "Cerrar MTG Corner", "MTG Corner schließen", "Fermer MTG Corner",
+            "Fechar o MTG Corner", "Chiudi MTG Corner", "MTG Corner を終了", "关闭 MTG Corner",
+        ],
+        // Tras poner el arranque automático: ya está funcionando, no hace falta reiniciar.
+        ["residente_lanzado"] =
+        [
+            "It's already running in the background: no need to sign in again or restart.",
+            "Ya está funcionando de fondo: no hace falta reiniciar ni volver a entrar.",
+            "Es läuft schon im Hintergrund: kein Neustart und keine neue Anmeldung nötig.",
+            "Il tourne déjà en arrière-plan : pas besoin de redémarrer ni de vous reconnecter.",
+            "Já está a funcionar em segundo plano: não é preciso reiniciar nem voltar a entrar.",
+            "È già in esecuzione in background: non serve riavviare né rientrare.",
+            "すでにバックグラウンドで動いています。再起動や再ログインは不要です。",
+            "已经在后台运行：无需重启或重新登录。",
+        ],
+        // El aviso que se aguantó durante la partida, al cerrar Arena.
+        ["sup_actualizado"] =
+        [
+            "Your decks were updated while you played. Review them on the site.",
+            "Tus mazos se han actualizado mientras jugabas. Revísalos en la web.",
+            "Deine Decks wurden während des Spielens aktualisiert. Sieh sie dir auf der Website an.",
+            "Vos decks ont été mis à jour pendant la partie. Vérifiez-les sur le site.",
+            "Os teus baralhos foram atualizados enquanto jogavas. Revê-os no site.",
+            "I tuoi mazzi sono stati aggiornati mentre giocavi. Controllali sul sito.",
+            "プレイ中にデッキが更新されました。サイトで確認してください。",
+            "你的套牌在游戏期间已更新。请到网站查看。",
+        ],
         ["pulsa_tecla"] =
         [
             "Press a key to close…",

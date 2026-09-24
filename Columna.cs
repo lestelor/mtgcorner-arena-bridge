@@ -1,0 +1,435 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+namespace MtgCornerArenaBridge;
+
+/// <summary>
+/// LA COLUMNA DE ICONOS SOBRE ARENA, al estilo de Untapped.
+///
+/// Una tira estrecha pegada al borde derecho de la ventana del juego, con un
+/// icono por cosa que se puede hacer. Al pasar el ratón se abre hacia la
+/// izquierda y enseña qué es cada icono; al pulsar uno, hace lo suyo; al quitar
+/// el ratón se cierra. Lo pidió el usuario el 2026-09-24: «que el menú salga
+/// estilo Untapped, como una columna expansible con icono y cada icono hace
+/// una cosa».
+///
+/// A DIFERENCIA DEL AVISO (Superposicion.cs), ESTA SÍ SE PULSA. Por eso NO
+/// lleva WS_EX_TRANSPARENT. Lo que sí conserva es WS_EX_NOACTIVATE, y además
+/// contesta WM_MOUSEACTIVATE con «no me actives»: pulsar un icono no le quita
+/// el foco al juego ni un instante. Es lo que separa un accesorio de una
+/// ventana que se pone en medio.
+///
+/// SIGUE A ARENA: cada medio segundo mira dónde está su ventana y se recoloca;
+/// se esconde si Arena está minimizado, no existe, o no es la ventana activa
+/// (para no flotar encima del navegador o del escritorio). En PANTALLA COMPLETA
+/// EXCLUSIVA no se ve, como ninguna superposición; Arena viene por defecto en
+/// ventana sin bordes, donde sí.
+///
+/// LOS ICONOS SON GLIFOS de la fuente «Segoe MDL2 Assets», que trae Windows 10
+/// y 11: no hay imágenes que embeber ni escalar, y se pintan con el mismo GDI
+/// que el texto. Win32 a pelo por lo mismo que el aviso: WinForms doblaba el
+/// ejecutable.
+///
+/// VIVE EN SU PROPIO HILO con su bucle de mensajes, durante toda la vida del
+/// modo residente. Lo que hace cada icono lo decide quien la arranca, con la
+/// función que le pasa: esta clase sólo pinta y avisa.
+/// </summary>
+internal static class Columna
+{
+    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir }
+
+    private sealed record Fila(Accion Accion, string Glifo, string Clave);
+
+    // ── Lo que hace falta de Windows ──────────────────────────────────────
+
+    private delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct POINT { public int x, y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PAINTSTRUCT
+    {
+        public IntPtr hdc; public bool fErase; public RECT rcPaint; public bool fRestore, fIncUpdate;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public byte[] rgbReserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam, lParam; public uint time; public POINT pt; }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct WNDCLASSEX
+    {
+        public uint cbSize, style; public IntPtr lpfnWndProc; public int cbClsExtra, cbWndExtra;
+        public IntPtr hInstance, hIcon, hCursor, hbrBackground;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? lpszMenuName;
+        [MarshalAs(UnmanagedType.LPWStr)] public string lpszClassName;
+        public IntPtr hIconSm;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TRACKMOUSEEVENT { public uint cbSize, dwFlags; public IntPtr hwndTrack; public uint dwHoverTime; }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern ushort RegisterClassEx(ref WNDCLASSEX clase);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateWindowEx(uint exStyle, string clase, string titulo, uint estilo, int x, int y, int ancho, int alto, IntPtr padre, IntPtr menu, IntPtr instancia, IntPtr param);
+    [DllImport("user32.dll")] private static extern bool DestroyWindow(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr DefWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int comando);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetMessage(out MSG msg, IntPtr hWnd, uint min, uint max);
+    [DllImport("user32.dll")] private static extern bool TranslateMessage(ref MSG msg);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr DispatchMessage(ref MSG msg);
+    [DllImport("user32.dll")] private static extern void PostQuitMessage(int codigo);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern IntPtr SetTimer(IntPtr hWnd, IntPtr id, uint ms, IntPtr fn);
+    [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint clave, byte alfa, uint banderas);
+    [DllImport("user32.dll")] private static extern IntPtr BeginPaint(IntPtr hWnd, out PAINTSTRUCT ps);
+    [DllImport("user32.dll")] private static extern bool EndPaint(IntPtr hWnd, ref PAINTSTRUCT ps);
+    [DllImport("user32.dll")] private static extern int FillRect(IntPtr hdc, ref RECT rc, IntPtr pincel);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int DrawText(IntPtr hdc, string texto, int largo, ref RECT rc, uint formato);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool GetWindowRect(IntPtr hWnd, out RECT rc);
+    [DllImport("user32.dll")] private static extern int SetWindowRgn(IntPtr hWnd, IntPtr region, bool repintar);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr despues, int x, int y, int ancho, int alto, uint banderas);
+    [DllImport("user32.dll")] private static extern bool InvalidateRect(IntPtr hWnd, IntPtr rc, bool borrar);
+    [DllImport("user32.dll")] private static extern bool TrackMouseEvent(ref TRACKMOUSEEVENT e);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern IntPtr LoadCursor(IntPtr instancia, int cursor);
+    [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr contexto);
+
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateRoundRectRgn(int izq, int arriba, int der, int abajo, int anchoElipse, int altoElipse);
+    [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr CreateFont(int alto, int ancho, int escape, int orientacion, int grosor, uint cursiva, uint subrayado, uint tachado, uint juego, uint precision, uint recorte, uint calidad, uint paso, string cara);
+    [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr hdc, IntPtr objeto);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr objeto);
+    [DllImport("gdi32.dll")] private static extern int SetBkMode(IntPtr hdc, int modo);
+    [DllImport("gdi32.dll")] private static extern uint SetTextColor(IntPtr hdc, uint color);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandle(string? nombre);
+
+    private const uint WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000;
+    private const uint WS_POPUP = 0x80000000;
+    private const uint WM_DESTROY = 0x2, WM_PAINT = 0xF, WM_CLOSE = 0x10, WM_MOUSEACTIVATE = 0x21, WM_TIMER = 0x113;
+    private const uint WM_MOUSEMOVE = 0x200, WM_LBUTTONUP = 0x202, WM_MOUSELEAVE = 0x2A3;
+    private const int MA_NOACTIVATE = 3;
+    private const int SW_HIDE = 0, SW_SHOWNOACTIVATE = 4;
+    private const uint LWA_ALPHA = 0x2;
+    private const int TRANSPARENT_BK = 1;
+    private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_SINGLELINE = 0x20, DT_END_ELLIPSIS = 0x8000;
+    private const uint TME_LEAVE = 0x2;
+    private const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_HIDEWINDOW = 0x80;
+    private static readonly IntPtr HWND_TOPMOST = new(-1);
+    private const int IDC_ARROW = 32512;
+
+    private static uint Rgb(int r, int g, int b) => (uint)(r | (g << 8) | (b << 16));
+
+    // ── Medidas ───────────────────────────────────────────────────────────
+
+    /// <summary>Cerrada, sólo iconos; abierta, con su nombre al lado.</summary>
+    private const int ANCHO_CERRADA = 46, ANCHO_ABIERTA = 238;
+    private const int ALTO_CABECERA = 40, ALTO_FILA = 44, AIRE_ABAJO = 8;
+    /// <summary>Separación con el borde derecho de Arena.</summary>
+    private const int MARGEN = 10;
+
+    /// <summary>
+    /// Qué se puede hacer, en orden. Los glifos son de «Segoe MDL2 Assets»:
+    /// descargar, biblioteca, editar, encendido, cerrar.
+    /// </summary>
+    private static readonly Fila[] Filas =
+    [
+        new(Accion.Importar, "", "col_importar"),
+        new(Accion.Coleccion, "", "col_coleccion"),
+        new(Accion.Constructor, "", "col_constructor"),
+        new(Accion.Arranque, "", "col_arranque"),
+        new(Accion.Salir, "", "col_salir"),
+    ];
+
+    private static int Alto => ALTO_CABECERA + Filas.Length * ALTO_FILA + AIRE_ABAJO;
+
+    // El procedimiento en un campo estático a propósito: Windows guarda su
+    // puntero, y si el recolector se llevara el delegado el siguiente mensaje
+    // saltaría a memoria liberada.
+    private static WndProc? procedimiento;
+    private static IntPtr ventana;
+    private static Thread? hilo;
+    private static bool abierta;
+    private static bool siguiendoRaton;
+    private static int filaBajoRaton = -1;
+    private static bool visible;
+    private static Func<Accion, Task>? alPulsar;
+    private static Func<bool>? arrancaSolo;
+    /// <summary>Modo de prueba: se ve aunque Arena no sea la ventana activa (para
+    /// mirarla desde otra ventana). En el residente, nunca.</summary>
+    public static bool SiempreVisible;
+    /// <summary>Modo de prueba: nace abierta y no se cierra al salir el ratón, para fotografiarla
+    /// (Unity recoloca el cursor y una foto con ratón simulado sale siempre cerrada).</summary>
+    public static bool ForzarAbierta;
+
+    /// <summary>
+    /// Arranca la columna en su hilo. <paramref name="pulsar"/> es lo que hace
+    /// cada icono (corre fuera del hilo de la ventana, así que puede tardar);
+    /// <paramref name="arranque"/> dice si el arranque automático está puesto,
+    /// para el texto de ese icono.
+    /// </summary>
+    public static void Iniciar(Func<Accion, Task> pulsar, Func<bool> arranque)
+    {
+        if (hilo is not null) return;
+        alPulsar = pulsar;
+        arrancaSolo = arranque;
+        hilo = new Thread(Correr) { IsBackground = true, Name = "columna" };
+        hilo.Start();
+    }
+
+    /// <summary>La quita. Se puede llamar desde cualquier hilo.</summary>
+    public static void Cerrar()
+    {
+        if (ventana != IntPtr.Zero) PostMessage(ventana, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    /// <summary>Vuelve a pintar (por ejemplo, tras cambiar el arranque automático).</summary>
+    public static void Refrescar()
+    {
+        if (ventana != IntPtr.Zero) InvalidateRect(ventana, IntPtr.Zero, true);
+    }
+
+    private static void Correr()
+    {
+        try
+        {
+            // En píxeles de verdad, como el aviso: sin esto, en una pantalla al
+            // 150 % la columna saldría fuera del borde de Arena.
+            try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { /* Windows viejos */ }
+
+            procedimiento = Procedimiento;
+            var instancia = GetModuleHandle(null);
+            var clase = new WNDCLASSEX
+            {
+                cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
+                lpfnWndProc = Marshal.GetFunctionPointerForDelegate(procedimiento),
+                hInstance = instancia,
+                // La flecha de siempre: sin cursor de clase, Windows deja el que
+                // hubiera (a veces el reloj de arena del arranque).
+                hCursor = LoadCursor(IntPtr.Zero, IDC_ARROW),
+                lpszClassName = "MtgCornerColumna",
+            };
+            RegisterClassEx(ref clase);
+
+            abierta = ForzarAbierta;
+            var anchoInicial = abierta ? ANCHO_ABIERTA : ANCHO_CERRADA;
+            var (x, y, ver) = Donde(anchoInicial);
+            ventana = CreateWindowEx(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+                "MtgCornerColumna", "MTG Corner", WS_POPUP,
+                x, y, anchoInicial, Alto, IntPtr.Zero, IntPtr.Zero, instancia, IntPtr.Zero);
+            if (ventana == IntPtr.Zero) return;
+
+            Recortar(anchoInicial);
+            SetLayeredWindowAttributes(ventana, 0, 236, LWA_ALPHA);
+            SetTimer(ventana, new IntPtr(1), 500, IntPtr.Zero);
+            visible = ver;
+            ShowWindow(ventana, ver ? SW_SHOWNOACTIVATE : SW_HIDE);
+
+            while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
+            {
+                TranslateMessage(ref msg);
+                DispatchMessage(ref msg);
+            }
+        }
+        catch { /* sin escritorio o sin permisos: el residente sigue sin columna */ }
+        finally { ventana = IntPtr.Zero; hilo = null; }
+    }
+
+    private static void Recortar(int ancho) =>
+        SetWindowRgn(ventana, CreateRoundRectRgn(0, 0, ancho + 1, Alto + 1, 14, 14), true);
+
+    /// <summary>La ventana principal de Arena, o cero.</summary>
+    private static IntPtr VentanaDeArena()
+    {
+        try
+        {
+            foreach (var p in Process.GetProcessesByName("MTGA"))
+            {
+                using (p) { if (p.MainWindowHandle != IntPtr.Zero) return p.MainWindowHandle; }
+            }
+        }
+        catch { /* sin permisos para listar procesos */ }
+        return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// Pegada al borde derecho de Arena, en el TERCIO SUPERIOR y no a media
+    /// altura: a media altura, a la derecha, es donde Arena amplía la carta que
+    /// tienes bajo el ratón en la partida, y taparla es lo último que puede
+    /// hacer un accesorio. Y si se ve: sólo con Arena delante (o la propia
+    /// columna, que al pulsarla es lo que hay debajo del ratón) y sin minimizar.
+    /// </summary>
+    private static (int X, int Y, bool Ver) Donde(int ancho)
+    {
+        var arena = VentanaDeArena();
+        if (arena == IntPtr.Zero || IsIconic(arena) || !GetWindowRect(arena, out var r) || r.Right <= r.Left) return (0, 0, false);
+        var delante = GetForegroundWindow();
+        var ver = SiempreVisible || delante == arena || delante == ventana;
+        return (r.Right - ancho - MARGEN, r.Top + (r.Bottom - r.Top) * 18 / 100, ver);
+    }
+
+    private static void Recolocar()
+    {
+        var ancho = abierta ? ANCHO_ABIERTA : ANCHO_CERRADA;
+        var (x, y, ver) = Donde(ancho);
+        if (ver != visible)
+        {
+            visible = ver;
+            if (!ver && !ForzarAbierta) { abierta = false; filaBajoRaton = -1; ancho = ANCHO_CERRADA; }
+        }
+        SetWindowPos(ventana, HWND_TOPMOST, x, y, ancho, Alto, SWP_NOACTIVATE | (ver ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+        Recortar(ancho);
+    }
+
+    /// <summary>La fila bajo un punto de la ventana, o -1.</summary>
+    private static int FilaEn(IntPtr lParam)
+    {
+        var y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
+        var i = (y - ALTO_CABECERA) / ALTO_FILA;
+        return y >= ALTO_CABECERA && i >= 0 && i < Filas.Length ? i : -1;
+    }
+
+    private static IntPtr Procedimiento(IntPtr hWnd, uint mensaje, IntPtr wParam, IntPtr lParam)
+    {
+        switch (mensaje)
+        {
+            case WM_PAINT:
+                Pintar(hWnd);
+                return IntPtr.Zero;
+
+            case WM_TIMER:
+                Recolocar();
+                return IntPtr.Zero;
+
+            // Pulsar la columna NO activa la columna: el teclado y el foco
+            // siguen en el juego.
+            case WM_MOUSEACTIVATE:
+                return new IntPtr(MA_NOACTIVATE);
+
+            case WM_MOUSEMOVE:
+            {
+                if (!siguiendoRaton)
+                {
+                    var seguir = new TRACKMOUSEEVENT { cbSize = (uint)Marshal.SizeOf<TRACKMOUSEEVENT>(), dwFlags = TME_LEAVE, hwndTrack = hWnd };
+                    siguiendoRaton = TrackMouseEvent(ref seguir);
+                }
+                var fila = FilaEn(lParam);
+                var cambia = !abierta || fila != filaBajoRaton;
+                if (!abierta) { abierta = true; Recolocar(); }
+                filaBajoRaton = fila;
+                if (cambia) InvalidateRect(hWnd, IntPtr.Zero, true);
+                return IntPtr.Zero;
+            }
+
+            case WM_MOUSELEAVE:
+                siguiendoRaton = false;
+                if (ForzarAbierta) return IntPtr.Zero;
+                abierta = false;
+                filaBajoRaton = -1;
+                Recolocar();
+                InvalidateRect(hWnd, IntPtr.Zero, true);
+                return IntPtr.Zero;
+
+            case WM_LBUTTONUP:
+            {
+                var fila = FilaEn(lParam);
+                if (fila >= 0 && alPulsar is { } pulsar)
+                {
+                    var accion = Filas[fila].Accion;
+                    // Fuera del hilo de la ventana: lo que hace un icono puede
+                    // tardar (subir la colección), y el bucle de mensajes no
+                    // puede pararse a esperarlo.
+                    _ = Task.Run(async () => { try { await pulsar(accion); } catch { /* lo cuenta quien la lanzó */ } });
+                }
+                return IntPtr.Zero;
+            }
+
+            case WM_CLOSE:
+                DestroyWindow(hWnd);
+                return IntPtr.Zero;
+
+            case WM_DESTROY:
+                PostQuitMessage(0);
+                return IntPtr.Zero;
+        }
+        return DefWindowProc(hWnd, mensaje, wParam, lParam);
+    }
+
+    /// <summary>
+    /// El dibujo: fondo oscuro como el aviso, la marca ámbar arriba, y una fila
+    /// por icono. Abierta, el nombre a la derecha del icono y la fila bajo el
+    /// ratón resaltada.
+    /// </summary>
+    private static void Pintar(IntPtr hWnd)
+    {
+        var hdc = BeginPaint(hWnd, out var ps);
+        var ancho = abierta ? ANCHO_ABIERTA : ANCHO_CERRADA;
+        var fondo = CreateSolidBrush(Rgb(9, 13, 24));
+        var resalte = CreateSolidBrush(Rgb(26, 34, 54));
+        var ambar = CreateSolidBrush(Rgb(245, 158, 11));
+        var glifos = CreateFont(19, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe MDL2 Assets");
+        var marca = CreateFont(12, 0, 0, 0, 800, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        var texto = CreateFont(16, 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        try
+        {
+            var todo = new RECT { Left = 0, Top = 0, Right = ancho, Bottom = Alto };
+            FillRect(hdc, ref todo, fondo);
+            SetBkMode(hdc, TRANSPARENT_BK);
+
+            // La marca: un cuadrado ámbar con «MC», centrado en la parte estrecha.
+            var cuadro = new RECT { Left = 11, Top = 9, Right = 35, Bottom = 33 };
+            FillRect(hdc, ref cuadro, ambar);
+            SelectObject(hdc, marca);
+            SetTextColor(hdc, Rgb(15, 16, 34));
+            DrawText(hdc, "MC", -1, ref cuadro, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            if (abierta)
+            {
+                SetTextColor(hdc, Rgb(252, 211, 77));
+                var rMarca = new RECT { Left = ANCHO_CERRADA + 2, Top = 9, Right = ancho - 10, Bottom = 33 };
+                DrawText(hdc, "MTG CORNER", -1, ref rMarca, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            }
+
+            for (var i = 0; i < Filas.Length; i++)
+            {
+                var arriba = ALTO_CABECERA + i * ALTO_FILA;
+                if (abierta && i == filaBajoRaton)
+                {
+                    var r = new RECT { Left = 4, Top = arriba + 2, Right = ancho - 4, Bottom = arriba + ALTO_FILA - 2 };
+                    FillRect(hdc, ref r, resalte);
+                }
+                SelectObject(hdc, glifos);
+                SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : Rgb(186, 196, 214));
+                var rGlifo = new RECT { Left = 0, Top = arriba, Right = ANCHO_CERRADA, Bottom = arriba + ALTO_FILA };
+                DrawText(hdc, Filas[i].Glifo, -1, ref rGlifo, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+                if (abierta)
+                {
+                    SelectObject(hdc, texto);
+                    SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : Rgb(226, 232, 240));
+                    var rTexto = new RECT { Left = ANCHO_CERRADA + 2, Top = arriba, Right = ancho - 10, Bottom = arriba + ALTO_FILA };
+                    DrawText(hdc, Etiqueta(Filas[i]), -1, ref rTexto, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                }
+            }
+        }
+        finally
+        {
+            EndPaint(hWnd, ref ps);
+            DeleteObject(fondo);
+            DeleteObject(resalte);
+            DeleteObject(ambar);
+            DeleteObject(glifos);
+            DeleteObject(marca);
+            DeleteObject(texto);
+        }
+    }
+
+    /// <summary>El nombre de cada icono; el del arranque dice si está puesto.</summary>
+    private static string Etiqueta(Fila f) =>
+        f.Accion == Accion.Arranque
+            ? Textos.T(arrancaSolo?.Invoke() == true ? "col_arranque_si" : "col_arranque_no")
+            : Textos.T(f.Clave);
+}

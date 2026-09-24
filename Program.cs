@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -301,6 +302,14 @@ internal static class Program
         // web dice en qué idioma se está jugando y manda ése. Ver Textos.cs.
         Textos.EscogerElDeWindows(IdiomaDeWindows());
 
+        // EL ENLACE mtgcorner:// apunta a ESTE ejecutable, esté hoy donde esté
+        // (ver Protocolo.cs). Y si es el enlace quien nos abre, sólo «importar»
+        // hace algo: es el flujo normal de abajo. Lo demás se ignora, que
+        // cualquier web puede poner un enlace así.
+        Protocolo.Registrar();
+        var accion = Protocolo.Accion(args);
+        if (accion is not null && accion != "importar") return 0;
+
         // Modos que no conectan con nada: comprobar el recorte del registro,
         // probar la lectura de la colección y volcar la licencia.
         if (args.Length > 0 && args[0] == "--probar-log") return ProbarLog(args.Skip(1).ToArray());
@@ -320,6 +329,18 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--probar-superposicion")
         {
             Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_guardado", 5343), 8);
+            return 0;
+        }
+        // Ver la columna de iconos sobre Arena sin arrancar el residente. Los
+        // iconos sólo dicen por consola cuál se ha pulsado.
+        if (args.Length > 0 && args[0] == "--probar-columna")
+        {
+            Columna.SiempreVisible = true;
+            Columna.ForzarAbierta = args.Contains("--abierta");
+            Columna.Iniciar(a => { Console.WriteLine($"pulsado: {a}"); return Task.CompletedTask; }, ArrancaSolo);
+            Console.WriteLine("Columna sobre Arena durante 40 s…");
+            await Task.Delay(TimeSpan.FromSeconds(40));
+            Columna.Cerrar();
             return 0;
         }
 
@@ -595,6 +616,12 @@ internal static class Program
     {
         try { ShowWindow(GetConsoleWindow(), 0); } catch { /* SW_HIDE; sin consola, mejor */ }
 
+        // UNO SOLO. Windows lo lanza al iniciar sesión, y desde la 1.10.0 también
+        // se lanza al momento al aceptar el arranque automático: sin esto habría
+        // dos procesos subiendo lo mismo y pintando dos columnas.
+        using var unico = new Mutex(true, @"Local\MtgCornerArenaBridgeResidente", out var primero);
+        if (!primero) return 0;
+
         var vinculo = Vinculo.Leer();
         if (vinculo is null) return 1;   // sin vincular no hay a quién subir
         Textos.Escoger(vinculo.Idioma);
@@ -602,6 +629,42 @@ internal static class Program
         using var http = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(4) };
         http.DefaultRequestHeaders.Add("X-Bridge-Version", VersionPropia);
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculo.Token);
+
+        // Las subidas, de una en una: la del ciclo y la que pide el icono
+        // «Importar ahora» pueden coincidir.
+        var subiendo = new SemaphoreSlim(1, 1);
+        async Task<bool> Subir(CartaColeccion[]? col, string? frag, bool avisar = true)
+        {
+            await subiendo.WaitAsync();
+            try { return await SubirDeFondo(http, col, frag, avisar); }
+            finally { subiendo.Release(); }
+        }
+
+        // LA COLUMNA DE ICONOS SOBRE EL JUEGO (ver Columna.cs): lo que hace cada uno.
+        Columna.Iniciar(async accion =>
+        {
+            switch (accion)
+            {
+                case Columna.Accion.Importar:
+                    await Subir(LectorArena.LeerColeccion(out _), LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta())).Fragmentos);
+                    break;
+                case Columna.Accion.Coleccion:
+                    Abrir(Sitio + RutaWeb("coleccion"));
+                    break;
+                case Columna.Accion.Constructor:
+                    Abrir(Sitio + RutaWeb("constructor"));
+                    break;
+                case Columna.Accion.Arranque:
+                    // Sin lanzar otro residente: éste ya lo es.
+                    Inicio(!ArrancaSolo(), lanzar: false);
+                    Columna.Refrescar();
+                    break;
+                case Columna.Accion.Salir:
+                    Columna.Cerrar();
+                    Environment.Exit(0);
+                    break;
+            }
+        }, ArrancaSolo);
 
         while (true)
         {
@@ -611,14 +674,84 @@ internal static class Program
             // adivinar un plazo. Si no sale, se sube igual lo del log.
             var coleccion = await EsperarColeccion();
             var log = LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta()));
-            if (!await SubirDeFondo(http, coleccion, log.Fragmentos)) return 1;
+            if (!await Subir(coleccion, log.Fragmentos)) return 1;
 
-            while (LectorArena.ArenaAbierto()) await Task.Delay(TimeSpan.FromSeconds(30));
+            /**
+             * DURANTE LA PARTIDA SE VIGILA EL REGISTRO. Cada minuto se relee; si
+             * los mazos han cambiado (la huella de los fragmentos es otra: se
+             * guardó o se editó un mazo, se llevó otro a la cola) se sube, como
+             * mucho una vez cada diez minutos, y SIN aviso encima del juego: a
+             * media partida nadie quiere un recuadro. El aviso se guarda para
+             * cuando se cierra Arena. Antes sólo se subía al abrir y al cerrar,
+             * y un mazo guardado a las nueve no llegaba a la web hasta que se
+             * cerraba el juego a la una.
+             */
+            var huella = Huella(log.Fragmentos);
+            var ultimaSubida = DateTime.UtcNow;
+            var avisoPendiente = false;
+            while (LectorArena.ArenaAbierto())
+            {
+                await Task.Delay(TimeSpan.FromSeconds(60));
+                if (!LectorArena.ArenaAbierto()) break;
+                var ahora = LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta()));
+                var h = Huella(ahora.Fragmentos);
+                if (h == huella || ahora.Fragmentos is null || DateTime.UtcNow - ultimaSubida < TimeSpan.FromMinutes(10)) continue;
+                if (!await Subir(null, ahora.Fragmentos, avisar: false)) return 1;
+                huella = h;
+                ultimaSubida = DateTime.UtcNow;
+                avisoPendiente = true;
+            }
 
+            // Al cerrar: lo que quede por subir; y si ya se subió todo en
+            // partida, sólo el aviso que se aguantó.
             var alCerrar = LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta()));
-            if (alCerrar.Fragmentos is not null && !await SubirDeFondo(http, null, alCerrar.Fragmentos)) return 1;
+            if (alCerrar.Fragmentos is not null && Huella(alCerrar.Fragmentos) != huella)
+            {
+                if (!await Subir(null, alCerrar.Fragmentos)) return 1;
+            }
+            else if (avisoPendiente)
+            {
+                Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_actualizado"));
+            }
         }
     }
+
+    /// <summary>La huella de los fragmentos del registro: igual huella, nada nuevo que subir.</summary>
+    private static string Huella(string? fragmentos) =>
+        fragmentos is null ? "" : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fragmentos)));
+
+    /// <summary>Abre una dirección en el navegador de siempre; si falla, nada.</summary>
+    private static void Abrir(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch { /* sin navegador no hay a dónde ir */ }
+    }
+
+    /// <summary>
+    /// Las páginas de la web a las que lleva la columna, en el idioma del
+    /// vínculo. Las rutas van traducidas (i18n/pathnames.ts en la web), y el
+    /// inglés sin prefijo.
+    /// </summary>
+    private static string RutaWeb(string pagina) => (pagina, Textos.Idioma) switch
+    {
+        ("coleccion", "es") => "/es/coleccion",
+        ("coleccion", "de") => "/de/sammlung",
+        ("coleccion", "fr") => "/fr/collection",
+        ("coleccion", "pt") => "/pt/colecao",
+        ("coleccion", "it") => "/it/collezione",
+        ("coleccion", "ja") => "/ja/collection",
+        ("coleccion", "zh") => "/zh/collection",
+        ("coleccion", _) => "/collection",
+        ("constructor", "es") => "/es/constructor-de-mazos",
+        ("constructor", "de") => "/de/deckbuilder",
+        ("constructor", "fr") => "/fr/constructeur-de-deck",
+        ("constructor", "pt") => "/pt/construtor-de-baralhos",
+        ("constructor", "it") => "/it/costruttore-di-mazzi",
+        ("constructor", "ja") => "/ja/deck-builder",
+        ("constructor", "zh") => "/zh/deck-builder",
+        ("constructor", _) => "/deck-builder",
+        _ => "/",
+    };
 
     /// <summary>
     /// La colección, reintentando mientras Arena siga abierto (hasta cinco
@@ -644,7 +777,7 @@ internal static class Program
     /// despierto: lo demás (sin red, un rechazo, nada que subir) se reintenta en
     /// la siguiente sesión de Arena.
     /// </summary>
-    private static async Task<bool> SubirDeFondo(HttpClient http, CartaColeccion[]? coleccion, string? fragmentos)
+    private static async Task<bool> SubirDeFondo(HttpClient http, CartaColeccion[]? coleccion, string? fragmentos, bool avisar = true)
     {
         if (coleccion is null && fragmentos is null) return true;
 
@@ -652,7 +785,8 @@ internal static class Program
         if (estado == 401) { Vinculo.Borrar(); return false; }
         if (estado != 200 || respuesta?.Pendiente is null) return true;
 
-        Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_pendiente", respuesta.Mazos ?? 0));
+        // `avisar` en falso: a media partida (ver Residente), el aviso se guarda para el cierre.
+        if (avisar) Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_pendiente", respuesta.Mazos ?? 0));
         return true;
     }
 
@@ -677,7 +811,7 @@ internal static class Program
     /// se quita igual de fácil. Windows lo lanza al iniciar sesión y el programa
     /// se queda esperando a que abras Arena.
     /// </summary>
-    private static int Inicio(bool poner)
+    private static int Inicio(bool poner, bool lanzar = true)
     {
         try
         {
@@ -689,6 +823,10 @@ internal static class Program
                 if (exe is null) return 1;
                 clave.SetValue(NombreInicio, "\"" + exe + "\" --residente");
                 Textos.Linea("residente_puesto");
+                // Y AHORA, no en el siguiente inicio de sesión: quien acaba de
+                // decir que sí espera que empiece a funcionar ya. El residente
+                // lleva un Mutex, así que si ya hubiera uno, éste se cierra solo.
+                if (lanzar) LanzarResidente();
             }
             else
             {
@@ -702,6 +840,19 @@ internal static class Program
             Textos.Linea("residente_fallo", ex.Message);
             return 1;
         }
+    }
+
+    /// <summary>Arranca el modo de fondo en este momento, escondido.</summary>
+    private static void LanzarResidente()
+    {
+        try
+        {
+            var exe = Environment.ProcessPath;
+            if (exe is null) return;
+            Process.Start(new ProcessStartInfo(exe, "--residente") { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden });
+            Textos.Linea("residente_lanzado");
+        }
+        catch { /* si no arranca ahora, arrancará con Windows */ }
     }
 
     /// <summary>
