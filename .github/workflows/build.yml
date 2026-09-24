@@ -36,6 +36,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Con historial: el paso de publicar mueve la etiqueta `latest` al
+          # commit de hoy con `git tag -f`, y para eso hace falta el repositorio
+          # de verdad, no una copia sin pasado.
+          fetch-depth: 0
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -100,13 +105,52 @@ jobs:
               --notes "Versión $v. Un único .exe, sin instalar nada: lee tu colección, tus mazos y tus comodines de MTG Arena y los sube a tu cuenta para que elijas qué guardar. GPLv3 — el código está en este repositorio e incluye, en vendor/, el lector de memoria de mtga-tracker-daemon (frcaton). SHA256 en SHA256.txt."
           }
 
+      # EL RELEASE "latest" NO SE BORRA: SE LE CAMBIAN LOS FICHEROS.
+      #
+      # Antes se borraba y se volvía a crear en cada publicación. Dos veces en
+      # un mismo día (2026-09-24) eso dejó el enlace de descarga de la web en
+      # 404: `gh release create` crea el release como BORRADOR, sube los
+      # ficheros y lo publica al final, y si ese último paso no llega —la
+      # etiqueta recién borrada aún no había desaparecido del todo— se queda un
+      # borrador que la URL pública no sirve. Y mientras dura el borrado,
+      # cualquiera que pulse «Descargar» se lleva un 404.
+      #
+      # Ahora el release vive siempre: se sustituyen sus tres ficheros
+      # (`--clobber`), se mueve la etiqueta al commit de hoy y se actualizan las
+      # notas. Sólo si no existe —el primer día, o si alguien lo borró a mano—
+      # se crea. Y se COMPRUEBA al final que la URL que enlaza la web responde:
+      # una publicación que deja el enlace roto tiene que fallar en rojo, no
+      # acabar en verde.
       - name: Publicar en el release "latest"
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = "${{ steps.version.outputs.version }}"
-          gh release delete latest --yes --cleanup-tag 2>$null
-          gh release create latest dist/MtgCornerArenaBridge.exe dist/LICENCIA-GPLv3.txt dist/SHA256.txt `
-            --title "Importar de MTG Arena" `
-            --notes "Versión $v. Un único .exe, sin instalar nada: lee tu colección, tus mazos y tus comodines de MTG Arena y los sube a tu cuenta para que elijas qué guardar. Se recompila en cada cambio; esta etiqueta apunta siempre a la última. GPLv3 — el código está en este repositorio e incluye, en vendor/, el lector de memoria de mtga-tracker-daemon (frcaton). SHA256 en SHA256.txt."
+          $notas = "Versión $v. Un único .exe, sin instalar nada: lee tu colección, tus mazos y tus comodines de MTG Arena y los sube a tu cuenta para que elijas qué guardar. Se recompila en cada cambio; esta etiqueta apunta siempre a la última. GPLv3 — el código está en este repositorio e incluye, en vendor/, el lector de memoria de mtga-tracker-daemon (frcaton). SHA256 en SHA256.txt."
+          if (gh release view latest 2>$null) {
+            gh release upload latest dist/MtgCornerArenaBridge.exe dist/LICENCIA-GPLv3.txt dist/SHA256.txt --clobber
+            gh release edit latest --draft=false --prerelease=false --title "Importar de MTG Arena" --notes $notas
+          } else {
+            gh release create latest dist/MtgCornerArenaBridge.exe dist/LICENCIA-GPLv3.txt dist/SHA256.txt `
+              --title "Importar de MTG Arena" --notes $notas
+          }
+          # La etiqueta, al commit de hoy: el release ya existía y apuntaba al anterior.
+          git tag -f latest
+          git push --force origin latest
+
+      - name: Comprobar que el enlace de la web descarga la versión de hoy
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $url = "https://github.com/${{ github.repository }}/releases/download/latest/MtgCornerArenaBridge.exe"
+          $ok = $false
+          foreach ($intento in 1..12) {
+            try {
+              $r = Invoke-WebRequest -Uri $url -Method Head -MaximumRedirection 5 -ErrorAction Stop
+              if ($r.StatusCode -eq 200) { $ok = $true; break }
+            } catch { }
+            Start-Sleep -Seconds 10
+          }
+          if (-not $ok) { Write-Host "::error::$url sigue sin responder 200 dos minutos después de publicar: el botón de descargar de la web está roto."; exit 1 }
+          Write-Host "Descarga en marcha: $url (v$v)"

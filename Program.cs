@@ -56,6 +56,19 @@ internal static class Program
     /// </summary>
     private const string ReleasesApi = "https://api.github.com/repos/lestelor/mtgcorner-arena-bridge/releases?per_page=20";
     private static readonly string PaginaDescarga = Sitio + "/importar-arena";
+
+    /// <summary>
+    /// POR DÓNDE PREGUNTA EL PROGRAMA A LA WEB (nombre de una carta, cartas
+    /// parecidas). Las mismas rutas existen en <c>/api/puente/…</c>, pero el
+    /// cortafuegos de Vercel (modo Challenge) devuelve un 429 «Security
+    /// Checkpoint» a todo lo que no es un navegador, y al programa sólo se le
+    /// abrió paso por el prefijo <c>/api/mtga-device/…</c>, donde ya vincula el
+    /// ordenador. Visto el 2026-09-24: con la 1.11.1 la columna nunca ofrecía
+    /// «Cartas similares a…» porque el nombre no llegaba. Lo que se abre EN EL
+    /// NAVEGADOR (<c>Abrir(...)</c>) sigue yendo por <c>/api/puente</c>: el
+    /// navegador sí pasa el desafío.
+    /// </summary>
+    private const string PuertaDevice = "/api/mtga-device";
     private static readonly JsonSerializerOptions JsonOpciones = new(JsonSerializerDefaults.Web);
 
     /// <summary>La versión de este ejecutable (&lt;Version&gt; del .csproj).</summary>
@@ -355,6 +368,27 @@ internal static class Program
             Console.WriteLine("Columna sobre Arena durante 40 s…");
             await Task.Delay(TimeSpan.FromSeconds(40));
             Columna.Cerrar();
+            return 0;
+        }
+        // Preguntar a la web cómo se llama una carta EXACTAMENTE como lo hace el
+        // residente (mismo cliente, mismas cabeceras, mismo token), y contar qué
+        // vuelve: estado, tipo de contenido y el cuerpo. Para cuando la columna
+        // no ofrece nada y hay que saber si es la web o el cortafuegos.
+        if (args.Length > 0 && args[0] == "--probar-nombre")
+        {
+            var v = Vinculo.Leer();
+            using var h = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(1) };
+            h.DefaultRequestHeaders.Add("X-Bridge-Version", VersionPropia);
+            if (v is not null) h.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", v.Token);
+            var grpPrueba = args.Length > 1 ? args[1] : "58437";
+            try
+            {
+                var r = await h.GetAsync($"{PuertaDevice}/carta/{grpPrueba}");
+                var cuerpo = await r.Content.ReadAsStringAsync();
+                Console.WriteLine($"HTTP {(int)r.StatusCode} | {r.Content.Headers.ContentType} | vínculo={(v is null ? "no" : "sí")}");
+                Console.WriteLine(cuerpo.Length > 300 ? cuerpo[..300] + "…" : cuerpo);
+            }
+            catch (Exception ex) { Console.WriteLine("EXCEPCIÓN: " + ex.GetType().Name + ": " + ex.Message); }
             return 0;
         }
         // Ver el panel de cartas encima de Arena sin jugar: con el arena_id que
@@ -760,6 +794,10 @@ internal static class Program
          */
         var nombres = new Dictionary<int, string>();
         var pidiendo = new HashSet<int>();
+        // Cuándo se puede volver a preguntar por una carta cuya consulta FALLÓ
+        // (red, cortafuegos, la web caída). Sin esto, un tropiezo la marcaba
+        // «desconocida» para toda la sesión y la columna se quedaba muda.
+        var reintentar = new Dictionary<int, DateTime>();
         void ActualizarColumna()
         {
             var filas = new List<(Columna.Accion, string, string)>();
@@ -780,7 +818,7 @@ internal static class Program
                 string? nombre;
                 lock (nombres) nombres.TryGetValue(grp, out nombre);
                 if (nombre is null) { _ = NombrarCarta(grp); }
-                else if (nombre.Length == 0) { /* preguntada y desconocida */ }
+                else if (nombre.Length == 0) { /* preguntada y de verdad desconocida (404) */ }
                 // El dato lleva las DOS caras si la carta está transformada
                 // («96052:96051»): sólo la frontal existe en Scryfall.
                 else
@@ -796,22 +834,55 @@ internal static class Program
         }
         async Task NombrarCarta(int grp)
         {
-            lock (pidiendo) { if (!pidiendo.Add(grp)) return; }
+            lock (pidiendo)
+            {
+                if (pidiendo.Contains(grp)) return;
+                // Falló hace poco: se espera antes de volver a molestar.
+                if (reintentar.TryGetValue(grp, out var cuando) && cuando > DateTime.UtcNow) return;
+                pidiendo.Add(grp);
+            }
             try
             {
-                var c = await http.GetFromJsonAsync<CartaPuente>($"/api/puente/carta/{grp}{Caras(Contexto.CartaOtraCara)}", JsonOpciones);
-                // Cadena vacía = preguntada y no hay manera de saberlo (una
-                // ficha, un emblema, una carta demasiado nueva). Se recuerda
-                // igual, que si no se preguntaría por ella cada segundo.
-                lock (nombres) nombres[grp] = c?.Nombre is { Length: > 0 } n ? n : "";
-                if (Contexto.Carta == grp) ActualizarColumna();
+                // /api/mtga-device/…, no /api/puente/…: el cortafuegos de Vercel
+                // sólo deja pasar al programa por ese prefijo (ver PuertaDevice).
+                using var r = await http.GetAsync($"{PuertaDevice}/carta/{grp}{Caras(Contexto.CartaOtraCara)}");
+                if (r.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    /**
+                     * SÓLO EL 404 ES «DESCONOCIDA»: la web miró y no existe (una
+                     * ficha, un emblema, una carta demasiado nueva). Eso sí se
+                     * recuerda para toda la sesión, que si no se preguntaría
+                     * por ella cada segundo.
+                     *
+                     * CUALQUIER OTRO FALLO ES «AHORA NO SE PUEDE»: sin red, la web
+                     * caída o —lo que pasó el 2026-09-24— el cortafuegos de
+                     * Vercel devolviendo un 429 de desafío a todo lo que no es
+                     * un navegador. Antes esto también marcaba la carta como
+                     * desconocida y la columna se quedaba sin filas hasta
+                     * reiniciar; ahora se vuelve a intentar al minuto.
+                     */
+                    lock (nombres) nombres[grp] = "";
+                }
+                else if (r.IsSuccessStatusCode)
+                {
+                    var c = await r.Content.ReadFromJsonAsync<CartaPuente>(JsonOpciones);
+                    if (c?.Nombre is { Length: > 0 } n) { lock (nombres) nombres[grp] = n; }
+                    else { lock (pidiendo) reintentar[grp] = DateTime.UtcNow.AddMinutes(1); }
+                }
+                else
+                {
+                    lock (pidiendo) reintentar[grp] = DateTime.UtcNow.AddMinutes(1);
+                }
             }
             catch
             {
-                lock (nombres) nombres[grp] = "";
+                lock (pidiendo) reintentar[grp] = DateTime.UtcNow.AddMinutes(1);
+            }
+            finally
+            {
+                lock (pidiendo) pidiendo.Remove(grp);
                 if (Contexto.Carta == grp) ActualizarColumna();
             }
-            finally { lock (pidiendo) pidiendo.Remove(grp); }
         }
         Contexto.Cambio += ActualizarColumna;
         Contexto.Iniciar(Path.Combine(LogArena.Carpeta(), "Player.log"));
@@ -914,7 +985,7 @@ internal static class Program
         {
             var (cara, otra) = Caras(arena);
             var datos = await http.GetFromJsonAsync<RespuestaSimilares>(
-                $"/api/puente/similares?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}", JsonOpciones);
+                $"{PuertaDevice}/similares?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}", JsonOpciones);
             var lista = datos?.Cartas ?? [];
             if (lista.Length == 0) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("panel_nada")); return true; }
 
