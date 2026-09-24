@@ -61,8 +61,12 @@ internal static class Contexto
     // escape dentro del nombre (\" o \), y se desescapa después.
     private static readonly Regex NombreMazo = new(@"\\\x22Name\\\x22:\\\x22((?:[^\x22\\]|\\.)*?)\\\x22", RegexOptions.Compiled);
     // Hasta `othersideGrpId` si lo hay, sin salirse del objeto: `[^{]` frena en
-    // cuanto empieza el siguiente, que es lo que separa uno de otro.
-    private static readonly Regex Objeto = new(@"""instanceId"":\s*(\d+),\s*""grpId"":\s*(\d+)(?:[^{]*?""othersideGrpId"":\s*(\d+))?", RegexOptions.Compiled);
+    // cuanto empieza el siguiente, que es lo que separa uno de otro. Y ACOTADO
+    // a 400 caracteres: sin tope, en una línea de estado con cientos de objetos
+    // la parte opcional hace retroceder al motor una y otra vez y la lectura
+    // pasa de instantánea a insoportable. `othersideGrpId` va siempre cerca del
+    // principio del objeto.
+    private static readonly Regex Objeto = new(@"""instanceId"":\s*(\d+),\s*""grpId"":\s*(\d+)(?:[^{]{0,400}?""othersideGrpId"":\s*(\d+))?", RegexOptions.Compiled);
     private static readonly Regex BajoRaton = new(@"""onHover"":\s*\{\s*""objectId"":\s*(\d+)", RegexOptions.Compiled);
     private const string PrefijoPrecon = "?=?Loc/";
 
@@ -70,7 +74,22 @@ internal static class Contexto
     private static readonly Dictionary<int, (int Grp, int? Otra)> objetos = new();
     private static string? fichero;
     private static long posicion;
+    private static bool estrenando = true;
     private static Thread? hilo;
+
+    /// <summary>
+    /// CUÁNTO SE MIRA HACIA ATRÁS AL EMPEZAR.
+    ///
+    /// El registro de una sesión larga pasa de los 35 MB, y leerlo entero al
+    /// arrancar es medio minuto de trabajo, cientos de megas de memoria y la
+    /// columna sin enterarse de nada mientras tanto (le pasó al usuario el
+    /// 2026-09-24: el programa en 630 MB y sin ofrecer similares). No hace
+    /// falta: lo único que se busca es lo de AHORA —el mazo de la cola, los
+    /// objetos de la mesa, la carta bajo el ratón—, y eso cabe de sobra en el
+    /// último medio mega, porque Arena reescribe el estado entero de la partida
+    /// cada dos por tres.
+    /// </summary>
+    private const long COLA_AL_EMPEZAR = 4 * 1024 * 1024;
 
     /// <summary>Empieza a vigilar ese fichero (aunque todavía no exista). Una vez.</summary>
     public static void Iniciar(string rutaLog)
@@ -102,6 +121,12 @@ internal static class Contexto
             objetos.Clear();
             Cambiar(null, null, null, false);
         }
+        if (estrenando)
+        {
+            // Sólo la cola: ver COLA_AL_EMPEZAR.
+            estrenando = false;
+            posicion = Math.Max(0, fs.Length - COLA_AL_EMPEZAR);
+        }
         if (fs.Length == posicion) return;
         fs.Seek(posicion, SeekOrigin.Begin);
         using var sr = new StreamReader(fs, System.Text.Encoding.UTF8);
@@ -124,9 +149,18 @@ internal static class Contexto
             {
                 foreach (Match m in Objeto.Matches(linea))
                 {
-                    // Sin límite crecería toda la partida; las instancias viejas no
-                    // vuelven a señalarse.
-                    if (objetos.Count > 5000) objetos.Clear();
+                    /**
+                     * VACIARLO ENTERO ERA PEOR QUE NO TENER TOPE.
+                     *
+                     * Con 5.000 objetos se limpiaba de golpe, y como el número
+                     * que llega al señalar una carta es el de la INSTANCIA en
+                     * la mesa —creada a lo mejor diez turnos antes—, después de
+                     * cada limpieza el juego tenía que volver a describirla
+                     * para poder reconocerla. Mientras tanto, la columna no
+                     * ofrecía nada. Cincuenta mil caben en un megabyte largo y
+                     * el vaciado de verdad es el del final de la partida.
+                     */
+                    if (objetos.Count > 50000) objetos.Clear();
                     int? otra = m.Groups[3].Success ? int.Parse(m.Groups[3].Value) : null;
                     objetos[int.Parse(m.Groups[1].Value)] = (int.Parse(m.Groups[2].Value), otra);
                 }
