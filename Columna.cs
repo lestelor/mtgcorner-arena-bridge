@@ -36,7 +36,7 @@ namespace MtgCornerArenaBridge;
 /// </summary>
 internal static class Columna
 {
-    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos }
+    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen }
 
     /// <summary>Una fila. Las de contexto traen su etiqueta hecha y un dato (nombre del mazo, id de la carta).</summary>
     private sealed record Fila(Accion Accion, string Glifo, string Clave, string? Dato = null, string? Etiqueta = null);
@@ -257,6 +257,9 @@ internal static class Columna
         Accion.Mejorar => "\uE735",
         Accion.Similares => "\uE8C8",
         Accion.Combos => "\uE71B",
+        Accion.Amenaza => "\uE7BA",
+        Accion.Sinergias => "\uE945",
+        Accion.Resumen => "\uE7C3",
         _ => "",
     };
 

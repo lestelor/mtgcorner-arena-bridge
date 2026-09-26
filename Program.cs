@@ -391,6 +391,24 @@ internal static class Program
             catch (Exception ex) { Console.WriteLine("EXCEPCIÓN: " + ex.GetType().Name + ": " + ex.Message); }
             return 0;
         }
+        // Preguntar por las amenazas de una mesa dada por NOMBRES, como lo haría
+        // el residente con los arena_id de la mesa del rival, y enseñar lo que
+        // vuelve: sirve para comprobar la puerta y el formato sin una partida.
+        if (args.Length > 0 && args[0] == "--probar-amenazas")
+        {
+            using var h = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(1) };
+            h.DefaultRequestHeaders.Add("X-Bridge-Version", VersionPropia);
+            var nombresMesa = args.Length > 1 ? string.Join(",", args.Skip(1)) : "Thassa's Oracle,Demonic Consultation";
+            try
+            {
+                var r = await h.GetFromJsonAsync<RespuestaAmenazas>($"{PuertaDevice}/amenazas?nombres={Uri.EscapeDataString(nombresMesa)}&idioma={Textos.Idioma}", JsonOpciones);
+                foreach (var c in r?.Listos ?? []) Console.WriteLine($"LISTO  {c.Resultado} | {string.Join(" + ", (c.Piezas ?? []).Select(p => p.Nombre + (p.EnMesa ? " (en mesa)" : "")))} | {c.Url}");
+                foreach (var c in (r?.Casi ?? []).Take(3)) Console.WriteLine($"CASI   {c.Resultado} | {string.Join(" + ", (c.Piezas ?? []).Select(p => p.Nombre + (p.EnMesa ? " (en mesa)" : "")))}");
+                Console.WriteLine($"({(r?.Listos ?? []).Length} listos, {(r?.Casi ?? []).Length} casi)");
+            }
+            catch (Exception ex) { Console.WriteLine("EXCEPCIÓN: " + ex.Message); }
+            return 0;
+        }
         // Ver el panel de cartas encima de Arena sin jugar: con el arena_id que
         // se le pase, o el de una carta cualquiera de la partida de pruebas.
         if (args.Length > 0 && args[0] == "--probar-panel")
@@ -410,8 +428,16 @@ internal static class Program
         // mazo actual, carta bajo el ratón, si hay partida. Sesenta segundos.
         if (args.Length > 0 && args[0] == "--probar-contexto")
         {
-            Contexto.Cambio += () => Console.WriteLine($"{DateTime.Now:HH:mm:ss}  mazo={Contexto.Mazo ?? "-"}  tu carta={Contexto.Carta?.ToString() ?? "-"}  rival mira={Contexto.RivalMira?.ToString() ?? "-"}  partida={Contexto.EnPartida}");
-            Contexto.Iniciar(Path.Combine(LogArena.Carpeta(), "Player.log"));
+            Contexto.Cambio += () => Console.WriteLine($"{DateTime.Now:HH:mm:ss}  mazo={Contexto.Mazo ?? "-"}  tu carta={Contexto.Carta?.ToString() ?? "-"}  rival mira={Contexto.RivalMira?.ToString() ?? "-"}  colores={(Contexto.MisColores.Length > 0 ? Contexto.MisColores : "-")}  mesa rival=[{string.Join(",", Contexto.MesaRival)}]  formato={Contexto.Formato ?? "-"}{(Contexto.Edicion is { } ed ? "/" + ed : "")}  partida={Contexto.EnPartida}");
+            Contexto.PartidaAcabada += () =>
+            {
+                Console.WriteLine($"PARTIDA ACABADA: gané={Contexto.UltimaPartida?.Gane} razón={Contexto.UltimaPartida?.Razon} turnos={Contexto.UltimaPartida?.Turnos.Count}");
+                foreach (var t in Contexto.UltimaPartida?.Turnos ?? [])
+                    Console.WriteLine($"  T{t.N} {t.Activo}  vida {t.VidaYo?.ToString() ?? "?"}/{t.VidaRival?.ToString() ?? "?"}  yo=[{string.Join(",", t.JugadasYo)}] rival=[{string.Join(",", t.JugadasRival)}]  daño a mí {t.DanoAYo} al rival {t.DanoARival}");
+            };
+            // Con un segundo argumento se vigila otro fichero (un Player-prev.log
+            // con partidas acabadas, para probar la cronología sin jugar una).
+            Contexto.Iniciar(args.Length > 1 ? args[1] : Path.Combine(LogArena.Carpeta(), "Player.log"));
             Console.WriteLine("Vigilando el registro durante 60 s…");
             await Task.Delay(TimeSpan.FromSeconds(60));
             return 0;
@@ -795,6 +821,33 @@ internal static class Program
                         }
                     }
                     break;
+                case Columna.Accion.Sinergias:
+                    if (dato is not null)
+                    {
+                        Columna.EnCurso(dato);
+                        bool hechoSin;
+                        try { hechoSin = await PanelSinergias(http, dato); }
+                        finally { Columna.EnCurso(null); }
+                        if (!hechoSin)
+                        {
+                            var (cara, otraCara) = Caras(dato);
+                            Abrir($"{Sitio}/api/puente/carta/{cara}?abrir=sinergias&idioma={Textos.Idioma}{otraCara}");
+                        }
+                    }
+                    break;
+                case Columna.Accion.Resumen:
+                    Columna.EnCurso("resumen");
+                    try { await PanelResumen(http); }
+                    finally { Columna.EnCurso(null); }
+                    break;
+                case Columna.Accion.Amenaza:
+                    if (dato is not null && int.TryParse(dato.Replace("amenaza:", ""), out var indiceAmenaza))
+                    {
+                        Columna.EnCurso(dato);
+                        try { await PanelAmenaza(indiceAmenaza); }
+                        finally { Columna.EnCurso(null); }
+                    }
+                    break;
                 case Columna.Accion.Salir:
                     Columna.Cerrar();
                     Environment.Exit(0);
@@ -845,9 +898,21 @@ internal static class Program
                     var cual = Contexto.CartaOtraCara is { } otra ? $"{grp}:{otra}" : grp.ToString();
                     filas.Add((Columna.Accion.Similares, cual, Textos.T("col_similares", nombre)));
                     filas.Add((Columna.Accion.Combos, cual, Textos.T("col_combos", nombre)));
-                    // Y POR ADELANTADO: similares y combos de esa carta, con sus
-                    // imágenes, antes de que nadie pulse nada (ver Precalentar).
+                    filas.Add((Columna.Accion.Sinergias, cual, Textos.T("col_sinergias", nombre)));
+                    // Y POR ADELANTADO: similares, combos y sinergias de esa carta,
+                    // con sus imágenes, antes de que nadie pulse nada (ver Precalentar).
                     _ = Precalentar(http, cual);
+                }
+            }
+            // Las amenazas del rival, primero: si tiene un combo montado es lo
+            // más urgente que puede decir la columna.
+            lock (Amenazas)
+            {
+                for (var i = 0; i < Amenazas.Count; i++)
+                {
+                    var (combo, lista) = Amenazas[i];
+                    filas.Insert(0, (Columna.Accion.Amenaza, $"amenaza:{i}",
+                        Textos.T(lista ? "col_amenaza" : "col_amenaza_casi", combo.Resultado ?? "")));
                 }
             }
             // Lo que mira el rival, dicho como tal: es lo único que el registro
@@ -863,6 +928,9 @@ internal static class Program
                     filas.Add((Columna.Accion.Similares, cual, Textos.T("col_rival_mira", nombreRival)));
                 }
             }
+            // Al acabar una partida, el resumen por IA se queda ofrecido hasta que
+            // empieza la siguiente.
+            if (partidaPendiente is not null && !Contexto.EnPartida) filas.Add((Columna.Accion.Resumen, "resumen", Textos.T("col_resumen")));
             Columna.FilasDeContexto(filas.ToArray());
         }
         async Task NombrarCarta(int grp, int? otraCara)
@@ -918,6 +986,14 @@ internal static class Program
             }
         }
         Contexto.Cambio += ActualizarColumna;
+        Contexto.Cambio += () => VigilarAmenazas(http, ActualizarColumna);
+        Contexto.Cambio += () => { if (Contexto.EnPartida) partidaPendiente = null; };
+        Contexto.PartidaAcabada += () =>
+        {
+            partidaPendiente = Contexto.UltimaPartida;
+            Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_resumen"), 8);
+            ActualizarColumna();
+        };
         Contexto.Iniciar(Path.Combine(LogArena.Carpeta(), "Player.log"));
 
         // Lo acaba de lanzar una ejecución normal, que ya ha subido: la primera
@@ -1044,30 +1120,210 @@ internal static class Program
                 {
                     var d = await Combos(http, arena);
                     if (d?.Combos is { } cs) await Task.WhenAll(cs.SelectMany(x => x.Piezas ?? []).Select(p => BajarImagen(p.Imagen)));
+                }),
+                Task.Run(async () =>
+                {
+                    var d = await Sinergias(http, arena);
+                    if (d?.Grupos is { } gs) await Task.WhenAll(gs.SelectMany(x => x.Cartas ?? []).Select(c => BajarImagen(c.Imagen)));
                 }));
         }
         catch { /* si no se pudo calentar, al pulsar se pide como siempre */ }
         finally { lock (Calentando) Calentando.Remove(arena); }
     }
 
+    /// <summary>
+    /// Los colores que juegas, como parámetro: las parecidas que se aconsejan
+    /// —también las de la carta del rival— tienen que ser jugables con tus
+    /// tierras. Va en la clave de la caché porque cambia según se ven cartas.
+    /// </summary>
+    private static string Colores() => Contexto.MisColores.Length > 0 ? $"&colores={Contexto.MisColores}" : "";
+
+    /// <summary>
+    /// LO QUE SE ESTÁ JUGANDO, como parámetros: el formato del mazo de la cola
+    /// («standard», «alchemy», «brawl»…) y, en Limitado, la edición del evento.
+    /// Con esto las parecidas, los combos y las amenazas son del juego que hay,
+    /// no de todo Magic (pedido del usuario el 2026-09-26).
+    /// </summary>
+    private static string Juego()
+    {
+        var p = "";
+        if (Contexto.Formato is { Length: > 0 } f) p += $"&formato={Uri.EscapeDataString(f)}";
+        if (Contexto.Edicion is { Length: > 0 } e) p += $"&edicion={Uri.EscapeDataString(e)}";
+        return p;
+    }
+
     private static async Task<RespuestaSimilares?> Similares(HttpClient http, string arena)
     {
-        lock (SimilaresListos) { if (SimilaresListos.TryGetValue(arena, out var ya)) return ya; }
+        var clave = arena + Colores() + Juego();
+        lock (SimilaresListos) { if (SimilaresListos.TryGetValue(clave, out var ya)) return ya; }
         var (cara, otra) = Caras(arena);
         var d = await http.GetFromJsonAsync<RespuestaSimilares>(
-            $"{PuertaDevice}/similares?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}", JsonOpciones);
-        if (d is not null) lock (SimilaresListos) SimilaresListos[arena] = d;
+            $"{PuertaDevice}/similares?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}{Colores()}{Juego()}", JsonOpciones);
+        if (d is not null) lock (SimilaresListos) SimilaresListos[clave] = d;
         return d;
     }
 
     private static async Task<RespuestaCombos?> Combos(HttpClient http, string arena)
     {
-        lock (CombosListos) { if (CombosListos.TryGetValue(arena, out var ya)) return ya; }
+        var clave = arena + Juego();
+        lock (CombosListos) { if (CombosListos.TryGetValue(clave, out var ya)) return ya; }
         var (cara, otra) = Caras(arena);
         var d = await http.GetFromJsonAsync<RespuestaCombos>(
-            $"{PuertaDevice}/combos?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}", JsonOpciones);
-        if (d is not null) lock (CombosListos) CombosListos[arena] = d;
+            $"{PuertaDevice}/combos?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}{Juego()}", JsonOpciones);
+        if (d is not null) lock (CombosListos) CombosListos[clave] = d;
         return d;
+    }
+
+    private static readonly Dictionary<string, RespuestaSinergias> SinergiasListas = new();
+
+    private static async Task<RespuestaSinergias?> Sinergias(HttpClient http, string arena)
+    {
+        lock (SinergiasListas) { if (SinergiasListas.TryGetValue(arena, out var ya)) return ya; }
+        var (cara, otra) = Caras(arena);
+        var d = await http.GetFromJsonAsync<RespuestaSinergias>(
+            $"{PuertaDevice}/sinergias?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}", JsonOpciones);
+        if (d is not null) lock (SinergiasListas) SinergiasListas[arena] = d;
+        return d;
+    }
+
+    /// <summary>
+    /// EL PANEL DE SINERGIAS: una sección por regla («las que aprovechan la vida
+    /// que da», «las que le dan auras»), con sus cartas. En Estándar de Arena es
+    /// lo que más hay: pocos combos de libro, muchas cartas que se pagan entre sí.
+    /// </summary>
+    private static async Task<bool> PanelSinergias(HttpClient http, string arena)
+    {
+        try
+        {
+            var datos = await Sinergias(http, arena);
+            var grupos = datos?.Grupos ?? [];
+            if (grupos.Length == 0) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("panel_sin_sinergias")); return true; }
+            var secciones = new List<PanelCartas.Seccion>();
+            foreach (var g in grupos)
+            {
+                var bajadas = await Task.WhenAll((g.Cartas ?? []).Select(async c => (Carta: c, Fichero: await BajarImagen(c.Imagen))));
+                var cartas = bajadas.Where(b => b.Fichero is not null)
+                    .Select(b => new PanelCartas.Carta(b.Carta.Nombre ?? "", b.Fichero!, b.Carta.Ruta, b.Carta.PrecioUsd)).ToArray();
+                if (cartas.Length == 0) continue;
+                secciones.Add(new PanelCartas.Seccion(Textos.T(g.Sentido == "dan" ? "panel_sin_dan" : "panel_sin_pagan", g.Regla ?? ""), null, cartas));
+            }
+            if (secciones.Count == 0) return false;
+            PanelCartas.AlAbrir = AbrirDelPanel;
+            PanelCartas.Mostrar(Textos.T("col_sinergias", datos?.Fuente?.Nombre ?? Textos.T("col_esta_carta")), secciones);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// EL RESUMEN DE LA PARTIDA, POR IA. Al acabar una partida, el vigía deja su
+    /// cronología en Contexto.UltimaPartida; se manda a la web con el token del
+    /// programa y lo que vuelve —por qué se ganó o perdió, qué no había que
+    /// hacer, qué hacer la próxima vez— se enseña como texto encima del juego.
+    /// Pedido del usuario el 2026-09-26: «críticas constructivas para aprender».
+    /// </summary>
+    private static Contexto.Partida? partidaPendiente;
+
+    private static async Task<bool> PanelResumen(HttpClient http)
+    {
+        var partida = partidaPendiente;
+        if (partida is null) return false;
+        try
+        {
+            var envio = new PartidaEnvio(partida.Formato, partida.Mazo, partida.Gane, partida.Razon,
+                partida.Turnos.Select(t => new TurnoEnvio(t.N, t.Activo, t.VidaYo, t.VidaRival, [.. t.JugadasYo], [.. t.JugadasRival], t.DanoAYo, t.DanoARival)).ToArray());
+            using var r = await http.PostAsJsonAsync($"{PuertaDevice}/resumen", new { idioma = Textos.Idioma, partida = envio }, JsonOpciones);
+            if (!r.IsSuccessStatusCode) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_resumen_fallo")); return true; }
+            var d = await r.Content.ReadFromJsonAsync<RespuestaResumen>(JsonOpciones);
+            if (d?.Texto is not { Length: > 0 } texto) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_resumen_fallo")); return true; }
+            PanelCartas.AlAbrir = AbrirDelPanel;
+            PanelCartas.MostrarTexto(Textos.T("col_resumen"), texto);
+            return true;
+        }
+        catch
+        {
+            Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_resumen_fallo"));
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// LAS AMENAZAS DEL RIVAL. Cada vez que cambia su mesa (Contexto.MesaRival),
+    /// tras dos segundos de calma se pregunta a la web qué combos tiene ya
+    /// montados y a cuáles le falta una carta. Los nuevos se AVISAN una vez
+    /// encima del juego y se quedan como filas en la columna, que abren un
+    /// panel con las piezas. Pedido del usuario el 2026-09-25: «detectar
+    /// combinaciones que hacen combos del contrincante y que avise».
+    /// </summary>
+    private static readonly List<(AmenazaPuente Combo, bool Lista)> Amenazas = new();
+    private static readonly HashSet<string> Avisadas = new();
+    private static CancellationTokenSource? esperaAmenazas;
+    private static string mesaRevisada = "";
+
+    private static void VigilarAmenazas(HttpClient http, Action alCambiar)
+    {
+        var mesa = string.Join(",", Contexto.MesaRival);
+        if (mesa == mesaRevisada) return;
+        if (!Contexto.EnPartida || Contexto.MesaRival.Length == 0)
+        {
+            // Partida acabada o mesa vacía: se olvida todo para la siguiente.
+            mesaRevisada = mesa;
+            lock (Amenazas) { Amenazas.Clear(); Avisadas.Clear(); }
+            alCambiar();
+            return;
+        }
+        esperaAmenazas?.Cancel();
+        var cts = esperaAmenazas = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(2000, cts.Token);
+                mesaRevisada = mesa;
+                var r = await http.GetFromJsonAsync<RespuestaAmenazas>(
+                    $"{PuertaDevice}/amenazas?ids={Uri.EscapeDataString(mesa)}&idioma={Textos.Idioma}{Juego()}", JsonOpciones, cts.Token);
+                var nuevas = new List<(AmenazaPuente, bool)>();
+                foreach (var c in r?.Listos ?? []) nuevas.Add((c, true));
+                foreach (var c in (r?.Casi ?? []).Take(2)) nuevas.Add((c, false));
+                (AmenazaPuente Combo, bool Lista)? avisar = null;
+                lock (Amenazas)
+                {
+                    Amenazas.Clear();
+                    Amenazas.AddRange(nuevas.Take(3));
+                    foreach (var n in nuevas)
+                        if (n.Item1.Id is { } id && Avisadas.Add(id) && avisar is null) avisar = n;
+                }
+                if (avisar is { } a)
+                {
+                    var piezas = string.Join(" + ", (a.Combo.Piezas ?? []).Select(p => p.Nombre));
+                    Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"),
+                        Textos.T(a.Lista ? "sup_amenaza" : "sup_amenaza_casi", piezas, a.Combo.Resultado ?? ""), 8);
+                }
+                alCambiar();
+            }
+            catch { /* cancelado o sin red: a la siguiente */ }
+        });
+    }
+
+    /// <summary>El panel de una amenaza: sus piezas, y en el rótulo qué hay en la mesa y qué le falta.</summary>
+    private static async Task<bool> PanelAmenaza(int indice)
+    {
+        (AmenazaPuente Combo, bool Lista) a;
+        lock (Amenazas) { if (indice < 0 || indice >= Amenazas.Count) return false; a = Amenazas[indice]; }
+        var piezas = a.Combo.Piezas ?? [];
+        var bajadas = await Task.WhenAll(piezas.Select(async p => (Pieza: p, Fichero: await BajarImagen(p.Imagen))));
+        var cartas = bajadas.Where(b => b.Fichero is not null)
+            .Select(b => new PanelCartas.Carta(b.Pieza.Nombre ?? "", b.Fichero!, b.Pieza.Ruta, b.Pieza.PrecioUsd)).ToArray();
+        if (cartas.Length == 0) return false;
+        var enMesa = string.Join(", ", piezas.Where(p => p.EnMesa).Select(p => p.Nombre));
+        var faltan = string.Join(", ", piezas.Where(p => !p.EnMesa).Select(p => p.Nombre));
+        var rotulo = faltan.Length > 0
+            ? Textos.T("panel_mesa_falta", a.Combo.Resultado ?? "", enMesa, faltan)
+            : Textos.T("panel_mesa", a.Combo.Resultado ?? "", enMesa);
+        PanelCartas.AlAbrir = AbrirDelPanel;
+        PanelCartas.Mostrar(Textos.T(a.Lista ? "col_amenaza" : "col_amenaza_casi", a.Combo.Resultado ?? ""),
+            [new PanelCartas.Seccion(rotulo, a.Combo.Url, cartas)]);
+        return true;
     }
 
     /// <summary>Abre una ruta del panel: las de la web son relativas; las de Commander Spellbook, absolutas.</summary>
@@ -1137,7 +1393,7 @@ internal static class Program
             if (secciones.Count == 0) return false;
 
             PanelCartas.AlAbrir = AbrirDelPanel;
-            PanelCartas.Mostrar(Textos.T("col_combos", datos?.Fuente?.Nombre ?? Textos.T("col_esta_carta")), secciones, compacto: true);
+            PanelCartas.Mostrar(Textos.T("col_combos", datos?.Fuente?.Nombre ?? Textos.T("col_esta_carta")), secciones);
             return true;
         }
         catch
@@ -2197,6 +2453,55 @@ internal sealed record RespuestaEstado(
 
 /// <summary>La respuesta de /api/mtga-import: con el paso de revisión, <c>pendiente</c>
 /// y los recuentos; un servidor anterior, el resumen de lo guardado.</summary>
+/// <summary>Lo que devuelve /api/puente/sinergias: grupos por regla con sus cartas.</summary>
+internal sealed record RespuestaSinergias(
+    [property: JsonPropertyName("fuente")] FuenteSimilares? Fuente,
+    [property: JsonPropertyName("grupos")] GrupoSinergiaPuente[]? Grupos);
+
+internal sealed record GrupoSinergiaPuente(
+    [property: JsonPropertyName("regla")] string? Regla,
+    [property: JsonPropertyName("sentido")] string? Sentido,
+    [property: JsonPropertyName("cartas")] CartaSimilar[]? Cartas);
+
+/// <summary>El resumen de la partida que devuelve /api/mtga-device/resumen.</summary>
+internal sealed record RespuestaResumen([property: JsonPropertyName("texto")] string? Texto);
+
+/// <summary>La partida que se manda para el resumen: lo mismo que Contexto.Partida, con nombres JSON.</summary>
+internal sealed record PartidaEnvio(
+    [property: JsonPropertyName("formato")] string? Formato,
+    [property: JsonPropertyName("miMazo")] string? MiMazo,
+    [property: JsonPropertyName("gane")] bool? Gane,
+    [property: JsonPropertyName("razon")] string? Razon,
+    [property: JsonPropertyName("turnos")] TurnoEnvio[] Turnos);
+
+internal sealed record TurnoEnvio(
+    [property: JsonPropertyName("n")] int N,
+    [property: JsonPropertyName("activo")] string Activo,
+    [property: JsonPropertyName("vidaYo")] int? VidaYo,
+    [property: JsonPropertyName("vidaRival")] int? VidaRival,
+    [property: JsonPropertyName("jugadasYo")] int[] JugadasYo,
+    [property: JsonPropertyName("jugadasRival")] int[] JugadasRival,
+    [property: JsonPropertyName("danoAYo")] int DanoAYo,
+    [property: JsonPropertyName("danoARival")] int DanoARival);
+
+/// <summary>Lo que devuelve /api/puente/amenazas: los combos del rival montados en la mesa y a una carta.</summary>
+internal sealed record RespuestaAmenazas(
+    [property: JsonPropertyName("listos")] AmenazaPuente[]? Listos,
+    [property: JsonPropertyName("casi")] AmenazaPuente[]? Casi);
+
+internal sealed record AmenazaPuente(
+    [property: JsonPropertyName("id")] string? Id,
+    [property: JsonPropertyName("resultado")] string? Resultado,
+    [property: JsonPropertyName("url")] string? Url,
+    [property: JsonPropertyName("piezas")] PiezaAmenaza[]? Piezas);
+
+internal sealed record PiezaAmenaza(
+    [property: JsonPropertyName("nombre")] string? Nombre,
+    [property: JsonPropertyName("imagen")] string? Imagen,
+    [property: JsonPropertyName("precioUsd")] double? PrecioUsd,
+    [property: JsonPropertyName("ruta")] string? Ruta,
+    [property: JsonPropertyName("enMesa")] bool EnMesa);
+
 /// <summary>Lo que devuelve /api/puente/combos: de qué carta se parte y sus combos, cada uno con lo que produce y sus otras piezas.</summary>
 internal sealed record RespuestaCombos(
     [property: JsonPropertyName("fuente")] FuenteSimilares? Fuente,

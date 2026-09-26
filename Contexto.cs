@@ -57,6 +57,20 @@ internal static class Contexto
     public static int? RivalMiraOtraCara { get; private set; }
 
     /// <summary>
+    /// LOS COLORES QUE ESTÁS JUGANDO, como letras («WU»): la unión de los colores
+    /// de tus propias cartas vistas en la partida, mano incluida. Sirve para
+    /// que las parecidas que se aconsejen sean jugables con tus tierras.
+    /// </summary>
+    public static string MisColores { get; private set; } = "";
+
+    /// <summary>
+    /// LA MESA DEL RIVAL: las cartas suyas (su <c>grpId</c>) que hay ahora en el
+    /// campo de batalla, sin repetir. Con esto se buscan sus combos montados y
+    /// los que tiene a una carta (ver Program.RevisarAmenazas).
+    /// </summary>
+    public static int[] MesaRival { get; private set; } = [];
+
+    /// <summary>
     /// LA OTRA CARA de esa carta, si está transformada, o null.
     ///
     /// Arena numera por separado las dos caras —una Saga vuelta criatura tiene
@@ -69,6 +83,35 @@ internal static class Contexto
 
     /// <summary>Si hay una partida en marcha.</summary>
     public static bool EnPartida { get; private set; }
+
+    /// <summary>El formato del mazo de la cola («standard», «alchemy», «brawl»…), en minúsculas, o null.</summary>
+    public static string? Formato { get; private set; }
+
+    /// <summary>El evento de la cola («Ladder», «QuickDraft_EOE_…»), o null.</summary>
+    public static string? Evento { get; private set; }
+
+    /// <summary>En Limitado, el código de la edición que se está jugando (de «QuickDraft_EOE_…» → «eoe»), o null.</summary>
+    public static string? Edicion { get; private set; }
+
+    /// <summary>Un turno de la partida en curso, para el resumen. Las jugadas son grpIds.</summary>
+    public sealed class Turno
+    {
+        public int N;
+        public string Activo = "yo";
+        public int? VidaYo, VidaRival;
+        public readonly List<int> JugadasYo = new(), JugadasRival = new();
+        public int DanoAYo, DanoARival;
+        public readonly HashSet<int> Vistas = new();
+    }
+
+    /// <summary>Una partida terminada, tal como se manda a la web para el resumen.</summary>
+    public sealed record Partida(string? Formato, string? Mazo, bool? Gane, string? Razon, IReadOnlyList<Turno> Turnos);
+
+    /// <summary>La última partida terminada, con su cronología, o null.</summary>
+    public static Partida? UltimaPartida { get; private set; }
+
+    /// <summary>Acaba de terminar una partida: UltimaPartida está puesta. Salta en el hilo del vigía.</summary>
+    public static event Action? PartidaAcabada;
 
     /// <summary>Algo de lo de arriba ha cambiado. Salta en el hilo del vigía.</summary>
     public static event Action? Cambio;
@@ -91,23 +134,54 @@ internal static class Contexto
         @"(?:,\s*""zoneId"":\s*(\d+))?" +
         @"(?:[^{]{0,120}?""ownerSeatId"":\s*(\d))?" +
         @"(?:[^{]{0,160}?""cardTypes"":\s*\[\s*""CardType_(\w+)"")?" +
+        @"(?:[^{]{0,200}?""color"":\s*\[([^\]]{0,120}?)\])?" +
         @"(?:[^{]{0,400}?""othersideGrpId"":\s*(\d+))?", RegexOptions.Compiled);
     private static readonly Regex Zona = new(@"""zoneId"":\s*(\d+),\s*""type"":\s*""ZoneType_(\w+)""", RegexOptions.Compiled);
     // Un traslado: qué instancia y a qué zona llega. Los detalles son una lista de
     // pares y `zone_dest` no es el primero, así que se salta con `.{0,400}?`.
     private static readonly Regex Traslado = new(
         @"""affectedIds"":\s*\[\s*(\d+)[^\]]*\],\s*""type"":\s*\[\s*""AnnotationType_ZoneTransfer""\s*\].{0,400}?""zone_dest"".{0,80}?""valueInt32"":\s*\[\s*(\d+)", RegexOptions.Compiled);
-    private static readonly Regex Asiento = new(@"""systemSeatIds"":\s*\[\s*(\d)", RegexOptions.Compiled);
+    // SÓLO los mensajes dirigidos a un asiento: los hay para los dos («[ 1, 2 ]»)
+    // y tomar el primero de ésos te sentaba en el 1 cada pocos segundos
+    // (visto el 2026-09-26: los colores propios alternaban con los del rival).
+    private static readonly Regex Asiento = new(@"""systemSeatIds"":\s*\[\s*(\d)\s*\]", RegexOptions.Compiled);
+    // El evento y el formato van en el `request` de EventSetDeckV3, JSON escapado
+    // dentro de una cadena: \x22 es la comilla, \\ la barra que la precede.
+    private static readonly Regex EventoCola = new(@"\\\x22EventName\\\x22:\\\x22([A-Za-z0-9_-]+)", RegexOptions.Compiled);
+    private static readonly Regex FormatoMazo = new(@"\\\x22name\\\x22:\\\x22Format\\\x22,\\\x22value\\\x22:\\\x22([A-Za-z]+)", RegexOptions.Compiled);
+    // La cronología: turno y jugador activo, vidas por asiento, equipo por
+    // asiento, daño a un jugador (los jugadores son los objetos 1 y 2), y el
+    // resultado.
+    private static readonly Regex TurnoInfo = new(@"""turnNumber"":\s*(\d+),\s*""activePlayer"":\s*(\d)", RegexOptions.Compiled);
+    private static readonly Regex Vida = new(@"""lifeTotal"":\s*(-?\d+),\s*""systemSeatNumber"":\s*(\d)", RegexOptions.Compiled);
+    private static readonly Regex Equipo = new(@"""systemSeatNumber"":\s*(\d),.{0,200}?""teamId"":\s*(\d)", RegexOptions.Compiled);
+    private static readonly Regex Dano = new(@"""affectedIds"":\s*\[\s*(\d+)\s*\],\s*""type"":\s*\[\s*""AnnotationType_DamageDealt""\s*\].{0,160}?""valueInt32"":\s*\[\s*(\d+)", RegexOptions.Compiled);
+    private static readonly Regex Ganador = new(@"""scope"":\s*""MatchScope_Match"",\s*""result"":\s*""[A-Za-z_]+"",\s*""winningTeamId"":\s*(\d),\s*""reason"":\s*""ResultReason_(\w+)""", RegexOptions.Compiled);
+    private static readonly Regex IdPartida = new(@"""matchId"":\s*""([0-9a-f-]{36})""", RegexOptions.Compiled);
     // El aviso de «está mirando»: de qué asiento y qué objeto.
     private static readonly Regex BajoRaton = new(@"""seatIds"":\s*\[\s*(\d)\s*\],\s*""onHover"":\s*\{\s*""objectId"":\s*(\d+)", RegexOptions.Compiled);
     private const string PrefijoPrecon = "?=?Loc/";
 
     /// <summary>Instancia en la mesa → la carta que es, de quién, en qué zona y, si está transformada, su otra cara.</summary>
-    private static readonly Dictionary<int, (int Grp, bool EsCarta, bool EsTierra, int? Zona, int? Dueno, int? Otra)> objetos = new();
+    private static readonly Dictionary<int, (int Grp, bool EsCarta, bool EsTierra, int? Zona, int? Dueno, string Colores, int? Otra)> objetos = new();
+
+    /// <summary>«CardColor_White», «CardColor_Blue»… → «W», «U»…</summary>
+    private static string Letras(string colores)
+    {
+        var sb = new System.Text.StringBuilder(5);
+        foreach (var (palabra, letra) in new[] { ("White", 'W'), ("Blue", 'U'), ("Black", 'B'), ("Red", 'R'), ("Green", 'G') })
+            if (colores.Contains("CardColor_" + palabra, StringComparison.Ordinal)) sb.Append(letra);
+        return sb.ToString();
+    }
     /// <summary>Zona → su tipo («Battlefield», «Stack», «Hand»…). Los números cambian en cada partida.</summary>
     private static readonly Dictionary<int, string> zonas = new();
     /// <summary>Tu asiento en la partida en curso (1 o 2), o 0 si aún no se sabe.</summary>
     private static int miAsiento;
+    /// <summary>La cronología de la partida en curso y lo que hace falta para cerrarla.</summary>
+    private static readonly List<Turno> turnos = new();
+    private static readonly Dictionary<int, int> equipoPorAsiento = new();
+    private static string idPartida = "";
+    private static string? formato, evento, edicion;
     private static string? fichero;
     private static long posicion;
     private static bool estrenando = true;
@@ -157,7 +231,10 @@ internal static class Contexto
             objetos.Clear();
             zonas.Clear();
             miAsiento = 0;
-            Cambiar(null, null, null, null, null, false);
+            turnos.Clear();
+            equipoPorAsiento.Clear();
+            idPartida = "";
+            Cambiar(null, null, null, null, null, false, "", []);
         }
         if (estrenando)
         {
@@ -183,10 +260,63 @@ internal static class Contexto
                     var nombre = Desescapar(m.Groups[1].Value);
                     if (nombre.Length > 0 && !nombre.StartsWith(PrefijoPrecon, StringComparison.Ordinal)) mazo = nombre;
                 }
+                // Y con qué formato y en qué cola: es lo que decide que las
+                // parecidas y los combos sean de lo que se está jugando.
+                var f = FormatoMazo.Match(linea);
+                if (f.Success) formato = f.Groups[1].Value.ToLowerInvariant();
+                var e = EventoCola.Match(linea);
+                if (e.Success)
+                {
+                    evento = e.Groups[1].Value;
+                    // «QuickDraft_EOE_20260901», «PremierDraft_EOE_…», «Sealed_EOE_…»: la
+                    // edición va entre los dos primeros guiones bajos.
+                    var partes = evento.Split('_');
+                    edicion = partes.Length >= 2 && evento.Contains("Draft", StringComparison.OrdinalIgnoreCase) || partes.Length >= 2 && evento.Contains("Sealed", StringComparison.OrdinalIgnoreCase)
+                        ? partes[1].ToLowerInvariant()
+                        : null;
+                }
             }
             // Tu asiento: lo dice cada mensaje del servidor hacia ti.
             var asiento = Asiento.Match(linea);
             if (asiento.Success) miAsiento = int.Parse(asiento.Groups[1].Value);
+
+            // LA CRONOLOGÍA: una partida nueva vacía la anterior; cada turno nuevo
+            // abre una entrada; las vidas, el equipo de cada asiento y el daño a
+            // los jugadores se van apuntando en el turno en curso.
+            var idm = IdPartida.Match(linea);
+            if (idm.Success && idm.Groups[1].Value != idPartida)
+            {
+                idPartida = idm.Groups[1].Value;
+                turnos.Clear();
+                equipoPorAsiento.Clear();
+            }
+            foreach (Match eq in Equipo.Matches(linea)) equipoPorAsiento[int.Parse(eq.Groups[1].Value)] = int.Parse(eq.Groups[2].Value);
+            var ti = TurnoInfo.Match(linea);
+            if (ti.Success)
+            {
+                var n = int.Parse(ti.Groups[1].Value);
+                if (turnos.Count == 0 || turnos[^1].N != n)
+                {
+                    var activo = miAsiento != 0 && int.Parse(ti.Groups[2].Value) == miAsiento ? "yo" : "rival";
+                    turnos.Add(new Turno { N = n, Activo = activo });
+                }
+            }
+            if (turnos.Count > 0)
+            {
+                var actual = turnos[^1];
+                foreach (Match v in Vida.Matches(linea))
+                {
+                    var vida = int.Parse(v.Groups[1].Value);
+                    if (int.Parse(v.Groups[2].Value) == miAsiento) actual.VidaYo = vida; else actual.VidaRival = vida;
+                }
+                foreach (Match d in Dano.Matches(linea))
+                {
+                    var a = int.Parse(d.Groups[1].Value);
+                    if (a > 2) continue;   // a una criatura, no a un jugador
+                    var puntos = int.Parse(d.Groups[2].Value);
+                    if (a == miAsiento) actual.DanoAYo += puntos; else actual.DanoARival += puntos;
+                }
+            }
 
             foreach (Match z in Zona.Matches(linea)) zonas[int.Parse(z.Groups[1].Value)] = z.Groups[2].Value;
 
@@ -211,8 +341,12 @@ internal static class Contexto
                     int? zona = m.Groups[4].Success ? int.Parse(m.Groups[4].Value) : null;
                     int? dueno = m.Groups[5].Success ? int.Parse(m.Groups[5].Value) : null;
                     var esTierra = m.Groups[6].Success && m.Groups[6].Value == "Land";
-                    int? otra = m.Groups[7].Success ? int.Parse(m.Groups[7].Value) : null;
-                    objetos[id] = (int.Parse(m.Groups[2].Value), esCarta, esTierra, zona, dueno, otra);
+                    var coloresObjeto = m.Groups[7].Success ? Letras(m.Groups[7].Value) : "";
+                    int? otra = m.Groups[8].Success ? int.Parse(m.Groups[8].Value) : null;
+                    // Un objeto que ya se conocía y vuelve sin zona (un cambio parcial)
+                    // conserva la que tenía.
+                    if (zona is null && objetos.TryGetValue(id, out var previo)) zona = previo.Zona;
+                    objetos[id] = (int.Parse(m.Groups[2].Value), esCarta, esTierra, zona, dueno, coloresObjeto, otra);
                 }
 
                 /**
@@ -228,9 +362,22 @@ internal static class Contexto
                  */
                 foreach (Match t in Traslado.Matches(linea))
                 {
-                    if (!objetos.TryGetValue(int.Parse(t.Groups[1].Value), out var obj)) continue;
+                    var idObj = int.Parse(t.Groups[1].Value);
+                    var destino = int.Parse(t.Groups[2].Value);
+                    if (!objetos.TryGetValue(idObj, out var obj)) continue;
+                    // La zona nueva se apunta SIEMPRE: la mesa del rival se calcula
+                    // de aquí, y una carta que va al cementerio tiene que salir.
+                    objetos[idObj] = obj with { Zona = destino };
+                    // Y a la cronología: lo que cada bando pone en juego (tierras
+                    // incluidas: para el resumen sí cuentan), una vez por instancia.
+                    if (obj.EsCarta && obj.Dueno is { } dueno && turnos.Count > 0 && miAsiento != 0
+                        && zonas.TryGetValue(destino, out var tz) && (tz == "Battlefield" || tz == "Stack")
+                        && turnos[^1].Vistas.Add(idObj))
+                    {
+                        (dueno == miAsiento ? turnos[^1].JugadasYo : turnos[^1].JugadasRival).Add(obj.Grp);
+                    }
                     if (!obj.EsCarta || obj.EsTierra || miAsiento == 0 || obj.Dueno != miAsiento) continue;
-                    if (!zonas.TryGetValue(int.Parse(t.Groups[2].Value), out var tipo)) continue;
+                    if (!zonas.TryGetValue(destino, out var tipo)) continue;
                     if (tipo != "Battlefield" && tipo != "Stack") continue;
                     carta = obj.Grp;
                     otraCara = obj.Otra;
@@ -251,6 +398,22 @@ internal static class Contexto
             if (linea.Contains("MatchGameRoomStateType_Playing", StringComparison.Ordinal)) enPartida = true;
             if (linea.Contains("MatchGameRoomStateType_MatchCompleted", StringComparison.Ordinal))
             {
+                // El resultado, y la partida entera lista para el resumen.
+                var g = Ganador.Match(linea);
+                bool? gane = null; string? razon = null;
+                if (g.Success)
+                {
+                    razon = g.Groups[2].Value;
+                    if (miAsiento != 0 && equipoPorAsiento.TryGetValue(miAsiento, out var miEquipo)) gane = int.Parse(g.Groups[1].Value) == miEquipo;
+                }
+                if (turnos.Count > 0)
+                {
+                    UltimaPartida = new Partida(formato, mazo, gane, razon, turnos.ToArray());
+                    try { PartidaAcabada?.Invoke(); } catch { /* cosa de quien escucha */ }
+                }
+                turnos.Clear();
+                equipoPorAsiento.Clear();
+                idPartida = "";
                 enPartida = false;
                 carta = null;
                 otraCara = null;
@@ -258,16 +421,36 @@ internal static class Contexto
                 rivalOtra = null;
                 objetos.Clear();
                 zonas.Clear();
+                miAsiento = 0;
             }
         }
-        Cambiar(mazo, carta, otraCara, rival, rivalOtra, enPartida);
+        // Lo que se deriva de la tabla entera: tus colores y la mesa del rival.
+        var colores = "";
+        var mesa = new SortedSet<int>();
+        if (miAsiento != 0)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var o in objetos.Values)
+            {
+                if (o.Dueno == miAsiento)
+                {
+                    foreach (var c in o.Colores) if (!sb.ToString().Contains(c)) sb.Append(c);
+                }
+                else if (o.EsCarta && o.Dueno == 3 - miAsiento && o.Zona is { } z && zonas.TryGetValue(z, out var tz) && tz == "Battlefield") mesa.Add(o.Grp);
+            }
+            colores = sb.ToString();
+        }
+        Cambiar(mazo, carta, otraCara, rival, rivalOtra, enPartida, colores, [.. mesa]);
     }
 
-    private static void Cambiar(string? mazo, int? carta, int? otraCara, int? rival, int? rivalOtra, bool enPartida)
+    private static void Cambiar(string? mazo, int? carta, int? otraCara, int? rival, int? rivalOtra, bool enPartida, string colores, int[] mesa)
     {
         if (mazo == Mazo && carta == Carta && otraCara == CartaOtraCara
-            && rival == RivalMira && rivalOtra == RivalMiraOtraCara && enPartida == EnPartida) return;
+            && rival == RivalMira && rivalOtra == RivalMiraOtraCara && enPartida == EnPartida
+            && colores == MisColores && mesa.SequenceEqual(MesaRival)
+            && formato == Formato && evento == Evento && edicion == Edicion) return;
         Mazo = mazo; Carta = carta; CartaOtraCara = otraCara; RivalMira = rival; RivalMiraOtraCara = rivalOtra; EnPartida = enPartida;
+        MisColores = colores; MesaRival = mesa; Formato = formato; Evento = evento; Edicion = edicion;
         try { Cambio?.Invoke(); } catch { /* lo que haga quien escucha es cosa suya */ }
     }
 

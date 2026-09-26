@@ -780,6 +780,76 @@ internal static class Textos
             "Opponent is looking at {0}", "El rival mira {0}", "Gegner schaut auf {0}", "L'adversaire regarde {0}",
             "O adversário olha para {0}", "L'avversario guarda {0}", "対戦相手が見ているカード: {0}", "对手正在查看 {0}",
         ],
+        // Las amenazas del rival (Program.VigilarAmenazas). {0} = lo que produce el combo.
+        ["col_amenaza"] =
+        [
+            "Opponent combo on board: {0}", "Combo del rival en mesa: {0}", "Gegner-Combo auf dem Feld: {0}", "Combo adverse en jeu : {0}",
+            "Combo do adversário em mesa: {0}", "Combo avversario in campo: {0}", "対戦相手のコンボ成立: {0}", "对手场上的组合技：{0}",
+        ],
+        ["col_amenaza_casi"] =
+        [
+            "Opponent one card from: {0}", "Rival a una carta de: {0}", "Gegner eine Karte entfernt von: {0}", "Adversaire à une carte de : {0}",
+            "Adversário a uma carta de: {0}", "Avversario a una carta da: {0}", "対戦相手はあと1枚: {0}", "对手只差一张牌：{0}",
+        ],
+        // El aviso encima del juego. {0} = las piezas, {1} = lo que produce.
+        ["sup_amenaza"] =
+        [
+            "Opponent has a combo on the board: {0} → {1}", "El rival tiene un combo en mesa: {0} → {1}", "Der Gegner hat eine Combo auf dem Feld: {0} → {1}", "L'adversaire a un combo en jeu : {0} → {1}",
+            "O adversário tem um combo em mesa: {0} → {1}", "L'avversario ha un combo in campo: {0} → {1}", "対戦相手のコンボが成立: {0} → {1}", "对手场上有组合技：{0} → {1}",
+        ],
+        ["sup_amenaza_casi"] =
+        [
+            "Opponent is one card from a combo: {0} → {1}", "El rival está a una carta de un combo: {0} → {1}", "Der Gegner ist eine Karte von einer Combo entfernt: {0} → {1}", "L'adversaire est à une carte d'un combo : {0} → {1}",
+            "O adversário está a uma carta de um combo: {0} → {1}", "L'avversario è a una carta da un combo: {0} → {1}", "対戦相手はコンボまであと1枚: {0} → {1}", "对手只差一张牌就能组合技：{0} → {1}",
+        ],
+        // El rótulo del panel de una amenaza. {0} = produce, {1} = en mesa, {2} = falta.
+        ["panel_mesa"] =
+        [
+            "{0} — on the board: {1}", "{0} — en mesa: {1}", "{0} — auf dem Feld: {1}", "{0} — en jeu : {1}",
+            "{0} — em mesa: {1}", "{0} — in campo: {1}", "{0} — 場: {1}", "{0} — 场上：{1}",
+        ],
+        ["panel_mesa_falta"] =
+        [
+            "{0} — on the board: {1} · missing: {2}", "{0} — en mesa: {1} · falta: {2}", "{0} — auf dem Feld: {1} · fehlt: {2}", "{0} — en jeu : {1} · manque : {2}",
+            "{0} — em mesa: {1} · falta: {2}", "{0} — in campo: {1} · manca: {2}", "{0} — 場: {1} · 不足: {2}", "{0} — 场上：{1} · 缺少：{2}",
+        ],
+        ["col_sinergias"] =
+        [
+            "Synergies with {0}", "Sinergias con {0}", "Synergien mit {0}", "Synergies avec {0}",
+            "Sinergias com {0}", "Sinergie con {0}", "{0} とのシナジー", "与 {0} 的协同",
+        ],
+        // Rótulos del panel de sinergias. {0} = la regla («vida», «auras»…).
+        ["panel_sin_pagan"] =
+        [
+            "Cards that benefit from what it gives: {0}", "Cartas que aprovechan lo que da: {0}", "Karten, die davon profitieren: {0}", "Cartes qui profitent de ce qu'elle donne : {0}",
+            "Cartas que aproveitam o que dá: {0}", "Carte che sfruttano ciò che dà: {0}", "与えるものを活かすカード: {0}", "利用其收益的牌：{0}",
+        ],
+        ["panel_sin_dan"] =
+        [
+            "Cards that give it what it wants: {0}", "Cartas que le dan lo que aprovecha: {0}", "Karten, die ihr geben, was sie braucht: {0}", "Cartes qui lui donnent ce qu'elle exploite : {0}",
+            "Cartas que lhe dão o que aproveita: {0}", "Carte che le danno ciò che sfrutta: {0}", "必要なものを与えるカード: {0}", "提供其所需的牌：{0}",
+        ],
+        ["panel_sin_sinergias"] =
+        [
+            "No known synergies for this card.", "Esta carta no tiene sinergias conocidas.", "Für diese Karte sind keine Synergien bekannt.", "Aucune synergie connue pour cette carte.",
+            "Esta carta não tem sinergias conhecidas.", "Nessuna sinergia conosciuta per questa carta.", "このカードの既知のシナジーはありません。", "这张牌没有已知的协同。",
+        ],
+        // El resumen de la partida por IA.
+        ["col_resumen"] =
+        [
+            "Match summary (AI)", "Resumen de la partida (IA)", "Spielzusammenfassung (KI)", "Résumé de la partie (IA)",
+            "Resumo da partida (IA)", "Riepilogo della partita (IA)", "対戦のまとめ（AI）", "对局总结（AI）",
+        ],
+        ["sup_resumen"] =
+        [
+            "Match over. The column now offers an AI review of it.", "Partida terminada. La columna te ofrece ahora un análisis por IA.", "Spiel vorbei. Die Leiste bietet jetzt eine KI-Auswertung an.", "Partie terminée. La colonne propose maintenant une analyse par IA.",
+            "Partida terminada. A coluna oferece agora uma análise por IA.", "Partita finita. La colonna ora offre un'analisi con IA.", "対戦終了。列から AI の振り返りを見られます。", "对局结束。侧栏现在可提供 AI 复盘。",
+        ],
+        ["sup_resumen_fallo"] =
+        [
+            "The summary couldn't be made right now.", "No se ha podido hacer el resumen ahora mismo.", "Die Zusammenfassung konnte gerade nicht erstellt werden.", "Le résumé n'a pas pu être fait pour l'instant.",
+            "Não foi possível fazer o resumo agora.", "Non è stato possibile fare il riepilogo adesso.", "今はまとめを作成できませんでした。", "现在无法生成总结。",
+        ],
         ["col_esta_carta"] =
         [
             "this card", "esta carta", "diese Karte", "cette carte",

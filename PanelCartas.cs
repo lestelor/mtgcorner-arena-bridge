@@ -50,7 +50,16 @@ internal static class PanelCartas
     // ── Medidas ──────────────────────────────────────────────────────────
     private const int AIRE = 14, MARGEN = 18, ALTO_CABECERA = 44, ALTO_PIE = 22, ALTO_ROTULO = 26, AIRE_SECCION = 16;
     private const int POR_FILA = 4;
-    private const int ANCHO_PANEL = MARGEN * 2 + POR_FILA * 170 + (POR_FILA - 1) * AIRE;   // 758, con cartas grandes
+    /// <summary>El ancho del panel sale del de la carta: cuatro por fila y sus aires.</summary>
+    private static int ANCHO_PANEL => MARGEN * 2 + POR_FILA * anchoCarta + (POR_FILA - 1) * AIRE;
+
+    /// <summary>
+    /// TAMAÑOS DE CARTA QUE SE PRUEBAN, de mayor a menor. «Que se puedan leer»
+    /// (el usuario, 2026-09-25): a 170 px el texto de reglas no se lee; a 260
+    /// sí. Pero tres combos con sus piezas a 260 no caben en 1080, así que se
+    /// baja hasta que el panel entero entra en la ventana de Arena con aire.
+    /// </summary>
+    private static readonly int[] ANCHOS = [280, 260, 240, 220, 200, 180, 160, 140, 120];
 
     // ── Windows ──────────────────────────────────────────────────────────
 
@@ -111,6 +120,8 @@ internal static class PanelCartas
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern IntPtr LoadCursor(IntPtr instancia, int cursor);
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr contexto);
+    [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
 
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
@@ -144,7 +155,7 @@ internal static class PanelCartas
     private const uint WM_MOUSEMOVE = 0x200, WM_LBUTTONUP = 0x202, WM_MOUSELEAVE = 0x2A3, WM_MOUSEACTIVATE = 0x21;
     private const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_HIDEWINDOW = 0x80;
     private const uint LWA_ALPHA = 0x2, TME_LEAVE = 0x2;
-    private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_SINGLELINE = 0x20, DT_END_ELLIPSIS = 0x8000;
+    private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_WORDBREAK = 0x10, DT_SINGLELINE = 0x20, DT_CALCRECT = 0x400, DT_END_ELLIPSIS = 0x8000;
     private const uint SRCCOPY = 0x00CC0020;
     private const int TRANSPARENT_BK = 1, SW_SHOWNOACTIVATE = 4, MA_NOACTIVATE = 3;
     private static readonly IntPtr HWND_TOPMOST = new(-1);
@@ -164,6 +175,36 @@ internal static class PanelCartas
     private static int bajoRaton = -1;   // índice en `huecos`; -2 = la X; -1 = nada
     private static int altoRegion;
 
+    /// <summary>Un panel SÓLO DE TEXTO (el resumen de la partida): párrafos, sin cartas.</summary>
+    private static string? texto;
+    private const int ANCHO_TEXTO = 760;
+
+    /// <summary>
+    /// Enseña un texto largo, con saltos de línea, dentro del mismo panel: es el
+    /// resumen de la partida que devuelve la web. El alto se mide con la fuente
+    /// de verdad (DT_CALCRECT) para que quepa entero, hasta lo que dé la
+    /// ventana de Arena.
+    /// </summary>
+    public static void MostrarTexto(string tituloPanel, string cuerpo)
+    {
+        Cerrar();
+        titulo = tituloPanel;
+        texto = cuerpo;
+        huecos = [];
+        (anchoCarta, altoCarta) = (170, 237);   // fija el ancho del panel (758)
+        var (_, altoArena) = MedidasDeArena();
+        var hdc = GetDC(IntPtr.Zero);
+        var fuente = CreateFont(17, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        var anterior = SelectObject(hdc, fuente);
+        var r = new RECT { Left = 0, Top = 0, Right = ANCHO_PANEL - MARGEN * 2, Bottom = 0 };
+        DrawText(hdc, cuerpo, -1, ref r, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
+        SelectObject(hdc, anterior); DeleteObject(fuente); ReleaseDC(IntPtr.Zero, hdc);
+        alto = Math.Min(altoArena - 60, ALTO_CABECERA + MARGEN + (r.Bottom - r.Top) + MARGEN + ALTO_PIE);
+        bajoRaton = -1;
+        hilo = new Thread(Correr) { IsBackground = true, Name = "panel" };
+        hilo.Start();
+    }
+
     /// <summary>LAS IMÁGENES, ABIERTAS UNA VEZ por panel. Se liberan al cerrarlo.</summary>
     private static readonly Dictionary<string, IntPtr> imagenes = new();
 
@@ -176,15 +217,21 @@ internal static class PanelCartas
     /// <summary>
     /// Enseña el panel con estas secciones, ya con todas sus imágenes. Si ya
     /// había uno, se sustituye: dos paneles encima del juego no los quiere
-    /// nadie. `compacto`: cartas más pequeñas, para varios combos con sus
-    /// piezas, que con las grandes no cabrían en una pantalla de 1080.
+    /// nadie. Las cartas, TAN GRANDES COMO QUEPAN: se prueba de mayor a menor
+    /// hasta que el panel entero entra en la ventana de Arena.
     /// </summary>
-    public static void Mostrar(string tituloPanel, IReadOnlyList<Seccion> secciones, bool compacto = false)
+    public static void Mostrar(string tituloPanel, IReadOnlyList<Seccion> secciones)
     {
         Cerrar();
         titulo = tituloPanel;
-        (anchoCarta, altoCarta) = compacto ? (130, 181) : (170, 237);
-        (huecos, alto) = Disponer(secciones);
+        texto = null;
+        var (anchoArena, altoArena) = MedidasDeArena();
+        foreach (var ancho in ANCHOS)
+        {
+            (anchoCarta, altoCarta) = (ancho, ancho * 680 / 488);   // proporción de una carta
+            (huecos, alto) = Disponer(secciones);
+            if (alto <= altoArena - 60 && ANCHO_PANEL <= anchoArena - 40) break;
+        }
         bajoRaton = -1;
         if (huecos.Length == 0) return;
         hilo = new Thread(Correr) { IsBackground = true, Name = "panel" };
@@ -295,6 +342,15 @@ internal static class PanelCartas
     {
         foreach (var img in imagenes.Values) if (img != IntPtr.Zero) GdipDisposeImage(img);
         imagenes.Clear();
+    }
+
+    /// <summary>Lo que mide la ventana de Arena, o una pantalla de 1080 si no está.</summary>
+    private static (int Ancho, int Alto) MedidasDeArena()
+    {
+        var arena = Columna.VentanaDeArena();
+        if (arena != IntPtr.Zero && GetWindowRect(arena, out var r) && r.Right > r.Left && r.Bottom > r.Top)
+            return (r.Right - r.Left, r.Bottom - r.Top);
+        return (1920, 1080);
     }
 
     /// <summary>Centrado sobre Arena, y sólo con Arena delante (o el propio panel).</summary>
@@ -430,6 +486,18 @@ internal static class PanelCartas
             GdipCreateFromHDC(hdc, out grafico);
             if (grafico != IntPtr.Zero) GdipSetInterpolationMode(grafico, 7);   // bicúbica de calidad
 
+            if (texto is { } cuerpo)
+            {
+                // Sólo texto: los párrafos, ajustados al ancho, con margen.
+                SelectObject(hdc, fPie);
+                var fTexto = CreateFont(17, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                SelectObject(hdc, fTexto);
+                SetTextColor(hdc, Rgb(226, 232, 240));
+                var rt = new RECT { Left = MARGEN, Top = ALTO_CABECERA + MARGEN / 2, Right = ANCHO_PANEL - MARGEN, Bottom = alto - ALTO_PIE };
+                DrawText(hdc, cuerpo, -1, ref rt, DT_LEFT | DT_WORDBREAK);
+                DeleteObject(fTexto);
+            }
+
             var lista = huecos;
             for (var i = 0; i < lista.Length; i++)
             {
@@ -475,9 +543,12 @@ internal static class PanelCartas
             SelectObject(hdc, fPie);
             SetTextColor(hdc, Rgb(148, 163, 184));
             var rPie = new RECT { Left = MARGEN, Top = alto - ALTO_PIE - MARGEN / 2, Right = ANCHO_PANEL - MARGEN, Bottom = alto };
-            var sobre = bajoRaton >= 0 && bajoRaton < lista.Length ? lista[bajoRaton].Carta : null;
-            var pie = sobre?.PrecioUsd is { } p ? $"{sobre.Nombre} · ${p:0.00}" : Textos.T("panel_pie");
-            DrawText(hdc, pie, -1, ref rPie, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            if (texto is null)
+            {
+                var sobre = bajoRaton >= 0 && bajoRaton < lista.Length ? lista[bajoRaton].Carta : null;
+                var pie = sobre?.PrecioUsd is { } p ? $"{sobre.Nombre} · ${p:0.00}" : Textos.T("panel_pie");
+                DrawText(hdc, pie, -1, ref rPie, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            }
         }
         finally
         {
