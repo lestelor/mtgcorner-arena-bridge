@@ -811,6 +811,9 @@ internal static class Program
                 case Columna.Accion.Coleccion:
                     Abrir(Sitio + RutaWeb("coleccion"));
                     break;
+                case Columna.Accion.Inicio:
+                    Abrir(Sitio + RutaWeb("inicio"));
+                    break;
                 case Columna.Accion.Constructor:
                     Abrir(Sitio + RutaWeb("constructor"));
                     break;
@@ -1608,6 +1611,8 @@ internal static class Program
         ("coleccion", "ja") => "/ja/collection",
         ("coleccion", "zh") => "/zh/collection",
         ("coleccion", _) => "/collection",
+        ("inicio", "en") => "/",
+        ("inicio", var idioma) => "/" + idioma,
         ("constructor", "es") => "/es/constructor-de-mazos",
         ("constructor", "de") => "/de/deckbuilder",
         ("constructor", "fr") => "/fr/constructeur-de-deck",

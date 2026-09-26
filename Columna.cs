@@ -36,7 +36,7 @@ namespace MtgCornerArenaBridge;
 /// </summary>
 internal static class Columna
 {
-    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival }
+    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival, Inicio }
 
     /// <summary>Una fila. Las de contexto traen su etiqueta hecha y un dato (nombre del mazo, id de la carta).</summary>
     private sealed record Fila(Accion Accion, string Glifo, string Clave, string? Dato = null, string? Etiqueta = null);
@@ -563,6 +563,14 @@ internal static class Columna
             {
                 var fila = FilaEn(lParam);
                 var filas = Filas;
+                // La cabecera (el trébol y la marca) lleva a la portada de la web
+                // (pedido del usuario el 2026-09-26).
+                var yPulsado = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
+                if (fila < 0 && yPulsado >= 0 && yPulsado < ALTO_CABECERA && alPulsar is { } pulsarInicio)
+                {
+                    _ = Task.Run(async () => { try { await pulsarInicio(Accion.Inicio, null); } catch { /* lo cuenta quien la lanzó */ } });
+                    return IntPtr.Zero;
+                }
                 if (fila >= 0 && fila < filas.Length && alPulsar is { } pulsar)
                 {
                     var accion = filas[fila].Accion;
