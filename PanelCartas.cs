@@ -121,6 +121,13 @@ internal static class PanelCartas
     [DllImport("user32.dll")] private static extern IntPtr LoadCursor(IntPtr instancia, int cursor);
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr contexto);
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern bool OpenClipboard(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern bool EmptyClipboard();
+    [DllImport("user32.dll")] private static extern IntPtr SetClipboardData(uint formato, IntPtr datos);
+    [DllImport("user32.dll")] private static extern bool CloseClipboard();
+    [DllImport("kernel32.dll")] private static extern IntPtr GlobalAlloc(uint banderas, UIntPtr bytes);
+    [DllImport("kernel32.dll")] private static extern IntPtr GlobalLock(IntPtr h);
+    [DllImport("kernel32.dll")] private static extern bool GlobalUnlock(IntPtr h);
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
 
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
@@ -152,7 +159,7 @@ internal static class PanelCartas
     private const uint WS_POPUP = 0x80000000;
     private const uint WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000;
     private const uint WM_DESTROY = 0x2, WM_CLOSE = 0x10, WM_PAINT = 0xF, WM_TIMER = 0x113;
-    private const uint WM_MOUSEMOVE = 0x200, WM_LBUTTONUP = 0x202, WM_MOUSELEAVE = 0x2A3, WM_MOUSEACTIVATE = 0x21;
+    private const uint WM_MOUSEMOVE = 0x200, WM_LBUTTONUP = 0x202, WM_MOUSELEAVE = 0x2A3, WM_MOUSEACTIVATE = 0x21, WM_MOUSEWHEEL = 0x20A;
     private const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_HIDEWINDOW = 0x80;
     private const uint LWA_ALPHA = 0x2, TME_LEAVE = 0x2;
     private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_WORDBREAK = 0x10, DT_SINGLELINE = 0x20, DT_CALCRECT = 0x400, DT_END_ELLIPSIS = 0x8000;
@@ -175,35 +182,129 @@ internal static class PanelCartas
     private static int bajoRaton = -1;   // índice en `huecos`; -2 = la X; -1 = nada
     private static int altoRegion;
 
-    /// <summary>Un panel SÓLO DE TEXTO (el resumen de la partida): párrafos, sin cartas.</summary>
-    private static string? texto;
-    private const int ANCHO_TEXTO = 760;
-
     /// <summary>
-    /// Enseña un texto largo, con saltos de línea, dentro del mismo panel: es el
-    /// resumen de la partida que devuelve la web. El alto se mide con la fuente
-    /// de verdad (DT_CALCRECT) para que quepa entero, hasta lo que dé la
-    /// ventana de Arena.
+    /// UN PANEL SÓLO DE TEXTO: el resumen de la partida. Va por secciones —cada
+    /// una con su título y sus párrafos; los de una lista llevan viñeta—, con
+    /// letra mayor que la de los pies (pedido del usuario el 2026-09-26), rueda
+    /// del ratón si no cabe, y un botón «Copiar» que deja el texto entero en el
+    /// portapapeles. NO se selecciona con el ratón: para eso la ventana tendría
+    /// que coger el foco del teclado, y eso se lo quita a Arena.
     /// </summary>
-    public static void MostrarTexto(string tituloPanel, string cuerpo)
+    public sealed record SeccionTexto(string Titulo, IReadOnlyList<string> Parrafos, bool Lista);
+
+    /// <summary>Un enlace al final del texto: los mazos que pudo llevar el rival, que abren la web.</summary>
+    public sealed record Enlace(string Texto, string Ruta);
+
+    private sealed record Bloque(string Texto, bool Titulo, bool Vineta, int Alto, int Enlace = -1);
+
+    private static Enlace[] enlaces = [];
+    /// <summary>Dónde se pintó cada enlace en el último repintado (coordenadas de la ventana), para el ratón.</summary>
+    private static RECT[] rectEnlaces = [];
+    private const int BAJO_ENLACE = -10;   // el enlace i está bajo el ratón: BAJO_ENLACE - i
+
+    private static Bloque[] bloques = [];
+    private static string copia = "";
+    private static int desplazamiento, altoTexto;
+    private static bool copiado;
+    private const int TAM_TITULO_SECCION = 21, TAM_TEXTO = 19, AIRE_PARRAFO = 8, AIRE_ANTES_TITULO = 18, SANGRIA_VINETA = 22;
+    private const int ANCHO_BOTON = 112, ALTO_BOTON = 30;
+    private const int BAJO_COPIAR = -3;
+
+    /// <summary>Enseña el resumen por secciones. <paramref name="textoPlano"/> es lo que copia el botón.</summary>
+    public static void MostrarTexto(string tituloPanel, IReadOnlyList<SeccionTexto> secciones, string textoPlano, IReadOnlyList<Enlace>? conEnlaces = null, string? tituloEnlaces = null)
     {
         Cerrar();
         titulo = tituloPanel;
-        texto = cuerpo;
+        copia = textoPlano;
+        enlaces = conEnlaces?.ToArray() ?? [];
+        rectEnlaces = new RECT[enlaces.Length];
+        copiado = false;
+        desplazamiento = 0;
         huecos = [];
         (anchoCarta, altoCarta) = (170, 237);   // fija el ancho del panel (758)
         var (_, altoArena) = MedidasDeArena();
+
+        // Se mide cada bloque con su fuente de verdad, para que el alto sea el
+        // que luego se pinta.
         var hdc = GetDC(IntPtr.Zero);
-        var fuente = CreateFont(17, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
-        var anterior = SelectObject(hdc, fuente);
-        var r = new RECT { Left = 0, Top = 0, Right = ANCHO_PANEL - MARGEN * 2, Bottom = 0 };
-        DrawText(hdc, cuerpo, -1, ref r, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
-        SelectObject(hdc, anterior); DeleteObject(fuente); ReleaseDC(IntPtr.Zero, hdc);
-        alto = Math.Min(altoArena - 60, ALTO_CABECERA + MARGEN + (r.Bottom - r.Top) + MARGEN + ALTO_PIE);
+        var fTitulo = CreateFont(TAM_TITULO_SECCION, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        var fTexto = CreateFont(TAM_TEXTO, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        var anterior = SelectObject(hdc, fTexto);
+        var lista = new List<Bloque>();
+        foreach (var sec in secciones)
+        {
+            SelectObject(hdc, fTitulo);
+            var rt = new RECT { Left = 0, Top = 0, Right = ANCHO_PANEL - MARGEN * 2, Bottom = 0 };
+            DrawText(hdc, sec.Titulo, -1, ref rt, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
+            lista.Add(new Bloque(sec.Titulo, true, false, rt.Bottom - rt.Top));
+            SelectObject(hdc, fTexto);
+            foreach (var p in sec.Parrafos)
+            {
+                var rp = new RECT { Left = 0, Top = 0, Right = ANCHO_PANEL - MARGEN * 2 - (sec.Lista ? SANGRIA_VINETA : 0), Bottom = 0 };
+                DrawText(hdc, p, -1, ref rp, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
+                lista.Add(new Bloque(p, false, sec.Lista, rp.Bottom - rp.Top));
+            }
+        }
+        // Los enlaces, como una sección más: su título y una línea por mazo.
+        if (enlaces.Length > 0)
+        {
+            SelectObject(hdc, fTitulo);
+            var rt = new RECT { Left = 0, Top = 0, Right = ANCHO_PANEL - MARGEN * 2, Bottom = 0 };
+            var rotulo = tituloEnlaces ?? "";
+            DrawText(hdc, rotulo, -1, ref rt, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
+            lista.Add(new Bloque(rotulo, true, false, rt.Bottom - rt.Top));
+            SelectObject(hdc, fTexto);
+            for (var i = 0; i < enlaces.Length; i++)
+            {
+                var re = new RECT { Left = 0, Top = 0, Right = ANCHO_PANEL - MARGEN * 2 - SANGRIA_VINETA, Bottom = 0 };
+                DrawText(hdc, enlaces[i].Texto, -1, ref re, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
+                lista.Add(new Bloque(enlaces[i].Texto, false, true, re.Bottom - re.Top, i));
+            }
+        }
+        SelectObject(hdc, anterior); DeleteObject(fTitulo); DeleteObject(fTexto); ReleaseDC(IntPtr.Zero, hdc);
+        bloques = lista.ToArray();
+        altoTexto = 0;
+        for (var i = 0; i < bloques.Length; i++)
+            altoTexto += bloques[i].Alto + (bloques[i].Titulo ? (i > 0 ? AIRE_ANTES_TITULO : 0) + AIRE_PARRAFO : AIRE_PARRAFO);
+        alto = Math.Min(altoArena - 60, ALTO_CABECERA + MARGEN / 2 + altoTexto + MARGEN + ALTO_PIE + MARGEN / 2);
+        texto = copia;
         bajoRaton = -1;
         hilo = new Thread(Correr) { IsBackground = true, Name = "panel" };
         hilo.Start();
     }
+
+    private static RECT RectBotonCopiar() => new()
+    {
+        Left = ANCHO_PANEL - MARGEN - ANCHO_BOTON, Top = alto - ALTO_PIE - MARGEN / 2 - (ALTO_BOTON - ALTO_PIE) / 2,
+        Right = ANCHO_PANEL - MARGEN, Bottom = alto - ALTO_PIE - MARGEN / 2 - (ALTO_BOTON - ALTO_PIE) / 2 + ALTO_BOTON,
+    };
+
+    /// <summary>Lo que se ve del texto: entre la cabecera y el pie.</summary>
+    private static int AltoVisibleTexto => alto - ALTO_CABECERA - MARGEN / 2 - ALTO_PIE - MARGEN;
+
+    /// <summary>Deja el texto en el portapapeles, como texto Unicode. Sin dueño: la ventana no coge el foco.</summary>
+    private static bool Copiar(string t)
+    {
+        if (!OpenClipboard(IntPtr.Zero)) return false;
+        try
+        {
+            EmptyClipboard();
+            var bytes = (t.Length + 1) * 2;
+            var h = GlobalAlloc(0x2 /* GMEM_MOVEABLE */, (UIntPtr)bytes);
+            if (h == IntPtr.Zero) return false;
+            var p = GlobalLock(h);
+            if (p == IntPtr.Zero) return false;
+            var datos = System.Text.Encoding.Unicode.GetBytes(t + "\0");
+            Marshal.Copy(datos, 0, p, datos.Length);
+            GlobalUnlock(h);
+            return SetClipboardData(13 /* CF_UNICODETEXT */, h) != IntPtr.Zero;
+        }
+        catch { return false; }
+        finally { CloseClipboard(); }
+    }
+
+    /// <summary>Un panel de sólo texto (sin secciones): un bloque de párrafos.</summary>
+    private static string? texto;
 
     /// <summary>LAS IMÁGENES, ABIERTAS UNA VEZ por panel. Se liberan al cerrarlo.</summary>
     private static readonly Dictionary<string, IntPtr> imagenes = new();
@@ -380,6 +481,16 @@ internal static class PanelCartas
     /// <summary>Qué hay bajo un punto de la ventana: un hueco (0..n), la X (-2), o nada (-1).</summary>
     private static int QueHayEn(IntPtr lParam)
     {
+        if (texto is not null)
+        {
+            var xr = (short)(lParam.ToInt64() & 0xFFFF);
+            var yr = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
+            var rb = RectBotonCopiar();
+            if (xr >= rb.Left && xr < rb.Right && yr >= rb.Top && yr < rb.Bottom) return BAJO_COPIAR;
+            var rects = rectEnlaces;
+            for (var i = 0; i < rects.Length; i++)
+                if (xr >= rects[i].Left && xr < rects[i].Right && yr >= rects[i].Top && yr < rects[i].Bottom) return BAJO_ENLACE - i;
+        }
         var x = (short)(lParam.ToInt64() & 0xFFFF);
         var y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
         if (y < ALTO_CABECERA) return x >= ANCHO_PANEL - 44 ? -2 : -1;
@@ -418,10 +529,27 @@ internal static class PanelCartas
                 InvalidateRect(hWnd, IntPtr.Zero, false);
                 return IntPtr.Zero;
 
+            case WM_MOUSEWHEEL:
+            {
+                if (texto is null) return IntPtr.Zero;
+                var giro = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+                var tope = Math.Max(0, altoTexto - AltoVisibleTexto);
+                desplazamiento = Math.Clamp(desplazamiento - giro / 120 * 48, 0, tope);
+                InvalidateRect(hWnd, IntPtr.Zero, false);
+                return IntPtr.Zero;
+            }
+
             case WM_LBUTTONUP:
             {
                 var i = QueHayEn(lParam);
                 if (i == -2) { PostMessage(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero); return IntPtr.Zero; }
+                if (i == BAJO_COPIAR) { copiado = Copiar(copia); InvalidateRect(hWnd, IntPtr.Zero, false); return IntPtr.Zero; }
+                if (i <= BAJO_ENLACE && BAJO_ENLACE - i < enlaces.Length && AlAbrir is { } abrirEnlace)
+                {
+                    var rutaEnlace = enlaces[BAJO_ENLACE - i].Ruta;
+                    _ = Task.Run(() => { try { abrirEnlace(rutaEnlace); } catch { /* lo cuenta quien lo montó */ } });
+                    return IntPtr.Zero;
+                }
                 var lista = huecos;
                 if (i >= 0 && i < lista.Length && AlAbrir is { } abrir)
                 {
@@ -486,16 +614,66 @@ internal static class PanelCartas
             GdipCreateFromHDC(hdc, out grafico);
             if (grafico != IntPtr.Zero) GdipSetInterpolationMode(grafico, 7);   // bicúbica de calidad
 
-            if (texto is { } cuerpo)
+            if (texto is not null)
             {
-                // Sólo texto: los párrafos, ajustados al ancho, con margen.
+                // Las secciones: título en ámbar, párrafos en claro, viñetas
+                // sangradas. Lo que se sale de la zona de texto se pinta en un
+                // lienzo aparte y sólo se vuelca la ventana, así la rueda no
+                // pisa la cabecera ni el pie.
+                var fTituloSec = CreateFont(TAM_TITULO_SECCION, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                var fTexto = CreateFont(TAM_TEXTO, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                var arriba = ALTO_CABECERA + MARGEN / 2;
+                var altoZona = AltoVisibleTexto;
+                var zona = CreateCompatibleDC(hdc);
+                var lienzoZona = CreateCompatibleBitmap(hdc, ANCHO_PANEL, Math.Max(1, altoZona));
+                var zonaAnterior = SelectObject(zona, lienzoZona);
+                var rz = new RECT { Left = 0, Top = 0, Right = ANCHO_PANEL, Bottom = altoZona };
+                FillRect(zona, ref rz, fondo);
+                SetBkMode(zona, TRANSPARENT_BK);
+                var y = -desplazamiento;
+                for (var i = 0; i < bloques.Length; i++)
+                {
+                    var b = bloques[i];
+                    if (b.Titulo && i > 0) y += AIRE_ANTES_TITULO;
+                    if (b.Enlace >= 0 && b.Enlace < rectEnlaces.Length)
+                    {
+                        // Dónde queda en la ventana (la zona empieza en `arriba`), para el ratón.
+                        rectEnlaces[b.Enlace] = new RECT { Left = MARGEN + SANGRIA_VINETA, Top = arriba + y, Right = ANCHO_PANEL - MARGEN, Bottom = arriba + y + b.Alto };
+                    }
+                    if (y + b.Alto >= 0 && y < altoZona)
+                    {
+                        SelectObject(zona, b.Titulo ? fTituloSec : fTexto);
+                        var sobreEnlace = b.Enlace >= 0 && bajoRaton == BAJO_ENLACE - b.Enlace;
+                        SetTextColor(zona, b.Titulo ? Rgb(252, 211, 77) : b.Enlace >= 0 ? (sobreEnlace ? Rgb(255, 255, 255) : Rgb(56, 189, 248)) : Rgb(226, 232, 240));
+                        if (b.Vineta)
+                        {
+                            var rv = new RECT { Left = MARGEN, Top = y, Right = MARGEN + SANGRIA_VINETA, Bottom = y + b.Alto };
+                            DrawText(zona, b.Enlace >= 0 ? "›" : "•", -1, ref rv, DT_LEFT);
+                        }
+                        var rb = new RECT { Left = MARGEN + (b.Vineta ? SANGRIA_VINETA : 0), Top = y, Right = ANCHO_PANEL - MARGEN, Bottom = y + b.Alto };
+                        DrawText(zona, b.Texto, -1, ref rb, DT_LEFT | DT_WORDBREAK);
+                    }
+                    y += b.Alto + AIRE_PARRAFO;
+                }
+                BitBlt(hdc, 0, arriba, ANCHO_PANEL, altoZona, zona, 0, 0, SRCCOPY);
+                SelectObject(zona, zonaAnterior); DeleteObject(lienzoZona); DeleteDC(zona);
+                DeleteObject(fTituloSec); DeleteObject(fTexto);
+
+                // El botón «Copiar» / «Copiado» en el pie, a la derecha.
+                var rBoton = RectBotonCopiar();
+                var pincelBoton = CreateSolidBrush(bajoRaton == BAJO_COPIAR ? Rgb(56, 189, 248) : Rgb(26, 34, 54));
+                FillRect(hdc, ref rBoton, pincelBoton);
+                DeleteObject(pincelBoton);
                 SelectObject(hdc, fPie);
-                var fTexto = CreateFont(17, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
-                SelectObject(hdc, fTexto);
-                SetTextColor(hdc, Rgb(226, 232, 240));
-                var rt = new RECT { Left = MARGEN, Top = ALTO_CABECERA + MARGEN / 2, Right = ANCHO_PANEL - MARGEN, Bottom = alto - ALTO_PIE };
-                DrawText(hdc, cuerpo, -1, ref rt, DT_LEFT | DT_WORDBREAK);
-                DeleteObject(fTexto);
+                SetTextColor(hdc, bajoRaton == BAJO_COPIAR ? Rgb(9, 13, 24) : Rgb(226, 232, 240));
+                DrawText(hdc, Textos.T(copiado ? "panel_copiado" : "panel_copiar"), -1, ref rBoton, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                // Y a la izquierda, si hace falta, que se puede bajar con la rueda.
+                if (altoTexto > altoZona)
+                {
+                    SetTextColor(hdc, Rgb(148, 163, 184));
+                    var rAviso = new RECT { Left = MARGEN, Top = alto - ALTO_PIE - MARGEN / 2, Right = rBoton.Left - AIRE, Bottom = alto };
+                    DrawText(hdc, Textos.T("panel_rueda"), -1, ref rAviso, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                }
             }
 
             var lista = huecos;

@@ -36,7 +36,7 @@ namespace MtgCornerArenaBridge;
 /// </summary>
 internal static class Columna
 {
-    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen }
+    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival }
 
     /// <summary>Una fila. Las de contexto traen su etiqueta hecha y un dato (nombre del mazo, id de la carta).</summary>
     private sealed record Fila(Accion Accion, string Glifo, string Clave, string? Dato = null, string? Etiqueta = null);
@@ -89,6 +89,7 @@ internal static class Columna
     [DllImport("user32.dll")] private static extern int FillRect(IntPtr hdc, ref RECT rc, IntPtr pincel);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int DrawText(IntPtr hdc, string texto, int largo, ref RECT rc, uint formato);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool GetWindowRect(IntPtr hWnd, out RECT rc);
+    [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr hWnd, out RECT rc);
     [DllImport("user32.dll")] private static extern int SetWindowRgn(IntPtr hWnd, IntPtr region, bool repintar);
     [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr despues, int x, int y, int ancho, int alto, uint banderas);
     [DllImport("user32.dll")] private static extern bool InvalidateRect(IntPtr hWnd, IntPtr rc, bool borrar);
@@ -101,6 +102,8 @@ internal static class Columna
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr contexto);
 
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
+    [DllImport("gdi32.dll")] private static extern bool Ellipse(IntPtr hdc, int izq, int arriba, int der, int abajo);
+    [DllImport("gdi32.dll")] private static extern IntPtr GetStockObject(int objeto);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateRoundRectRgn(int izq, int arriba, int der, int abajo, int anchoElipse, int altoElipse);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateFont(int alto, int ancho, int escape, int orientacion, int grosor, uint cursiva, uint subrayado, uint tachado, uint juego, uint precision, uint recorte, uint calidad, uint paso, string cara);
@@ -124,7 +127,7 @@ internal static class Columna
     private const int SW_HIDE = 0, SW_SHOWNOACTIVATE = 4;
     private const uint LWA_ALPHA = 0x2;
     private const int TRANSPARENT_BK = 1;
-    private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_SINGLELINE = 0x20, DT_CALCRECT = 0x400, DT_END_ELLIPSIS = 0x8000;
+    private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_SINGLELINE = 0x20, DT_CALCRECT = 0x400, DT_WORDBREAK = 0x10, DT_END_ELLIPSIS = 0x8000;
     private const uint TME_LEAVE = 0x2;
     private const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_HIDEWINDOW = 0x80;
     private static readonly IntPtr HWND_TOPMOST = new(-1);
@@ -161,6 +164,7 @@ internal static class Columna
         new(Accion.Coleccion, "", "col_coleccion"),
         new(Accion.Constructor, "", "col_constructor"),
         new(Accion.Arranque, "", "col_arranque"),
+        new(Accion.Version, "\uE946", "col_version", "version"),
         new(Accion.Salir, "", "col_salir"),
     ];
 
@@ -197,6 +201,30 @@ internal static class Columna
     /// </summary>
     private static volatile string? enCurso;
     private static int faseCurso;
+
+    /// <summary>
+    /// LA FILA QUE PIDE ATENCIÓN: su glifo y su nombre en ámbar y un punto en la
+    /// esquina, hasta que se pulsa. Es cómo se ve, con la columna cerrada, que
+    /// hay un resumen de la partida esperando (pedido del usuario el
+    /// 2026-09-26). El ámbar ya es el color de la marca en la cabecera, así que
+    /// no se añade nada nuevo al diseño.
+    /// </summary>
+    private static readonly HashSet<string> destacadas = new();
+
+    public static void Destacar(string dato)
+    {
+        lock (destacadas) destacadas.Add(dato);
+        Refrescar();
+    }
+
+    public static void Olvidar(string dato)
+    {
+        lock (destacadas) destacadas.Remove(dato);
+        Refrescar();
+    }
+
+    /// <summary>La versión del programa, para la fila que la enseña. La pone Program al arrancar.</summary>
+    public static string Version { get; set; } = "";
 
     public static void EnCurso(string? dato)
     {
@@ -260,10 +288,16 @@ internal static class Columna
         Accion.Amenaza => "\uE7BA",
         Accion.Sinergias => "\uE945",
         Accion.Resumen => "\uE7C3",
+        Accion.SinergiaRival => "\uE7BA",
         _ => "",
     };
 
-    private static int Alto => ALTO_CABECERA + Filas.Length * ALTO_FILA + AIRE_ABAJO;
+    /// <summary>El hueco entre lo del momento (arriba) y lo de siempre (abajo), con su raya en medio.</summary>
+    private const int AIRE_GRUPO = 14;
+    private static int Alto => ALTO_CABECERA + Filas.Length * ALTO_FILA + (cuantasDeContexto > 0 ? AIRE_GRUPO : 0) + AIRE_ABAJO;
+
+    /// <summary>Dónde empieza la fila i: las de siempre bajan el hueco del grupo cuando hay filas del momento.</summary>
+    private static int ArribaDe(int i) => ALTO_CABECERA + i * ALTO_FILA + (cuantasDeContexto > 0 && i >= cuantasDeContexto ? AIRE_GRUPO : 0);
 
     // El procedimiento en un campo estático a propósito: Windows guarda su
     // puntero, y si el recolector se llevara el delegado el siguiente mensaje
@@ -380,6 +414,7 @@ internal static class Columna
 
             Recortar(anchoInicial);
             SetLayeredWindowAttributes(ventana, 0, 236, LWA_ALPHA);
+            CrearAyuda(instancia);
             SetTimer(ventana, new IntPtr(1), 500, IntPtr.Zero);
             visible = ver;
             ShowWindow(ventana, ver ? SW_SHOWNOACTIVATE : SW_HIDE);
@@ -391,7 +426,7 @@ internal static class Columna
             }
         }
         catch { /* sin escritorio o sin permisos: el residente sigue sin columna */ }
-        finally { ventana = IntPtr.Zero; hilo = null; }
+        finally { if (ayuda != IntPtr.Zero) DestroyWindow(ayuda); ayuda = IntPtr.Zero; ventana = IntPtr.Zero; hilo = null; }
     }
 
     private static void Recortar(int ancho) =>
@@ -453,8 +488,13 @@ internal static class Columna
     private static int FilaEn(IntPtr lParam)
     {
         var y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
-        var i = (y - ALTO_CABECERA) / ALTO_FILA;
-        return y >= ALTO_CABECERA && i >= 0 && i < Filas.Length ? i : -1;
+        var filas = Filas;
+        for (var i = 0; i < filas.Length; i++)
+        {
+            var arriba = ArribaDe(i);
+            if (y >= arriba && y < arriba + ALTO_FILA) return i;
+        }
+        return -1;
     }
 
     private static IntPtr Procedimiento(IntPtr hWnd, uint mensaje, IntPtr wParam, IntPtr lParam)
@@ -467,6 +507,7 @@ internal static class Columna
 
             case WM_TIMER:
                 Recolocar();
+                ActualizarAyuda();
                 // Los puntos del indicador de carga andan con este latido.
                 if (enCurso is not null) { faseCurso++; InvalidateRect(hWnd, IntPtr.Zero, false); }
                 return IntPtr.Zero;
@@ -538,6 +579,7 @@ internal static class Columna
         var ancho = abierta ? anchoAbierta : ANCHO_CERRADA;
         var fondo = CreateSolidBrush(Rgb(9, 13, 24));
         var resalte = CreateSolidBrush(Rgb(26, 34, 54));
+        var separador = CreateSolidBrush(Rgb(148, 163, 184));
         var ambar = CreateSolidBrush(Rgb(245, 158, 11));
         var glifos = CreateFont(19, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe MDL2 Assets");
         var marca = CreateFont(12, 0, 0, 0, 800, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
@@ -575,28 +617,41 @@ internal static class Columna
             var contexto = cuantasDeContexto;
             for (var i = 0; i < filas.Length; i++)
             {
-                var arriba = ALTO_CABECERA + i * ALTO_FILA;
-                // Una raya fina entre lo del momento y lo de siempre.
+                var arriba = ArribaDe(i);
+                // La raya entre lo del momento y lo de siempre, en medio del
+                // hueco: que se vea dónde acaba lo de la partida (pedido del
+                // usuario el 2026-09-26: la fina de antes no se distinguía).
                 if (contexto > 0 && i == contexto)
                 {
-                    var raya = new RECT { Left = 8, Top = arriba - 1, Right = ancho - 8, Bottom = arriba };
-                    FillRect(hdc, ref raya, resalte);
+                    var raya = new RECT { Left = 10, Top = arriba - AIRE_GRUPO / 2 - 1, Right = ancho - 10, Bottom = arriba - AIRE_GRUPO / 2 + 1 };
+                    FillRect(hdc, ref raya, separador);
                 }
                 if (abierta && i == filaBajoRaton)
                 {
                     var r = new RECT { Left = 4, Top = arriba + 2, Right = ancho - 4, Bottom = arriba + ALTO_FILA - 2 };
                     FillRect(hdc, ref r, resalte);
                 }
+                bool nueva;
+                lock (destacadas) nueva = filas[i].Dato is { } dd && destacadas.Contains(dd);
                 SelectObject(hdc, glifos);
-                SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : Rgb(186, 196, 214));
+                SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : nueva ? Rgb(252, 211, 77) : Rgb(186, 196, 214));
                 var rGlifo = new RECT { Left = 0, Top = arriba, Right = ANCHO_CERRADA, Bottom = arriba + ALTO_FILA };
                 var ocupada = enCurso is not null && filas[i].Dato == enCurso;
                 DrawText(hdc, ocupada ? "" : filas[i].Glifo, -1, ref rGlifo, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                if (nueva && !ocupada)
+                {
+                    // El punto: en la esquina del glifo, sin borde.
+                    var pincelAnterior = SelectObject(hdc, ambar);
+                    var plumaAnterior = SelectObject(hdc, GetStockObject(8 /* NULL_PEN */));
+                    Ellipse(hdc, ANCHO_CERRADA - 15, arriba + 9, ANCHO_CERRADA - 6, arriba + 18);
+                    SelectObject(hdc, plumaAnterior);
+                    SelectObject(hdc, pincelAnterior);
+                }
 
                 if (abierta)
                 {
                     SelectObject(hdc, texto);
-                    SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : Rgb(226, 232, 240));
+                    SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : nueva ? Rgb(252, 211, 77) : Rgb(226, 232, 240));
                     var rTexto = new RECT { Left = ANCHO_CERRADA + 2, Top = arriba, Right = ancho - 10, Bottom = arriba + ALTO_FILA };
                     var rotulo = ocupada ? Etiqueta(filas[i]) + new string('.', 1 + faseCurso % 3) : Etiqueta(filas[i]);
                     DrawText(hdc, rotulo, -1, ref rTexto, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -608,6 +663,7 @@ internal static class Columna
             EndPaint(hWnd, ref ps);
             DeleteObject(fondo);
             DeleteObject(resalte);
+            DeleteObject(separador);
             DeleteObject(ambar);
             DeleteObject(glifos);
             DeleteObject(marca);
@@ -619,5 +675,104 @@ internal static class Columna
     private static string Etiqueta(Fila f) =>
         f.Etiqueta ?? (f.Accion == Accion.Arranque
             ? Textos.T(arrancaSolo?.Invoke() == true ? "col_arranque_si" : "col_arranque_no")
+            : f.Accion == Accion.Version ? Textos.T("col_version", Version)
             : Textos.T(f.Clave));
+
+    // ── La ayuda: qué hace cada fila, al pasar el ratón ──────────────────
+    //
+    // Una ventanita a la derecha de la columna abierta, con una frase sobre la
+    // fila que hay bajo el ratón (pedido del usuario el 2026-09-26). Sale con
+    // el tic de medio segundo de la columna, no al instante, para que mover el
+    // ratón por la lista no vaya dejando cajas por el camino.
+    private const int ANCHO_AYUDA = 300, MARGEN_AYUDA = 12;
+    private static IntPtr ayuda;
+    private static WndProc? procedimientoAyuda;
+    private static int filaAyuda = -1, filaCandidata = -1, ticsCandidata;
+    private static string textoAyuda = "";
+
+    private static string ClaveAyuda(Accion a) => "ayuda_" + a.ToString().ToLowerInvariant();
+
+    private static void CrearAyuda(IntPtr instancia)
+    {
+        procedimientoAyuda = ProcedimientoAyuda;
+        var clase = new WNDCLASSEX
+        {
+            cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
+            lpfnWndProc = Marshal.GetFunctionPointerForDelegate(procedimientoAyuda),
+            hInstance = instancia,
+            hCursor = LoadCursor(IntPtr.Zero, IDC_ARROW),
+            lpszClassName = "MtgCornerAyuda",
+        };
+        RegisterClassEx(ref clase);
+        ayuda = CreateWindowEx(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+            "MtgCornerAyuda", "", WS_POPUP, 0, 0, ANCHO_AYUDA, 40, IntPtr.Zero, IntPtr.Zero, instancia, IntPtr.Zero);
+        if (ayuda != IntPtr.Zero) SetLayeredWindowAttributes(ayuda, 0, 240, LWA_ALPHA);
+    }
+
+    /// <summary>Con la columna abierta y una fila bajo el ratón, la ayuda de esa fila; si no, nada.</summary>
+    private static void ActualizarAyuda()
+    {
+        if (ayuda == IntPtr.Zero) return;
+        var filas = Filas;
+        var fila = abierta && visible && filaBajoRaton >= 0 && filaBajoRaton < filas.Length ? filaBajoRaton : -1;
+        // Un segundo quieto sobre la fila (dos tics) antes de enseñarla: quien
+        // baja el ratón por la lista no quiere una caja por cada fila.
+        if (fila != filaCandidata) { filaCandidata = fila; ticsCandidata = 0; if (fila < 0 || fila != filaAyuda) { filaAyuda = -1; ShowWindow(ayuda, SW_HIDE); } if (fila < 0) return; }
+        if (fila == filaAyuda) return;
+        if (++ticsCandidata < 2) return;
+        filaAyuda = fila;
+        textoAyuda = Textos.T(ClaveAyuda(filas[fila].Accion));
+        if (textoAyuda.Length == 0 || textoAyuda.StartsWith("ayuda_", StringComparison.Ordinal)) { ShowWindow(ayuda, SW_HIDE); return; }
+
+        // El alto, medido con la fuente con la que se pinta.
+        var hdc = GetDC(IntPtr.Zero);
+        var fuente = CreateFont(15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        var anterior = SelectObject(hdc, fuente);
+        var r = new RECT { Left = 0, Top = 0, Right = ANCHO_AYUDA - MARGEN_AYUDA * 2, Bottom = 0 };
+        DrawText(hdc, textoAyuda, -1, ref r, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
+        SelectObject(hdc, anterior); DeleteObject(fuente); ReleaseDC(IntPtr.Zero, hdc);
+        var alto = r.Bottom - r.Top + MARGEN_AYUDA * 2;
+
+        GetWindowRect(ventana, out var rc);
+        var x = rc.Right + 6;
+        var y = rc.Top + ArribaDe(fila);
+        SetWindowPos(ayuda, HWND_TOPMOST, x, y, ANCHO_AYUDA, alto, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        InvalidateRect(ayuda, IntPtr.Zero, true);
+    }
+
+    private static IntPtr ProcedimientoAyuda(IntPtr hWnd, uint mensaje, IntPtr wParam, IntPtr lParam)
+    {
+        switch (mensaje)
+        {
+            case WM_PAINT:
+            {
+                var hdc = BeginPaint(hWnd, out var ps);
+                var fondo = CreateSolidBrush(Rgb(9, 13, 24));
+                var marco = CreateSolidBrush(Rgb(56, 189, 248));
+                var fuente = CreateFont(15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                try
+                {
+                    GetClientRect(hWnd, out var rc);
+                    FillRect(hdc, ref rc, marco);
+                    var dentro = new RECT { Left = 1, Top = 1, Right = rc.Right - 1, Bottom = rc.Bottom - 1 };
+                    FillRect(hdc, ref dentro, fondo);
+                    SetBkMode(hdc, TRANSPARENT_BK);
+                    SelectObject(hdc, fuente);
+                    SetTextColor(hdc, Rgb(226, 232, 240));
+                    var rt = new RECT { Left = MARGEN_AYUDA, Top = MARGEN_AYUDA, Right = rc.Right - MARGEN_AYUDA, Bottom = rc.Bottom - MARGEN_AYUDA };
+                    DrawText(hdc, textoAyuda, -1, ref rt, DT_LEFT | DT_WORDBREAK);
+                }
+                finally
+                {
+                    DeleteObject(fuente); DeleteObject(fondo); DeleteObject(marco);
+                    EndPaint(hWnd, ref ps);
+                }
+                return IntPtr.Zero;
+            }
+            case WM_MOUSEACTIVATE:
+                return new IntPtr(MA_NOACTIVATE);
+        }
+        return DefWindowProc(hWnd, mensaje, wParam, lParam);
+    }
 }

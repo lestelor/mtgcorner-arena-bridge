@@ -706,8 +706,8 @@ internal static class Textos
         // La columna de iconos sobre el juego (Columna.cs): un nombre por icono.
         ["col_importar"] =
         [
-            "Import now", "Importar ahora", "Jetzt importieren", "Importer maintenant",
-            "Importar agora", "Importa adesso", "今すぐ取り込む", "立即导入",
+            "Import collection now", "Importar la colección ahora", "Sammlung jetzt importieren", "Importer la collection maintenant",
+            "Importar a coleção agora", "Importa la collezione adesso", "今すぐコレクションを取り込む", "立即导入收藏",
         ],
         ["col_coleccion"] =
         [
@@ -849,6 +849,227 @@ internal static class Textos
         [
             "The summary couldn't be made right now.", "No se ha podido hacer el resumen ahora mismo.", "Die Zusammenfassung konnte gerade nicht erstellt werden.", "Le résumé n'a pas pu être fait pour l'instant.",
             "Não foi possível fazer o resumo agora.", "Non è stato possibile fare il riepilogo adesso.", "今はまとめを作成できませんでした。", "现在无法生成总结。",
+        ],
+        // Las secciones del resumen de la partida y su pie.
+        ["res_como_fue"] =
+        [
+            "How it went", "Cómo fue", "So lief es", "Comment ça s'est passé",
+            "Como foi", "Com'è andata", "試合の流れ", "对局经过",
+        ],
+        ["res_motivo"] =
+        [
+            "Why", "Por qué", "Warum", "Pourquoi",
+            "Porquê", "Perché", "理由", "原因",
+        ],
+        ["res_errores"] =
+        [
+            "Mistakes", "Errores", "Fehler", "Erreurs",
+            "Erros", "Errori", "ミス", "失误",
+        ],
+        ["res_consejos"] =
+        [
+            "Next time", "La próxima vez", "Nächstes Mal", "La prochaine fois",
+            "Da próxima vez", "La prossima volta", "次回に向けて", "下次建议",
+        ],
+        ["panel_copiar"] =
+        [
+            "Copy", "Copiar", "Kopieren", "Copier",
+            "Copiar", "Copia", "コピー", "复制",
+        ],
+        ["panel_copiado"] =
+        [
+            "Copied", "Copiado", "Kopiert", "Copié",
+            "Copiado", "Copiato", "コピー済み", "已复制",
+        ],
+        ["panel_rueda"] =
+        [
+            "Scroll with the mouse wheel to read the rest.", "Baja con la rueda del ratón para leer el resto.", "Mit dem Mausrad scrollen, um den Rest zu lesen.", "Faites défiler avec la molette pour lire la suite.",
+            "Use a roda do rato para ler o resto.", "Scorri con la rotellina per leggere il resto.", "マウスホイールで続きを読めます。", "滚动鼠标滚轮查看其余内容。",
+        ],
+        ["col_version"] =
+        [
+            "MTG Corner v{0} · check for updates", "MTG Corner v{0} · buscar actualización", "MTG Corner v{0} · nach Updates suchen", "MTG Corner v{0} · vérifier les mises à jour",
+            "MTG Corner v{0} · procurar atualização", "MTG Corner v{0} · cerca aggiornamenti", "MTG Corner v{0} · 更新を確認", "MTG Corner v{0} · 检查更新",
+        ],
+        ["sup_version_ultima"] =
+        [
+            "You have the latest version (v{0}).", "Tienes la última versión (v{0}).", "Du hast die neueste Version (v{0}).", "Vous avez la dernière version (v{0}).",
+            "Tens a versão mais recente (v{0}).", "Hai l'ultima versione (v{0}).", "最新バージョン（v{0}）です。", "你已是最新版本（v{0}）。",
+        ],
+        ["sup_version_nueva"] =
+        [
+            "Version {0} is out (you have {1}). Opening the download page.", "Hay una versión {0} (tienes la {1}). Se abre la página de descarga.", "Version {0} ist da (du hast {1}). Die Downloadseite wird geöffnet.", "La version {0} est sortie (vous avez la {1}). Ouverture de la page de téléchargement.",
+            "Saiu a versão {0} (tens a {1}). A abrir a página de download.", "È uscita la versione {0} (hai la {1}). Si apre la pagina di download.", "バージョン {0} が公開されています（現在 {1}）。ダウンロードページを開きます。", "已发布版本 {0}（你当前是 {1}）。正在打开下载页面。",
+        ],
+        ["col_sinergia_rival"] =
+        [
+            "Opponent synergy: {0}", "Sinergia del rival: {0}", "Synergie des Gegners: {0}", "Synergie de l'adversaire : {0}",
+            "Sinergia do adversário: {0}", "Sinergia dell'avversario: {0}", "相手のシナジー: {0}", "对手协同：{0}",
+        ],
+        ["sup_sinergia_rival"] =
+        [
+            "Opponent synergy ({0}): {1}", "Sinergia del rival ({0}): {1}", "Synergie des Gegners ({0}): {1}", "Synergie de l'adversaire ({0}) : {1}",
+            "Sinergia do adversário ({0}): {1}", "Sinergia dell'avversario ({0}): {1}", "相手のシナジー（{0}）: {1}", "对手协同（{0}）：{1}",
+        ],
+        ["panel_rival_dan"] =
+        [
+            "Enablers ({0}) · ▲ on the battlefield", "Las que lo dan ({0}) · ▲ en mesa", "Ermöglicher ({0}) · ▲ im Spiel", "Celles qui le donnent ({0}) · ▲ sur le champ de bataille",
+            "As que o dão ({0}) · ▲ em jogo", "Quelle che lo danno ({0}) · ▲ in gioco", "供給側（{0}）· ▲ 戦場", "提供方（{0}）· ▲ 在场",
+        ],
+        ["panel_rival_aprovechan"] =
+        [
+            "Payoffs ({0}) · ▲ on the battlefield", "Las que lo aprovechan ({0}) · ▲ en mesa", "Nutznießer ({0}) · ▲ im Spiel", "Celles qui en profitent ({0}) · ▲ sur le champ de bataille",
+            "As que o aproveitam ({0}) · ▲ em jogo", "Quelle che lo sfruttano ({0}) · ▲ in gioco", "活用側（{0}）· ▲ 戦場", "受益方（{0}）· ▲ 在场",
+        ],
+        ["regla_sacrificio"] =
+        [
+            "sacrifice", "sacrificio", "Opfern", "sacrifice",
+            "sacrifício", "sacrificio", "生け贄", "牺牲",
+        ],
+        ["regla_fichas"] =
+        [
+            "tokens", "fichas", "Spielsteine", "jetons",
+            "fichas", "pedine", "トークン", "衍生物",
+        ],
+        ["regla_vida"] =
+        [
+            "life gain", "ganar vida", "Lebensgewinn", "gain de vie",
+            "ganho de vida", "guadagno di vita", "ライフ獲得", "获得生命",
+        ],
+        ["regla_descarte"] =
+        [
+            "discard", "descarte", "Abwerfen", "défausse",
+            "descarte", "scarto", "ディスカード", "弃牌",
+        ],
+        ["regla_cementerio"] =
+        [
+            "graveyard", "cementerio", "Friedhof", "cimetière",
+            "cemitério", "cimitero", "墓地", "坟场",
+        ],
+        ["regla_contadores"] =
+        [
+            "counters", "contadores", "Marken", "marqueurs",
+            "marcadores", "segnalini", "カウンター", "指示物",
+        ],
+        ["regla_artefactos"] =
+        [
+            "artifacts", "artefactos", "Artefakte", "artefacts",
+            "artefatos", "artefatti", "アーティファクト", "神器",
+        ],
+        ["regla_auras"] =
+        [
+            "auras", "auras", "Auren", "auras",
+            "auras", "aure", "オーラ", "灵气",
+        ],
+        ["regla_encantamientos"] =
+        [
+            "enchantments", "encantamientos", "Verzauberungen", "enchantements",
+            "encantamentos", "incantesimi", "エンチャント", "结界",
+        ],
+        ["regla_equipo"] =
+        [
+            "equipment", "equipo", "Ausrüstung", "équipements",
+            "equipamentos", "equipaggiamenti", "装備品", "武具",
+        ],
+        ["regla_hechizos"] =
+        [
+            "instants and sorceries", "instantáneos y conjuros", "Spontanzauber und Hexereien", "éphémères et rituels",
+            "mágicas instantâneas e feitiços", "istantanei e stregonerie", "インスタントとソーサリー", "瞬间与法术",
+        ],
+        ["regla_robar"] =
+        [
+            "card draw", "robar cartas", "Kartenziehen", "pioche",
+            "comprar cartas", "pescare carte", "ドロー", "抓牌",
+        ],
+        ["ayuda_importar"] =
+        [
+            "Reads your Arena collection from the game's log and uploads it to your MTG Corner account.", "Lee tu colección de Arena del registro del juego y la sube a tu cuenta de MTG Corner.", "Liest deine Arena-Sammlung aus dem Spielprotokoll und lädt sie in dein MTG-Corner-Konto.", "Lit votre collection Arena dans le journal du jeu et l'envoie sur votre compte MTG Corner.",
+            "Lê a tua coleção do Arena a partir do registo do jogo e envia-a para a tua conta MTG Corner.", "Legge la tua collezione di Arena dal registro del gioco e la carica sul tuo account MTG Corner.", "ゲームのログから Arena のコレクションを読み取り、MTG Corner のアカウントに送ります。", "从游戏日志读取你的 Arena 收藏并上传到你的 MTG Corner 账户。",
+        ],
+        ["ayuda_coleccion"] =
+        [
+            "Opens your collection on the website: your decks, what you own and what each card is worth.", "Abre tu colección en la web: tus mazos, lo que tienes y lo que vale cada carta.", "Öffnet deine Sammlung auf der Website: deine Decks, was du besitzt und was jede Karte wert ist.", "Ouvre votre collection sur le site : vos decks, ce que vous possédez et la valeur de chaque carte.",
+            "Abre a tua coleção no site: os teus baralhos, o que tens e quanto vale cada carta.", "Apre la tua collezione sul sito: i tuoi mazzi, cosa possiedi e quanto vale ogni carta.", "サイトでコレクションを開きます：デッキ、所持カード、各カードの価格。", "在网站上打开你的收藏：你的套牌、拥有的牌和每张牌的价格。",
+        ],
+        ["ayuda_constructor"] =
+        [
+            "Opens the deck builder: describe what you want to play and get a full list with its curve and what you are missing.", "Abre el constructor de mazos: describe lo que quieres jugar y sale una lista completa con su curva y lo que te falta.", "Öffnet den Deckbauer: Beschreibe, was du spielen willst, und bekomme eine komplette Liste mit Kurve und dem, was dir fehlt.", "Ouvre le constructeur de decks : décrivez ce que vous voulez jouer et obtenez une liste complète avec sa courbe et ce qu'il vous manque.",
+            "Abre o construtor de baralhos: descreve o que queres jogar e recebe uma lista completa com a curva e o que te falta.", "Apre il costruttore di mazzi: descrivi cosa vuoi giocare e ottieni una lista completa con la curva e cosa ti manca.", "デッキビルダーを開きます：遊びたい内容を書くと、マナカーブと不足カード付きの完全なリストが出ます。", "打开套牌构筑器：描述你想玩的内容，即可得到完整牌表、曲线和缺少的牌。",
+        ],
+        ["ayuda_arranque"] =
+        [
+            "Whether MTG Corner starts with Windows, so the column is there whenever you open Arena.", "Si MTG Corner arranca con Windows, para que la columna esté ahí cada vez que abres Arena.", "Ob MTG Corner mit Windows startet, damit die Leiste da ist, sobald du Arena öffnest.", "Si MTG Corner démarre avec Windows, pour que la colonne soit là dès que vous ouvrez Arena.",
+            "Se o MTG Corner arranca com o Windows, para a coluna estar lá sempre que abres o Arena.", "Se MTG Corner si avvia con Windows, così la colonna c'è ogni volta che apri Arena.", "Windows 起動時に MTG Corner も起動するか。Arena を開くたびに列が表示されます。", "MTG Corner 是否随 Windows 启动，这样每次打开 Arena 时侧栏都在。",
+        ],
+        ["ayuda_salir"] =
+        [
+            "Closes MTG Corner. The column disappears until you run it again.", "Cierra MTG Corner. La columna desaparece hasta que lo vuelvas a ejecutar.", "Schließt MTG Corner. Die Leiste verschwindet, bis du es wieder startest.", "Ferme MTG Corner. La colonne disparaît jusqu'à ce que vous le relanciez.",
+            "Fecha o MTG Corner. A coluna desaparece até o voltares a executar.", "Chiude MTG Corner. La colonna sparisce finché non lo riavvii.", "MTG Corner を終了します。再度起動するまで列は表示されません。", "关闭 MTG Corner。侧栏会消失，直到你再次运行。",
+        ],
+        ["ayuda_version"] =
+        [
+            "The version you are running. Click to check whether there is a newer one and download it.", "La versión que tienes. Pulsa para comprobar si hay una más nueva y descargarla.", "Deine aktuelle Version. Klicke, um zu prüfen, ob es eine neuere gibt, und sie herunterzuladen.", "La version que vous utilisez. Cliquez pour vérifier s'il en existe une plus récente et la télécharger.",
+            "A versão que tens. Clica para verificar se há uma mais recente e descarregá-la.", "La versione che hai. Clicca per controllare se ce n'è una più recente e scaricarla.", "現在のバージョン。クリックすると新しいバージョンの有無を確認してダウンロードできます。", "你当前的版本。点击检查是否有新版本并下载。",
+        ],
+        ["ayuda_mejorar"] =
+        [
+            "Opens this deck on the website with suggestions to improve it: cards to add or swap and what they cost.", "Abre este mazo en la web con sugerencias para mejorarlo: cartas que añadir o cambiar y lo que cuestan.", "Öffnet dieses Deck auf der Website mit Vorschlägen zur Verbesserung: Karten zum Hinzufügen oder Tauschen und ihre Preise.", "Ouvre ce deck sur le site avec des suggestions pour l'améliorer : cartes à ajouter ou à remplacer et leur prix.",
+            "Abre este baralho no site com sugestões para o melhorar: cartas a acrescentar ou trocar e o seu preço.", "Apre questo mazzo sul sito con suggerimenti per migliorarlo: carte da aggiungere o cambiare e il loro prezzo.", "サイトでこのデッキを開き、追加・入れ替え候補と価格の改善案を表示します。", "在网站上打开这副套牌并给出改进建议：可加入或替换的牌及其价格。",
+        ],
+        ["ayuda_similares"] =
+        [
+            "Cards that do something similar to the last card you played, legal in this format and in your deck's colours.", "Cartas que hacen algo parecido a la última que has jugado, legales en este formato y de los colores de tu mazo.", "Karten, die etwas Ähnliches tun wie deine zuletzt gespielte Karte, legal in diesem Format und in den Farben deines Decks.", "Des cartes qui font quelque chose de similaire à la dernière que vous avez jouée, légales dans ce format et dans les couleurs de votre deck.",
+            "Cartas que fazem algo parecido com a última que jogaste, legais neste formato e das cores do teu baralho.", "Carte che fanno qualcosa di simile all'ultima che hai giocato, legali in questo formato e nei colori del tuo mazzo.", "最後にプレイしたカードと似た働きをするカード。このフォーマットで使え、デッキの色に合うもの。", "与你最近打出的牌功能相似的牌，在本赛制合法且符合你套牌的颜色。",
+        ],
+        ["ayuda_combos"] =
+        [
+            "Known combos (Commander Spellbook) that include the last card you played, in this format.", "Combos conocidos (Commander Spellbook) en los que entra la última carta que has jugado, en este formato.", "Bekannte Kombos (Commander Spellbook) mit deiner zuletzt gespielten Karte, in diesem Format.", "Les combos connus (Commander Spellbook) qui incluent la dernière carte jouée, dans ce format.",
+            "Combos conhecidos (Commander Spellbook) onde entra a última carta que jogaste, neste formato.", "Combo noti (Commander Spellbook) in cui entra l'ultima carta che hai giocato, in questo formato.", "最後にプレイしたカードを含む既知のコンボ（Commander Spellbook）。このフォーマット内。", "包含你最近打出的牌的已知组合技（Commander Spellbook），限本赛制。",
+        ],
+        ["ayuda_sinergias"] =
+        [
+            "Cards that pair well with the last card you played: what it enables and what feeds it.", "Cartas que casan con la última que has jugado: lo que ella habilita y lo que la alimenta.", "Karten, die mit deiner zuletzt gespielten Karte harmonieren: was sie ermöglicht und was sie versorgt.", "Des cartes qui s'accordent avec la dernière carte jouée : ce qu'elle permet et ce qui l'alimente.",
+            "Cartas que combinam com a última que jogaste: o que ela permite e o que a alimenta.", "Carte che si abbinano all'ultima che hai giocato: ciò che abilita e ciò che la alimenta.", "最後にプレイしたカードと相性のよいカード：それが可能にするものと、それを支えるもの。", "与你最近打出的牌配合良好的牌：它能带动什么，以及什么能支持它。",
+        ],
+        ["ayuda_amenaza"] =
+        [
+            "A known combo the opponent has on the battlefield, or is one card away from. Click to see the pieces.", "Un combo conocido que el rival tiene en mesa, o al que le falta una carta. Pulsa para ver las piezas.", "Eine bekannte Kombo, die der Gegner im Spiel hat oder der nur eine Karte fehlt. Klicke, um die Teile zu sehen.", "Un combo connu que l'adversaire a sur le champ de bataille, ou auquel il manque une carte. Cliquez pour voir les pièces.",
+            "Um combo conhecido que o adversário tem em jogo, ou ao qual falta uma carta. Clica para ver as peças.", "Un combo noto che l'avversario ha in gioco, o a cui manca una carta. Clicca per vedere i pezzi.", "相手が戦場に揃えている、または残り1枚の既知コンボ。クリックでパーツを表示。", "对手已在场上组成、或只差一张牌的已知组合技。点击查看组件。",
+        ],
+        ["ayuda_sinergiarival"] =
+        [
+            "A synergy between cards the opponent has shown this game (battlefield, graveyard, stack). Click to see which cards.", "Una sinergia entre cartas que el rival ha enseñado en esta partida (mesa, cementerio, pila). Pulsa para ver cuáles.", "Eine Synergie zwischen Karten, die der Gegner in diesem Spiel gezeigt hat (Spielfeld, Friedhof, Stapel). Klicke, um sie zu sehen.", "Une synergie entre des cartes que l'adversaire a montrées dans cette partie (champ de bataille, cimetière, pile). Cliquez pour les voir.",
+            "Uma sinergia entre cartas que o adversário mostrou nesta partida (jogo, cemitério, pilha). Clica para ver quais.", "Una sinergia tra carte che l'avversario ha mostrato in questa partita (gioco, cimitero, pila). Clicca per vederle.", "この対戦で相手が見せたカード同士のシナジー（戦場、墓地、スタック）。クリックで表示。", "对手本局已展示的牌之间的协同（战场、坟场、堆叠）。点击查看是哪些牌。",
+        ],
+        ["ayuda_resumen"] =
+        [
+            "An AI review of the match that just ended: why you won or lost, mistakes by turn and tips. Uses the cards you actually had in hand.", "Un análisis por IA de la partida que acaba de terminar: por qué ganaste o perdiste, errores por turno y consejos. Tiene en cuenta las cartas que tenías en la mano.", "Eine KI-Auswertung des gerade beendeten Spiels: warum du gewonnen oder verloren hast, Fehler pro Zug und Tipps. Berücksichtigt die Karten, die du auf der Hand hattest.", "Une analyse par IA de la partie qui vient de se terminer : pourquoi vous avez gagné ou perdu, erreurs par tour et conseils. Tient compte des cartes que vous aviez en main.",
+            "Uma análise por IA da partida que acabou de terminar: porque ganhaste ou perdeste, erros por turno e conselhos. Tem em conta as cartas que tinhas na mão.", "Un'analisi con IA della partita appena finita: perché hai vinto o perso, errori per turno e consigli. Tiene conto delle carte che avevi in mano.", "終了した対戦の AI 分析：勝敗の理由、ターンごとのミス、アドバイス。実際の手札を考慮します。", "刚结束对局的 AI 复盘：胜负原因、逐回合失误和建议。会考虑你实际手中的牌。",
+        ],
+        ["res_mazo_rival"] =
+        [
+            "Decks the opponent may have played (click to see the list)", "Mazos que pudo llevar el rival (pulsa para ver la lista)", "Decks, die der Gegner gespielt haben könnte (klicken für die Liste)", "Decks que l'adversaire a pu jouer (cliquez pour voir la liste)",
+            "Baralhos que o adversário pode ter jogado (clica para ver a lista)", "Mazzi che l'avversario potrebbe aver giocato (clicca per la lista)", "相手が使った可能性のあるデッキ（クリックでリスト表示）", "对手可能使用的套牌（点击查看牌表）",
+        ],
+        ["res_mazo_coinciden"] =
+        [
+            "{0} cards in common", "{0} cartas en común", "{0} gemeinsame Karten", "{0} cartes en commun",
+            "{0} cartas em comum", "{0} carte in comune", "共通カード {0} 枚", "{0} 张相同的牌",
+        ],
+        ["res_mazo_meta"] =
+        [
+            "meta deck", "mazo del meta", "Meta-Deck", "deck du méta",
+            "baralho do meta", "mazzo del meta", "メタデッキ", "环境套牌",
+        ],
+        ["res_mazo_gente"] =
+        [
+            "community deck", "mazo de la gente", "Community-Deck", "deck de la communauté",
+            "baralho da comunidade", "mazzo della community", "コミュニティデッキ", "社区套牌",
+        ],
+        ["res_arranque"] =
+        [
+            "Opening hand", "El arranque", "Die Starthand", "La main de départ",
+            "A mão inicial", "La mano iniziale", "初手", "起手"
         ],
         ["col_esta_carta"] =
         [

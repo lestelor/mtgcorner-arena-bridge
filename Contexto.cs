@@ -70,6 +70,9 @@ internal static class Contexto
     /// </summary>
     public static int[] MesaRival { get; private set; } = [];
 
+    /// <summary>Todo lo que el rival ha enseñado en la partida (mesa, cementerio, pila, exilio): grpIds. Para sus sinergias.</summary>
+    public static int[] VistasRival { get; private set; } = [];
+
     /// <summary>
     /// LA OTRA CARA de esa carta, si está transformada, o null.
     ///
@@ -102,10 +105,19 @@ internal static class Contexto
         public readonly List<int> JugadasYo = new(), JugadasRival = new();
         public int DanoAYo, DanoARival;
         public readonly HashSet<int> Vistas = new();
+        /// <summary>Lo que tenías en la mano al empezar el turno: el resumen sólo puede aconsejar con esto.</summary>
+        public readonly List<int> ManoYo = new();
+    }
+
+    /// <summary>Una mano ofrecida al empezar (la de 7 y una por cada mulligan) y si se aceptó.</summary>
+    public sealed class ManoOfrecida
+    {
+        public int[] Cartas = [];
+        public bool? Aceptada;
     }
 
     /// <summary>Una partida terminada, tal como se manda a la web para el resumen.</summary>
-    public sealed record Partida(string? Formato, string? Mazo, bool? Gane, string? Razon, IReadOnlyList<Turno> Turnos);
+    public sealed record Partida(string? Formato, string? Mazo, bool? Gane, string? Razon, IReadOnlyList<Turno> Turnos, IReadOnlyList<ManoOfrecida> Manos);
 
     /// <summary>La última partida terminada, con su cronología, o null.</summary>
     public static Partida? UltimaPartida { get; private set; }
@@ -179,6 +191,7 @@ internal static class Contexto
     private static int miAsiento;
     /// <summary>La cronología de la partida en curso y lo que hace falta para cerrarla.</summary>
     private static readonly List<Turno> turnos = new();
+    private static readonly List<ManoOfrecida> manos = new();
     private static readonly Dictionary<int, int> equipoPorAsiento = new();
     private static string idPartida = "";
     private static string? formato, evento, edicion;
@@ -232,9 +245,10 @@ internal static class Contexto
             zonas.Clear();
             miAsiento = 0;
             turnos.Clear();
+            manos.Clear();
             equipoPorAsiento.Clear();
             idPartida = "";
-            Cambiar(null, null, null, null, null, false, "", []);
+            Cambiar(null, null, null, null, null, false, "", [], []);
         }
         if (estrenando)
         {
@@ -280,6 +294,19 @@ internal static class Contexto
             var asiento = Asiento.Match(linea);
             if (asiento.Success) miAsiento = int.Parse(asiento.Groups[1].Value);
 
+            // EL MULLIGAN: cada vez que Arena te ofrece una mano, se apunta; la
+            // decisión (quedársela o no) llega en tu respuesta, y va a la última.
+            if (linea.Contains("GREMessageType_MulliganReq", StringComparison.Ordinal) && miAsiento != 0)
+            {
+                var mano = ManoAhora();
+                if (mano.Length > 0 && (manos.Count == 0 || manos[^1].Aceptada is not null || !manos[^1].Cartas.SequenceEqual(mano)))
+                    manos.Add(new ManoOfrecida { Cartas = mano });
+            }
+            if (manos.Count > 0 && manos[^1].Aceptada is null)
+            {
+                if (linea.Contains("MulliganOption_AcceptHand", StringComparison.Ordinal)) manos[^1].Aceptada = true;
+                else if (linea.Contains("MulliganOption_Mulligan", StringComparison.Ordinal)) manos[^1].Aceptada = false;
+            }
             // LA CRONOLOGÍA: una partida nueva vacía la anterior; cada turno nuevo
             // abre una entrada; las vidas, el equipo de cada asiento y el daño a
             // los jugadores se van apuntando en el turno en curso.
@@ -288,6 +315,7 @@ internal static class Contexto
             {
                 idPartida = idm.Groups[1].Value;
                 turnos.Clear();
+                manos.Clear();
                 equipoPorAsiento.Clear();
             }
             foreach (Match eq in Equipo.Matches(linea)) equipoPorAsiento[int.Parse(eq.Groups[1].Value)] = int.Parse(eq.Groups[2].Value);
@@ -298,7 +326,10 @@ internal static class Contexto
                 if (turnos.Count == 0 || turnos[^1].N != n)
                 {
                     var activo = miAsiento != 0 && int.Parse(ti.Groups[2].Value) == miAsiento ? "yo" : "rival";
-                    turnos.Add(new Turno { N = n, Activo = activo });
+                    var turno = new Turno { N = n, Activo = activo };
+                    // La mano con la que se empieza el turno.
+                    turno.ManoYo.AddRange(ManoAhora());
+                    turnos.Add(turno);
                 }
             }
             if (turnos.Count > 0)
@@ -408,10 +439,11 @@ internal static class Contexto
                 }
                 if (turnos.Count > 0)
                 {
-                    UltimaPartida = new Partida(formato, mazo, gane, razon, turnos.ToArray());
+                    UltimaPartida = new Partida(formato, mazo, gane, razon, turnos.ToArray(), manos.ToArray());
                     try { PartidaAcabada?.Invoke(); } catch { /* cosa de quien escucha */ }
                 }
                 turnos.Clear();
+                manos.Clear();
                 equipoPorAsiento.Clear();
                 idPartida = "";
                 enPartida = false;
@@ -427,6 +459,7 @@ internal static class Contexto
         // Lo que se deriva de la tabla entera: tus colores y la mesa del rival.
         var colores = "";
         var mesa = new SortedSet<int>();
+        var vistas = new SortedSet<int>();
         if (miAsiento != 0)
         {
             var sb = new System.Text.StringBuilder();
@@ -436,21 +469,36 @@ internal static class Contexto
                 {
                     foreach (var c in o.Colores) if (!sb.ToString().Contains(c)) sb.Append(c);
                 }
-                else if (o.EsCarta && o.Dueno == 3 - miAsiento && o.Zona is { } z && zonas.TryGetValue(z, out var tz) && tz == "Battlefield") mesa.Add(o.Grp);
+                else if (o.EsCarta && o.Grp > 0 && o.Dueno == 3 - miAsiento && o.Zona is { } z && zonas.TryGetValue(z, out var tz))
+                {
+                    if (tz == "Battlefield") mesa.Add(o.Grp);
+                    if (tz is "Battlefield" or "Graveyard" or "Stack" or "Exile") vistas.Add(o.Grp);
+                }
             }
             colores = sb.ToString();
         }
-        Cambiar(mazo, carta, otraCara, rival, rivalOtra, enPartida, colores, [.. mesa]);
+        Cambiar(mazo, carta, otraCara, rival, rivalOtra, enPartida, colores, [.. mesa], [.. vistas]);
     }
 
-    private static void Cambiar(string? mazo, int? carta, int? otraCara, int? rival, int? rivalOtra, bool enPartida, string colores, int[] mesa)
+    /// <summary>Tus cartas cuya zona es una mano ahora mismo (las del rival no tienen grpId): distintas, en orden de instancia.</summary>
+    private static int[] ManoAhora()
+    {
+        if (miAsiento == 0) return [];
+        var mano = new List<int>();
+        foreach (var o in objetos.Values)
+            if (o.Dueno == miAsiento && o.Grp > 0 && o.Zona is { } zm && zonas.TryGetValue(zm, out var tzm) && tzm == "Hand" && !mano.Contains(o.Grp))
+                mano.Add(o.Grp);
+        return mano.ToArray();
+    }
+
+    private static void Cambiar(string? mazo, int? carta, int? otraCara, int? rival, int? rivalOtra, bool enPartida, string colores, int[] mesa, int[] vistas)
     {
         if (mazo == Mazo && carta == Carta && otraCara == CartaOtraCara
             && rival == RivalMira && rivalOtra == RivalMiraOtraCara && enPartida == EnPartida
-            && colores == MisColores && mesa.SequenceEqual(MesaRival)
+            && colores == MisColores && mesa.SequenceEqual(MesaRival) && vistas.SequenceEqual(VistasRival)
             && formato == Formato && evento == Evento && edicion == Edicion) return;
         Mazo = mazo; Carta = carta; CartaOtraCara = otraCara; RivalMira = rival; RivalMiraOtraCara = rivalOtra; EnPartida = enPartida;
-        MisColores = colores; MesaRival = mesa; Formato = formato; Evento = evento; Edicion = edicion;
+        MisColores = colores; MesaRival = mesa; VistasRival = vistas; Formato = formato; Evento = evento; Edicion = edicion;
         try { Cambio?.Invoke(); } catch { /* lo que haga quien escucha es cosa suya */ }
     }
 
