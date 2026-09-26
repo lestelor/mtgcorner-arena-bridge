@@ -369,8 +369,23 @@ internal static class Program
                     (Columna.Accion.Similares, "58437", Textos.T("col_similares", "Plains")),
                     (Columna.Accion.Combos, "58437", Textos.T("col_combos", "Plains")),
                     (Columna.Accion.Sinergias, "58437", Textos.T("col_sinergias", "Plains")),
+                    (Columna.Accion.SinergiaRival, "sinrival:0", Textos.T("col_sinergia_rival", "cementerio, con un nombre larguísimo para ver el visor")),
                     (Columna.Accion.Resumen, "resumen", Textos.T("col_resumen")));
                 Columna.Destacar("resumen");
+                // --aviso: un aviso con miniaturas, como el de una sinergia del rival.
+                if (args.Contains("--aviso"))
+                {
+                    var urls = new[]
+                    {
+                        "https://cards.scryfall.io/normal/front/1/9/19775c18-4cc0-49d3-86e4-0841768cbf4d.jpg",
+                        "https://cards.scryfall.io/normal/front/8/3/83f20a32-9f5d-4a68-8995-549e57554da2.jpg",
+                        "https://cards.scryfall.io/normal/front/9/6/96b6b2e1-c3e6-464c-8a13-b15deb34e862.jpg",
+                    };
+                    var ficheros = await Task.WhenAll(urls.Select(BajarImagen));
+                    Console.WriteLine($"aviso de prueba: {ficheros.Count(f => f is not null)} miniaturas bajadas");
+                    Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_sinergia_rival", NombreRegla("cementerio"), "Kiora, the Rising Tide + Bringer of the Last Gift"), 12,
+                        ficheros.Where(f => f is not null).Select(f => f!).ToArray());
+                }
             }
             Console.WriteLine("Columna sobre Arena durante 40 s…");
             await Task.Delay(TimeSpan.FromSeconds(40));
@@ -756,10 +771,10 @@ internal static class Program
         // Las subidas, de una en una: la del ciclo y la que pide el icono
         // «Importar ahora» pueden coincidir.
         var subiendo = new SemaphoreSlim(1, 1);
-        async Task<bool> Subir(CartaColeccion[]? col, string? frag, bool avisar = true, Action<Subida>? alTerminar = null)
+        async Task<bool> Subir(CartaColeccion[]? col, string? frag, bool avisar = true, Action<Subida>? alTerminar = null, bool abrirNavegador = false)
         {
             await subiendo.WaitAsync();
-            try { return await SubirDeFondo(http, col, frag, avisar, alTerminar); }
+            try { return await SubirDeFondo(http, col, frag, avisar, alTerminar, abrirNavegador); }
             finally { subiendo.Release(); }
         }
 
@@ -777,7 +792,11 @@ internal static class Program
                      * cómo ha ido: pendiente de tu OK, al día, o que falló.
                      */
                     Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("col_subiendo"), 30);
+                    // Pulsado a mano: si hay mazos que revisar, se ABRE la página de
+                    // revisión (el aviso decía «esperan en el navegador» y nada lo
+                    // abría; el usuario, 2026-09-26).
                     await Subir(LectorArena.LeerColeccion(out _), LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta())).Fragmentos,
+                        abrirNavegador: true,
                         alTerminar: fin =>
                         {
                             switch (fin)
@@ -1388,9 +1407,13 @@ internal static class Program
                 }
                 if (avisar is { } a)
                 {
-                    var piezas = string.Join(" + ", (a.Combo.Piezas ?? []).Select(p => p.Nombre));
+                    // Con las cartas del combo en miniatura, las de la mesa primero.
+                    var piezasCombo = (a.Combo.Piezas ?? []).OrderByDescending(p => p.EnMesa).ToArray();
+                    var minis = await Task.WhenAll(piezasCombo.Take(4).Select(p => BajarImagen(p.Imagen)));
+                    var piezas = string.Join(" + ", piezasCombo.Select(p => p.Nombre));
                     Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"),
-                        Textos.T(a.Lista ? "sup_amenaza" : "sup_amenaza_casi", piezas, a.Combo.Resultado ?? ""), 8);
+                        Textos.T(a.Lista ? "sup_amenaza" : "sup_amenaza_casi", piezas, a.Combo.Resultado ?? ""), 8,
+                        minis.Where(f => f is not null).Select(f => f!).ToArray());
                 }
                 // Y LAS SINERGIAS entre lo que ha enseñado: una vez por regla.
                 SinergiaRivalPuente? avisarSin = null;
@@ -1403,8 +1426,11 @@ internal static class Program
                 }
                 if (avisar is null && avisarSin is { } g2)
                 {
-                    var cartas = string.Join(" + ", (g2.Cartas ?? []).Select(c => c.Nombre).Take(4));
-                    Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_sinergia_rival", NombreRegla(g2.Regla), cartas), 8);
+                    var cartasSin = (g2.Cartas ?? []).OrderByDescending(c => c.EnMesa).Take(4).ToArray();
+                    var minis = await Task.WhenAll(cartasSin.Select(c => BajarImagen(c.Imagen)));
+                    var cartas = string.Join(" + ", cartasSin.Select(c => c.Nombre));
+                    Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_sinergia_rival", NombreRegla(g2.Regla), cartas), 8,
+                        minis.Where(f => f is not null).Select(f => f!).ToArray());
                 }
                 alCambiar();
             }
@@ -1620,7 +1646,7 @@ internal static class Program
     /// <summary>Cómo acabó una subida de fondo, para quien la pidió con un icono.</summary>
     private enum Subida { Nada, Pendiente, AlDia, Fallo }
 
-    private static async Task<bool> SubirDeFondo(HttpClient http, CartaColeccion[]? coleccion, string? fragmentos, bool avisar = true, Action<Subida>? alTerminar = null)
+    private static async Task<bool> SubirDeFondo(HttpClient http, CartaColeccion[]? coleccion, string? fragmentos, bool avisar = true, Action<Subida>? alTerminar = null, bool abrirNavegador = false)
     {
         if (coleccion is null && fragmentos is null) { alTerminar?.Invoke(Subida.Nada); return true; }
 
@@ -1629,8 +1655,16 @@ internal static class Program
         if (estado != 200) { alTerminar?.Invoke(Subida.Fallo); return true; }
         if (respuesta?.Pendiente is null) { alTerminar?.Invoke(Subida.AlDia); return true; }
 
+        // Pedido desde la columna: se abre la página de revisión con ESTA
+        // importación, y el aviso lo dice. De fondo no se abre nada: quien juega
+        // no quiere que le salte el navegador.
+        if (abrirNavegador)
+        {
+            Abrir($"{Sitio}{RutaImportar()}?revisar={Uri.EscapeDataString(respuesta.Pendiente)}");
+            Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_pendiente_navegador", respuesta.Mazos ?? 0), 8);
+        }
         // `avisar` en falso: a media partida (ver Residente), el aviso se guarda para el cierre.
-        if (avisar) Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_pendiente", respuesta.Mazos ?? 0));
+        else if (avisar) Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_pendiente", respuesta.Mazos ?? 0));
         alTerminar?.Invoke(Subida.Pendiente);
         return true;
     }

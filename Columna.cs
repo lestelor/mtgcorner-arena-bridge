@@ -102,6 +102,8 @@ internal static class Columna
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr contexto);
 
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
+    [DllImport("gdi32.dll")] private static extern int IntersectClipRect(IntPtr hdc, int izq, int arriba, int der, int abajo);
+    [DllImport("gdi32.dll")] private static extern int SelectClipRgn(IntPtr hdc, IntPtr region);
     [DllImport("gdi32.dll")] private static extern bool Ellipse(IntPtr hdc, int izq, int arriba, int der, int abajo);
     [DllImport("gdi32.dll")] private static extern IntPtr GetStockObject(int objeto);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateRoundRectRgn(int izq, int arriba, int der, int abajo, int anchoElipse, int altoElipse);
@@ -186,6 +188,9 @@ internal static class Columna
     private static volatile int cuantasDeContexto;
     /// <summary>Lo que mide abierta: lo que pida la etiqueta más larga, entre el mínimo y el tope.</summary>
     private static volatile int anchoAbierta = ANCHO_ABIERTA;
+    /// <summary>Alguna etiqueta no cabe ni en el ancho máximo: el visor tiene trabajo.</summary>
+    private static volatile bool hayDesbordadas;
+    private static int ticksVisor;
 
     /// <summary>
     /// LA FILA CUYA ACCIÓN ESTÁ EN CURSO (bajando las cartas parecidas), por su
@@ -257,6 +262,7 @@ internal static class Columna
                 ancho = Math.Max(ancho, ANCHO_CERRADA + 2 + (r.Right - r.Left) + 16);
             }
             anchoAbierta = Math.Min(ancho, ANCHO_MAXIMO);
+            hayDesbordadas = ancho > ANCHO_MAXIMO;
         }
         catch { /* sin medir se queda el de siempre */ }
         finally
@@ -416,6 +422,9 @@ internal static class Columna
             SetLayeredWindowAttributes(ventana, 0, 236, LWA_ALPHA);
             CrearAyuda(instancia);
             SetTimer(ventana, new IntPtr(1), 500, IntPtr.Zero);
+            // El latido rápido del visor: sólo hace algo con la columna abierta
+            // y alguna etiqueta que no cabe (ver Pintar).
+            SetTimer(ventana, new IntPtr(2), 40, IntPtr.Zero);
             visible = ver;
             ShowWindow(ventana, ver ? SW_SHOWNOACTIVATE : SW_HIDE);
 
@@ -506,6 +515,15 @@ internal static class Columna
                 return IntPtr.Zero;
 
             case WM_TIMER:
+                if (wParam.ToInt64() == 2)
+                {
+                    // EL VISOR: las etiquetas que no caben se desplazan de lado
+                    // (pedido del usuario el 2026-09-26: «a veces se recortan las
+                    // letras»). Sólo se repinta cuando hay algo que mover.
+                    if (abierta && hayDesbordadas) { ticksVisor++; InvalidateRect(hWnd, IntPtr.Zero, false); }
+                    else ticksVisor = 0;
+                    return IntPtr.Zero;
+                }
                 Recolocar();
                 ActualizarAyuda();
                 // Los puntos del indicador de carga andan con este latido.
@@ -654,7 +672,27 @@ internal static class Columna
                     SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : nueva ? Rgb(252, 211, 77) : Rgb(226, 232, 240));
                     var rTexto = new RECT { Left = ANCHO_CERRADA + 2, Top = arriba, Right = ancho - 10, Bottom = arriba + ALTO_FILA };
                     var rotulo = ocupada ? Etiqueta(filas[i]) + new string('.', 1 + faseCurso % 3) : Etiqueta(filas[i]);
-                    DrawText(hdc, rotulo, -1, ref rTexto, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                    // ¿Cabe? Si no, se pinta entera desplazada según el latido
+                    // del visor, recortada a su hueco: espera al principio, corre
+                    // hasta el final, espera, y vuelve.
+                    var rMedida = new RECT();
+                    DrawText(hdc, rotulo, -1, ref rMedida, DT_CALCRECT | DT_SINGLELINE);
+                    var sobra = (rMedida.Right - rMedida.Left) - (rTexto.Right - rTexto.Left);
+                    if (sobra <= 0)
+                    {
+                        DrawText(hdc, rotulo, -1, ref rTexto, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                    }
+                    else
+                    {
+                        const int ESPERA_INICIO = 30, ESPERA_FIN = 20, PASO = 2;
+                        var ciclo = ESPERA_INICIO + sobra / PASO + ESPERA_FIN;
+                        var fase = ticksVisor % ciclo;
+                        var desplazado = Math.Clamp((fase - ESPERA_INICIO) * PASO, 0, sobra);
+                        IntersectClipRect(hdc, rTexto.Left, rTexto.Top, rTexto.Right, rTexto.Bottom);
+                        var rCorrido = new RECT { Left = rTexto.Left - desplazado, Top = rTexto.Top, Right = rTexto.Left - desplazado + (rMedida.Right - rMedida.Left) + 4, Bottom = rTexto.Bottom };
+                        DrawText(hdc, rotulo, -1, ref rCorrido, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                        SelectClipRgn(hdc, IntPtr.Zero);
+                    }
                 }
             }
         }

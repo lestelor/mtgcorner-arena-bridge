@@ -1086,6 +1086,11 @@ internal static class Textos
             "Synergies with the opponent's {0}", "Sinergias con {0} del rival", "Synergien mit {0} des Gegners", "Synergies avec {0} de l'adversaire",
             "Sinergias com {0} do adversário", "Sinergie con {0} dell'avversario", "相手の {0} とのシナジー", "与对手的 {0} 的协同",
         ],
+        ["sup_pendiente_navegador"] =
+        [
+            "{0} decks are waiting for your OK: the review page is opening in your browser.", "{0} mazos esperan tu visto bueno: se abre la página de revisión en el navegador.", "{0} Decks warten auf dein OK: die Prüfseite öffnet sich im Browser.", "{0} decks attendent votre accord : la page de vérification s'ouvre dans le navigateur.",
+            "{0} baralhos esperam a tua aprovação: a página de revisão abre-se no navegador.", "{0} mazzi aspettano il tuo OK: la pagina di revisione si apre nel browser.", "{0} 個のデッキが確認待ちです。ブラウザーで確認ページを開きます。", "{0} 副套牌等待你的确认：正在浏览器中打开审核页面。",
+        ],
         ["col_esta_carta"] =
         [
             "this card", "esta carta", "diese Karte", "cette carte",

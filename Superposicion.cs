@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace MtgCornerArenaBridge;
@@ -110,6 +112,15 @@ internal static class Superposicion
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr contexto);
 
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
+    // GDI+ para las miniaturas de las cartas del aviso (ver PanelCartas.cs).
+    private struct GdiplusStartupInput { public int GdiplusVersion; public IntPtr DebugEventCallback; public bool SuppressBackgroundThread, SuppressExternalCodecs; }
+    [DllImport("gdiplus.dll")] private static extern int GdiplusStartup(out IntPtr token, ref GdiplusStartupInput entrada, IntPtr salida);
+    [DllImport("gdiplus.dll", CharSet = CharSet.Unicode)] private static extern int GdipLoadImageFromFile(string fichero, out IntPtr imagen);
+    [DllImport("gdiplus.dll")] private static extern int GdipDisposeImage(IntPtr imagen);
+    [DllImport("gdiplus.dll")] private static extern int GdipCreateFromHDC(IntPtr hdc, out IntPtr grafico);
+    [DllImport("gdiplus.dll")] private static extern int GdipDeleteGraphics(IntPtr grafico);
+    [DllImport("gdiplus.dll")] private static extern int GdipSetInterpolationMode(IntPtr grafico, int modo);
+    [DllImport("gdiplus.dll")] private static extern int GdipDrawImageRectI(IntPtr grafico, IntPtr imagen, int x, int y, int ancho, int alto);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateRoundRectRgn(int izq, int arriba, int der, int abajo, int anchoElipse, int altoElipse);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateFont(int alto, int ancho, int escape, int orientacion, int grosor,
@@ -137,7 +148,14 @@ internal static class Superposicion
     private static uint Rgb(int r, int g, int b) => (uint)(r | (g << 8) | (b << 16));
 
     /// <summary>Ancho y alto del aviso, y el aire que deja contra el borde del juego.</summary>
-    private const int ANCHO = 380, ALTO = 104, MARGEN = 28;
+    private const int ANCHO = 380, ALTO_TEXTO = 104, MARGEN = 28;
+    /// <summary>Las miniaturas: cartas pequeñas en fila bajo el texto (pedido del usuario el 2026-09-26: «no hace falta que sean muy grandes»).</summary>
+    private const int ANCHO_MINI = 70, ALTO_MINI = 98, AIRE_MINI = 8, MAX_MINIS = 4;
+    /// <summary>El alto del aviso que hay en pantalla: el del texto, y las miniaturas si las lleva.</summary>
+    private static int ALTO = ALTO_TEXTO;
+    private static string[] ficherosMini = [];
+    private static readonly List<IntPtr> minis = new();
+    private static IntPtr gdiplus;
 
     // El procedimiento de ventana se guarda en un campo estático A PROPÓSITO:
     // Windows se queda con su puntero, y si el recolector se llevara el
@@ -189,12 +207,13 @@ internal static class Superposicion
     /// esto, un «subiendo» de veinte segundos y un «hecho» de seis se apilarían
     /// en el mismo sitio y el de encima taparía al otro.
     /// </summary>
-    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6)
+    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null)
     {
         try
         {
             Ocultar();
-            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos); } catch { /* sin escritorio */ } });
+            var ficheros = (imagenes ?? []).Where(f => !string.IsNullOrEmpty(f) && File.Exists(f)).Take(MAX_MINIS).ToArray();
+            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos, ficheros); } catch (Exception e) { Console.Error.WriteLine($"[aviso] {e.GetType().Name}: {e.Message}"); } });
             hilo.IsBackground = true;
             hilo.Start();
             return hilo;
@@ -212,7 +231,7 @@ internal static class Superposicion
     /// <summary>La ventana del aviso que está en pantalla, o cero.</summary>
     private static volatile IntPtr ventanaActual;
 
-    private static void Correr(string titulo, string texto, int segundos)
+    private static void Correr(string titulo, string texto, int segundos, string[] ficheros)
     {
         // EN PÍXELES DE VERDAD. `GetWindowRect` devuelve píxeles físicos; sin
         // declararse consciente del DPI, Windows virtualiza las coordenadas y
@@ -223,6 +242,8 @@ internal static class Superposicion
 
         textoTitulo = titulo;
         textoCuerpo = texto;
+        ficherosMini = ficheros;
+        ALTO = ALTO_TEXTO + (ficheros.Length > 0 ? ALTO_MINI + AIRE_MINI : 0);
         procedimiento = Procedimiento;
 
         var instancia = GetModuleHandle(null);
@@ -233,14 +254,14 @@ internal static class Superposicion
             hInstance = instancia,
             lpszClassName = "MtgCornerAviso",
         };
-        RegisterClassEx(ref clase);   // si ya estaba registrada, falla y da igual
+        if (RegisterClassEx(ref clase) == 0) { var err = Marshal.GetLastWin32Error(); if (err != 1410 /* ERROR_CLASS_ALREADY_EXISTS */) Console.Error.WriteLine($"[aviso] RegisterClassEx falló: error {err}"); }
 
         var (x, y) = Donde();
         var ventana = CreateWindowEx(
             WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
             "MtgCornerAviso", "MTG Corner", WS_POPUP,
             x, y, ANCHO, ALTO, IntPtr.Zero, IntPtr.Zero, instancia, IntPtr.Zero);
-        if (ventana == IntPtr.Zero) return;
+        if (ventana == IntPtr.Zero) { Console.Error.WriteLine($"[aviso] CreateWindowEx falló: error {Marshal.GetLastWin32Error()}"); return; }
 
         // Esquinas redondeadas y un punto de transparencia, para que no parezca
         // un cuadro de diálogo de 1998.
@@ -274,6 +295,8 @@ internal static class Superposicion
                 return IntPtr.Zero;
 
             case WM_DESTROY:
+                foreach (var m in minis) if (m != IntPtr.Zero) GdipDisposeImage(m);
+                minis.Clear();
                 PostQuitMessage(0);
                 return IntPtr.Zero;
         }
@@ -313,8 +336,32 @@ internal static class Superposicion
 
             SelectObject(hdc, normal);
             SetTextColor(hdc, Rgb(203, 213, 225));
-            var rCuerpo = new RECT { Left = 18, Top = 58, Right = ANCHO - 18, Bottom = ALTO - 10 };
+            var rCuerpo = new RECT { Left = 18, Top = 58, Right = ANCHO - 18, Bottom = ALTO_TEXTO - 10 };
             DrawText(hdc, textoCuerpo, -1, ref rCuerpo, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
+
+            // Las miniaturas, en fila bajo el texto. Se cargan la primera vez
+            // que se pinta y se sueltan al cerrar.
+            if (ficherosMini.Length > 0)
+            {
+                if (gdiplus == IntPtr.Zero)
+                {
+                    var entrada = new GdiplusStartupInput { GdiplusVersion = 1 };
+                    GdiplusStartup(out gdiplus, ref entrada, IntPtr.Zero);
+                }
+                if (minis.Count == 0)
+                    foreach (var f in ficherosMini) minis.Add(GdipLoadImageFromFile(f, out var img) == 0 ? img : IntPtr.Zero);
+                if (GdipCreateFromHDC(hdc, out var grafico) == 0 && grafico != IntPtr.Zero)
+                {
+                    GdipSetInterpolationMode(grafico, 7);
+                    var x = 18;
+                    foreach (var img in minis)
+                    {
+                        if (img != IntPtr.Zero) GdipDrawImageRectI(grafico, img, x, ALTO_TEXTO - 4, ANCHO_MINI, ALTO_MINI);
+                        x += ANCHO_MINI + AIRE_MINI;
+                    }
+                    GdipDeleteGraphics(grafico);
+                }
+            }
         }
         finally
         {
