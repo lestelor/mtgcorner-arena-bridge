@@ -446,7 +446,7 @@ internal static class Program
         // mazo actual, carta bajo el ratón, si hay partida. Sesenta segundos.
         if (args.Length > 0 && args[0] == "--probar-contexto")
         {
-            Contexto.Cambio += () => Console.WriteLine($"{DateTime.Now:HH:mm:ss}  mazo={Contexto.Mazo ?? "-"}  tu carta={Contexto.Carta?.ToString() ?? "-"}  rival mira={Contexto.RivalMira?.ToString() ?? "-"}  colores={(Contexto.MisColores.Length > 0 ? Contexto.MisColores : "-")}  mesa rival=[{string.Join(",", Contexto.MesaRival)}]  formato={Contexto.Formato ?? "-"}{(Contexto.Edicion is { } ed ? "/" + ed : "")}  partida={Contexto.EnPartida}");
+            Contexto.Cambio += () => Console.WriteLine($"{DateTime.Now:HH:mm:ss}  mazo={Contexto.Mazo ?? "-"}  tu carta={Contexto.Carta?.ToString() ?? "-"}  carta rival={Contexto.CartaRival?.ToString() ?? "-"}  colores={(Contexto.MisColores.Length > 0 ? Contexto.MisColores : "-")}  mesa rival=[{string.Join(",", Contexto.MesaRival)}]  formato={Contexto.Formato ?? "-"}{(Contexto.Edicion is { } ed ? "/" + ed : "")}  partida={Contexto.EnPartida}");
             Contexto.PartidaAcabada += () =>
             {
                 Console.WriteLine($"PARTIDA ACABADA: gané={Contexto.UltimaPartida?.Gane} razón={Contexto.UltimaPartida?.Razon} turnos={Contexto.UltimaPartida?.Turnos.Count}");
@@ -965,15 +965,20 @@ internal static class Program
             }
             // Lo que mira el rival, dicho como tal: es lo único que el registro
             // sabe del ratón (ver Contexto.cs). Pulsarlo abre sus parecidas.
-            if (Contexto.RivalMira is { } grpRival && grpRival != Contexto.Carta)
+            if (Contexto.CartaRival is { } grpRival && grpRival != Contexto.Carta)
             {
                 string? nombreRival;
                 lock (nombres) nombres.TryGetValue(grpRival, out nombreRival);
-                if (nombreRival is null) { _ = NombrarCarta(grpRival, Contexto.RivalMiraOtraCara); }
+                if (nombreRival is null) { _ = NombrarCarta(grpRival, Contexto.CartaRivalOtraCara); }
                 else if (nombreRival.Length > 0)
                 {
-                    var cual = Contexto.RivalMiraOtraCara is { } otra ? $"{grpRival}:{otra}" : grpRival.ToString();
-                    filas.Add((Columna.Accion.Similares, cual, Textos.T("col_rival_mira", nombreRival)));
+                    var cual = Contexto.CartaRivalOtraCara is { } otra ? $"{grpRival}:{otra}" : grpRival.ToString();
+                    // Parecidas, combos y sinergias de la carta del rival, en TUS
+                    // colores (Similares ya manda `colores=`), y precalentadas.
+                    filas.Add((Columna.Accion.Similares, cual, Textos.T("col_rival_similares", nombreRival)));
+                    filas.Add((Columna.Accion.Combos, cual, Textos.T("col_rival_combos", nombreRival)));
+                    filas.Add((Columna.Accion.Sinergias, cual, Textos.T("col_rival_sinergias", nombreRival)));
+                    _ = Precalentar(http, cual);
                 }
             }
             // Al acabar una partida, el resumen por IA se queda ofrecido hasta que
@@ -1030,7 +1035,7 @@ internal static class Program
             finally
             {
                 lock (pidiendo) pidiendo.Remove(grp);
-                if (Contexto.Carta == grp || Contexto.RivalMira == grp) ActualizarColumna();
+                if (Contexto.Carta == grp || Contexto.CartaRival == grp) ActualizarColumna();
             }
         }
         Contexto.Cambio += ActualizarColumna;

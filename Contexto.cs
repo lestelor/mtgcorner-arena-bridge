@@ -51,10 +51,10 @@ internal static class Contexto
     public static int? Carta { get; private set; }
 
     /// <summary>La carta que está mirando EL RIVAL (su <c>grpId</c>), o null. Ver la cabecera: es lo único que el registro sabe del ratón.</summary>
-    public static int? RivalMira { get; private set; }
+    public static int? CartaRival { get; private set; }
 
     /// <summary>La otra cara de la que mira el rival, si está transformada.</summary>
-    public static int? RivalMiraOtraCara { get; private set; }
+    public static int? CartaRivalOtraCara { get; private set; }
 
     /// <summary>
     /// LOS COLORES QUE ESTÁS JUGANDO, como letras («WU»): la unión de los colores
@@ -263,7 +263,7 @@ internal static class Contexto
         posicion = fs.Length;
 
         string? mazo = Mazo; int? carta = Carta; int? otraCara = CartaOtraCara;
-        int? rival = RivalMira; int? rivalOtra = RivalMiraOtraCara; bool enPartida = EnPartida;
+        int? rival = CartaRival; int? rivalOtra = CartaRivalOtraCara; bool enPartida = EnPartida;
         foreach (var linea in texto.Split('\n'))
         {
             if (linea.Contains("DeckUpsertDeckV3", StringComparison.Ordinal) || linea.Contains("EventSetDeckV3", StringComparison.Ordinal))
@@ -407,11 +407,16 @@ internal static class Contexto
                     {
                         (dueno == miAsiento ? turnos[^1].JugadasYo : turnos[^1].JugadasRival).Add(obj.Grp);
                     }
-                    if (!obj.EsCarta || obj.EsTierra || miAsiento == 0 || obj.Dueno != miAsiento) continue;
+                    if (!obj.EsCarta || obj.EsTierra || miAsiento == 0) continue;
                     if (!zonas.TryGetValue(destino, out var tipo)) continue;
                     if (tipo != "Battlefield" && tipo != "Stack") continue;
-                    carta = obj.Grp;
-                    otraCara = obj.Otra;
+                    // La última carta (no tierra) que cada bando pone en juego o en
+                    // la pila: la tuya y la del rival, por separado. La del rival
+                    // sale en la columna con parecidas EN TUS COLORES (pedido del
+                    // usuario el 2026-09-26: «creía que podría ver las del otro
+                    // mazo, similares con mis tierras»).
+                    if (obj.Dueno == miAsiento) { carta = obj.Grp; otraCara = obj.Otra; }
+                    else if (obj.Dueno == 3 - miAsiento) { rival = obj.Grp; rivalOtra = obj.Otra; }
                 }
             }
             if (linea.Contains("onHover", StringComparison.Ordinal))
@@ -419,11 +424,12 @@ internal static class Contexto
                 var m = BajoRaton.Match(linea);
                 if (m.Success && objetos.TryGetValue(int.Parse(m.Groups[2].Value), out var obj) && obj.EsCarta)
                 {
-                    // Del asiento que sea distinto del tuyo: es lo que mira el rival.
-                    // (Si algún día Arena escribiera los tuyos, irían a tu carta.)
+                    // Arena sólo escribe el ratón del RIVAL, y lo que mira cambia
+                    // a cada segundo: ya no se ofrece (la carta del rival es la
+                    // última que ha jugado, ver arriba). Si algún día escribiera
+                    // el tuyo, iría a tu carta.
                     var quien = int.Parse(m.Groups[1].Value);
                     if (miAsiento != 0 && quien == miAsiento) { carta = obj.Grp; otraCara = obj.Otra; }
-                    else { rival = obj.Grp; rivalOtra = obj.Otra; }
                 }
             }
             if (linea.Contains("MatchGameRoomStateType_Playing", StringComparison.Ordinal)) enPartida = true;
@@ -494,10 +500,10 @@ internal static class Contexto
     private static void Cambiar(string? mazo, int? carta, int? otraCara, int? rival, int? rivalOtra, bool enPartida, string colores, int[] mesa, int[] vistas)
     {
         if (mazo == Mazo && carta == Carta && otraCara == CartaOtraCara
-            && rival == RivalMira && rivalOtra == RivalMiraOtraCara && enPartida == EnPartida
+            && rival == CartaRival && rivalOtra == CartaRivalOtraCara && enPartida == EnPartida
             && colores == MisColores && mesa.SequenceEqual(MesaRival) && vistas.SequenceEqual(VistasRival)
             && formato == Formato && evento == Evento && edicion == Edicion) return;
-        Mazo = mazo; Carta = carta; CartaOtraCara = otraCara; RivalMira = rival; RivalMiraOtraCara = rivalOtra; EnPartida = enPartida;
+        Mazo = mazo; Carta = carta; CartaOtraCara = otraCara; CartaRival = rival; CartaRivalOtraCara = rivalOtra; EnPartida = enPartida;
         MisColores = colores; MesaRival = mesa; VistasRival = vistas; Formato = formato; Evento = evento; Edicion = edicion;
         try { Cambio?.Invoke(); } catch { /* lo que haga quien escucha es cosa suya */ }
     }

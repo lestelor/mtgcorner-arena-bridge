@@ -1018,8 +1018,8 @@ internal static class Textos
         ],
         ["ayuda_similares"] =
         [
-            "Cards that do something similar to the last card you played, legal in this format and in your deck's colours.", "Cartas que hacen algo parecido a la última que has jugado, legales en este formato y de los colores de tu mazo.", "Karten, die etwas Ähnliches tun wie deine zuletzt gespielte Karte, legal in diesem Format und in den Farben deines Decks.", "Des cartes qui font quelque chose de similaire à la dernière que vous avez jouée, légales dans ce format et dans les couleurs de votre deck.",
-            "Cartas que fazem algo parecido com a última que jogaste, legais neste formato e das cores do teu baralho.", "Carte che fanno qualcosa di simile all'ultima che hai giocato, legali in questo formato e nei colori del tuo mazzo.", "最後にプレイしたカードと似た働きをするカード。このフォーマットで使え、デッキの色に合うもの。", "与你最近打出的牌功能相似的牌，在本赛制合法且符合你套牌的颜色。",
+            "Cards that do something similar to that card (yours or the opponent's), legal in this format and in your deck's colours.", "Cartas que hacen algo parecido a esa carta (tuya o del rival), legales en este formato y de los colores de tu mazo.", "Karten, die etwas Ähnliches tun wie diese Karte (deine oder die des Gegners), legal in diesem Format und in den Farben deines Decks.", "Des cartes qui font quelque chose de similaire à cette carte (la vôtre ou celle de l'adversaire), légales dans ce format et dans les couleurs de votre deck.",
+            "Cartas que fazem algo parecido com essa carta (tua ou do adversário), legais neste formato e das cores do teu baralho.", "Carte che fanno qualcosa di simile a quella carta (tua o dell'avversario), legali in questo formato e nei colori del tuo mazzo.", "そのカード（自分または相手の）と似た働きをするカード。このフォーマットで使え、デッキの色に合うもの。", "与该牌（你的或对手的）功能相似的牌，在本赛制合法且符合你套牌的颜色。",
         ],
         ["ayuda_combos"] =
         [
@@ -1070,6 +1070,21 @@ internal static class Textos
         [
             "Opening hand", "El arranque", "Die Starthand", "La main de départ",
             "A mão inicial", "La mano iniziale", "初手", "起手"
+        ],
+        ["col_rival_similares"] =
+        [
+            "Similar to the opponent's {0}", "Parecidas a {0} del rival", "Ähnlich wie {0} des Gegners", "Similaires à {0} de l'adversaire",
+            "Parecidas com {0} do adversário", "Simili a {0} dell'avversario", "相手の {0} に似たカード", "与对手的 {0} 相似的牌",
+        ],
+        ["col_rival_combos"] =
+        [
+            "Combos with the opponent's {0}", "Combos con {0} del rival", "Kombos mit {0} des Gegners", "Combos avec {0} de l'adversaire",
+            "Combos com {0} do adversário", "Combo con {0} dell'avversario", "相手の {0} のコンボ", "对手的 {0} 的组合技",
+        ],
+        ["col_rival_sinergias"] =
+        [
+            "Synergies with the opponent's {0}", "Sinergias con {0} del rival", "Synergien mit {0} des Gegners", "Synergies avec {0} de l'adversaire",
+            "Sinergias com {0} do adversário", "Sinergie con {0} dell'avversario", "相手の {0} とのシナジー", "与对手的 {0} 的协同",
         ],
         ["col_esta_carta"] =
         [
