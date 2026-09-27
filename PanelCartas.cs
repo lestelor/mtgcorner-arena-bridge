@@ -281,7 +281,8 @@ internal static partial class PanelCartas
         copia = textoPlano;
         extras = conExtras;
         est = conEstadisticas;
-        rectPuntosEst = []; rectMazosEst = []; centroPuntosEst = [];
+        rectPuntosEst = []; centroPuntosEst = []; rectFichasEst = []; rectPeldanosEst = []; rectSegmentosEst = []; puntosEst = [];
+        mazoEst = -1;
         rectTonos = new RECT[conExtras?.Tonos.Length ?? 0];
         enlaces = conEnlaces?.ToArray() ?? [];
         rectEnlaces = new RECT[enlaces.Length];
@@ -914,12 +915,8 @@ internal static partial class PanelCartas
             var rav = rectAvatares;
             for (var i = 0; i < rav.Length; i++)
                 if (rav[i].Right > 0 && xr >= rav[i].Left && xr < rav[i].Right && yr >= rav[i].Top && yr < rav[i].Bottom) return BAJO_AVATAR - i;
-            var rme = rectMazosEst;
-            for (var i = 0; i < rme.Length; i++)
-                if (rme[i].Right > 0 && xr >= rme[i].Left && xr < rme[i].Right && yr >= rme[i].Top && yr < rme[i].Bottom) return BAJO_MAZO_EST - i;
-            var rpe = rectPuntosEst;
-            for (var i = 0; i < rpe.Length; i++)
-                if (rpe[i].Right > 0 && xr >= rpe[i].Left && xr < rpe[i].Right && yr >= rpe[i].Top && yr < rpe[i].Bottom) return BAJO_PUNTO_EST - i;
+            var ce = QueHayEnEstadisticas(xr, yr);
+            if (ce != 0) return ce;
             var rco = rectCoinciden;
             for (var i = 0; i < rco.Length; i++)
                 if (rco[i].Right > 0 && xr >= rco[i].Left && xr < rco[i].Right && yr >= rco[i].Top && yr < rco[i].Bottom) return BAJO_COINCIDEN - i;
@@ -968,8 +965,8 @@ internal static partial class PanelCartas
             {
                 var i = bajoRaton;
                 var lista = huecos;
-                var pulsable = i == -2 || i == BAJO_COPIAR || (i <= BAJO_ENLACE && i > BAJO_TONO) || (i <= BAJO_TONO && i > BAJO_TURNO) || (i <= BAJO_AVATAR && i > BAJO_JUGADA) || (i <= BAJO_COINCIDEN && i > BAJO_MAZO_EST)
-                    || (i <= BAJO_MAZO_EST && i > BAJO_PUNTO_EST && est is { } esC && BAJO_MAZO_EST - i < esC.Mazos.Length && esC.Mazos[BAJO_MAZO_EST - i].Ruta is not null)
+                var pulsable = i == -2 || i == BAJO_COPIAR || (i <= BAJO_ENLACE && i > BAJO_TONO) || (i <= BAJO_TONO && i > BAJO_TURNO) || (i <= BAJO_AVATAR && i > BAJO_JUGADA) || (i <= BAJO_COINCIDEN && i > BAJO_PUNTO_EST)
+                    || PulsableEstadisticas(i)
                     || (i >= 0 && i < lista.Length && (lista[i].Carta?.Ruta ?? lista[i].Seccion.Ruta) is not null);
                 SetCursor(LoadCursor(IntPtr.Zero, pulsable ? IDC_HAND : IDC_ARROW));
                 return new IntPtr(1);
@@ -1004,11 +1001,7 @@ internal static partial class PanelCartas
                 var i = QueHayEn(lParam);
                 if (i == -2) { PostMessage(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero); return IntPtr.Zero; }
                 if (i == BAJO_COPIAR) { copiado = Copiar(copia); InvalidateRect(hWnd, IntPtr.Zero, false); return IntPtr.Zero; }
-                if (i <= BAJO_MAZO_EST && i > BAJO_PUNTO_EST && est is { } esM && BAJO_MAZO_EST - i < esM.Mazos.Length && esM.Mazos[BAJO_MAZO_EST - i].Ruta is { } rutaEst && AlAbrir is { } abrirEst)
-                {
-                    _ = Task.Run(() => { try { abrirEst(rutaEst); } catch { /* lo cuenta quien lo montó */ } });
-                    return IntPtr.Zero;
-                }
+                if (PulsarEstadisticas(i, hWnd)) return IntPtr.Zero;
                 if (i <= BAJO_COINCIDEN && BAJO_COINCIDEN - i < enlaces.Length && AlAbrir is { } abrirMazo)
                 {
                     var rutaMazo = enlaces[BAJO_COINCIDEN - i].Ruta;

@@ -1485,5 +1485,55 @@ internal static class Textos
             "Mythic", "Mítico", "Mythisch", "Mythique",
             "Mítico", "Mitico", "ミシック", "秘稀",
         ],
+        ["est_todos"] =
+        [
+            "All", "Todos", "Alle", "Tous",
+            "Todos", "Tutti", "すべて", "全部",
+        ],
+        ["tipo_creature"] =
+        [
+            "Creature", "Criatura", "Kreatur", "Créature",
+            "Criatura", "Creature", "クリーチャー", "生物",
+        ],
+        ["tipo_planeswalker"] =
+        [
+            "Planeswalker", "Planeswalker", "Planeswalker", "Planeswalker",
+            "Planeswalker", "Planeswalker", "プレインズウォーカー", "鹏洛客",
+        ],
+        ["tipo_instant"] =
+        [
+            "Instant", "Instantáneo", "Spontanzauber", "Éphémère",
+            "Mágica instantânea", "Istantanei", "インスタント", "瞬间",
+        ],
+        ["tipo_sorcery"] =
+        [
+            "Sorcery", "Conjuro", "Hexerei", "Rituel",
+            "Feitiço", "Stregonerie", "ソーサリー", "法术",
+        ],
+        ["tipo_artifact"] =
+        [
+            "Artifact", "Artefacto", "Artefakt", "Artefact",
+            "Artefato", "Artefatti", "アーティファクト", "神器",
+        ],
+        ["tipo_enchantment"] =
+        [
+            "Enchantment", "Encantamiento", "Verzauberung", "Enchantement",
+            "Encantamento", "Incantesimi", "エンチャント", "结界",
+        ],
+        ["tipo_battle"] =
+        [
+            "Battle", "Batalla", "Schlacht", "Bataille",
+            "Batalha", "Battaglie", "バトル", "战役",
+        ],
+        ["tipo_land"] =
+        [
+            "Land", "Tierra", "Land", "Terrain",
+            "Terreno", "Terre", "土地", "地",
+        ],
+        ["tipo_other"] =
+        [
+            "Other", "Otros", "Sonstige", "Autres",
+            "Outros", "Altro", "その他", "其他",
+        ],
     };
 }

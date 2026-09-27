@@ -496,7 +496,7 @@ internal static class Program
             var d = JsonSerializer.Deserialize<RespuestaEstadisticas>(File.ReadAllText(args[1]), JsonOpciones)!;
             PanelCartas.SiempreVisible = true;
             PanelCartas.AlAbrir = AbrirDelPanel;
-            EnsenarEstadisticas(d);
+            await EnsenarEstadisticas(d);
             await Task.Delay(TimeSpan.FromSeconds(15));
             PanelCartas.Cerrar();
             return 0;
@@ -1159,13 +1159,6 @@ internal static class Program
         httpResidente = http;
         Contexto.Cambio += ActualizarColumna;
         Contexto.Cambio += () => VigilarAmenazas(http, ActualizarColumna);
-        // EL ARO DEL MAZO: cuántas cartas tuyas han salido ya, sobre el tamaño del
-        // mazo (100 en Brawl y Commander, 60 en el resto).
-        Contexto.Cambio += () =>
-        {
-            var tam = Contexto.Formato is "brawl" or "historicbrawl" or "commander" ? 100 : 60;
-            Columna.Progreso(Contexto.EnPartida ? Math.Min(1.0, Contexto.CartasVistasMias / (double)tam) : 0);
-        };
         _ = Task.Run(async () => { try { if (await BuscarVersionNueva() is not null) Columna.Destacar("version"); } catch { /* sin red */ } });
         Contexto.Cambio += () => { if (Contexto.EnPartida && partidaPendiente is not null) { partidaPendiente = null; Columna.Olvidar("resumen"); } };
         Contexto.PartidaAcabada += () =>
@@ -1556,25 +1549,18 @@ internal static class Program
             var d = await r.Content.ReadFromJsonAsync<RespuestaEstadisticas>(JsonOpciones);
             if (d is null) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("est_fallo")); return; }
             PanelCartas.AlAbrir = AbrirDelPanel;
-            EnsenarEstadisticas(d);
+            await EnsenarEstadisticas(d);
         }
         catch { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("est_fallo")); }
     }
 
-    /// <summary>Una fecha del eje: «27 sept» por día, «14:25» por partida; y la larga, para la caja al pasar.</summary>
-    private static (string Corta, string Larga) EtiquetasDeFecha(string iso, bool porDia)
-    {
-        if (!DateTime.TryParse(iso, System.Globalization.CultureInfo.InvariantCulture,
-                porDia ? System.Globalization.DateTimeStyles.None : System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var f))
-            return (iso, iso);
-        if (!porDia) f = f.ToLocalTime();
-        var meses = Textos.T("fecha_meses").Split(',');
-        var mes = meses.Length == 12 ? meses[f.Month - 1].Trim() : f.Month.ToString();
-        var dia = Textos.Idioma is "ja" or "zh" ? $"{f.Month}月{f.Day}日" : Textos.Idioma == "en" ? $"{mes} {f.Day}" : $"{f.Day} {mes}";
-        return porDia ? (dia, Textos.T("fecha_corta", f.Day, mes, f.Year, f.Month)) : (f.ToString("HH:mm"), $"{dia} · {f:HH:mm}");
-    }
+    private static DateTime Local(string? iso) =>
+        DateTime.TryParse(iso, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var f)
+            ? f.ToLocalTime() : DateTime.MinValue;
 
-    private static void EnsenarEstadisticas(RespuestaEstadisticas d)
+    /// <summary>Monta Stats con lo que devuelve /estadisticas: baja las insignias de rango y pasa todo al panel.</summary>
+    private static async Task EnsenarEstadisticas(RespuestaEstadisticas d)
     {
         var total = d.Total ?? new MarcadorEst(0, 0);
         if (total.Ganadas + total.Perdidas == 0)
@@ -1582,28 +1568,24 @@ internal static class Program
             PanelCartas.MostrarTexto(Textos.T("est_titulo"), [new PanelCartas.SeccionTexto(Textos.T("est_titulo"), [Textos.T("est_vacio")], false)], Textos.T("est_vacio"));
             return;
         }
-        var porDia = d.Evolucion?.PorDia ?? true;
-        var puntos = (d.Evolucion?.Puntos ?? [])
-            .Select(p => { var (corta, larga) = EtiquetasDeFecha(p.Etiqueta ?? "", porDia); return new PanelCartas.PuntoEvolucion(corta, larga, p.Valor, p.Ganadas, p.Perdidas); })
-            .ToArray();
-        var mazo = d.Mazo;
-        var e = new PanelCartas.Estadisticas(
-            total.Ganadas, total.Perdidas, d.Hoy?.Ganadas ?? 0, d.Hoy?.Perdidas ?? 0,
-            d.Racha?.Gane, d.Racha?.N ?? 0, d.Ultimas ?? [],
-            porDia, puntos,
-            (d.Mazos ?? []).Where(m => m.Nombre is { Length: > 0 }).Select(m => new PanelCartas.MazoEst(m.Nombre!, m.Ganadas, m.Perdidas, m.Ruta, m.Actual)).ToArray(),
-            d.Rango?.Clase, d.Rango?.Nivel,
-            (d.Escalera ?? []).Select(p => new PanelCartas.PeldanoEst(p.Posicion, p.Clase ?? "Bronze", p.Nivel, p.Gane)).ToArray(),
-            mazo?.Nombre ?? Contexto.Mazo, mazo is not null, mazo?.Tierras ?? 0, mazo?.Curva ?? [], mazo?.Medio ?? 0,
-            mazo?.Mano?.Buenas ?? 0, mazo?.LandDrops?.FirstOrDefault(l => l.Turno == 3)?.P ?? 0,
-            (mazo?.Colores ?? []).Select(c => new PanelCartas.ColorEst(c.Color ?? "", c.Fuentes, c.T3)).ToArray());
+        // Las insignias, a disco (las pinta GDI+ desde fichero).
+        var iconos = new Dictionary<string, string>();
+        foreach (var (clave, url) in d.Iconos ?? new Dictionary<string, string>())
+            if (await BajarImagen(url) is { } fichero) iconos[clave] = fichero;
+        var partidas = (d.Partidas ?? []).Select(q => new PanelCartas.PartidaEst(Local(q.Cuando), q.Gane, q.Mazo))
+            .Where(q => q.Cuando != DateTime.MinValue).ToArray();
+        var escalera = (d.EscaleraCompleta ?? []).Select(q => new PanelCartas.PeldanoEst(q.Antes, q.Pos, q.Clase ?? "Bronze", q.Nivel, q.Gane, Local(q.Cuando), q.Mazo, q.Subio)).ToArray();
+        var mazos = (d.MazosAnalisis ?? []).Where(m => m.Nombre is { Length: > 0 }).Select(m => new PanelCartas.MazoEst(
+            m.Nombre!, m.Ganadas, m.Perdidas, m.Actual,
+            m.Analisis is { } a ? new PanelCartas.AnalisisMazo(a.Tierras, a.Medio, a.Mano?.Buenas ?? 0, a.LandDrops?.FirstOrDefault(l => l.Turno == 3)?.P ?? 0,
+                (a.Curva ?? []).Select(c => new PanelCartas.ColumnaCurva(c.Cmc, c.Total,
+                    (c.Tipos ?? []).Select(t => new PanelCartas.SegmentoCurva(t.Tipo ?? "other", t.N,
+                        (t.Cartas ?? []).Select(x => $"{x.N}× {x.Nombre}").ToArray())).ToArray())).ToArray())
+            : null)).ToArray();
+        var e = new PanelCartas.Estadisticas(total.Ganadas, total.Perdidas, partidas, mazos, d.Rango?.Clase, d.Rango?.Nivel, escalera, iconos, d.MazoArena ?? Contexto.Mazo);
         // Lo que se copia: el resumen en unas líneas.
         var jugadas = total.Ganadas + total.Perdidas;
-        var plano = new List<string>
-        {
-            $"{Textos.T("est_total")}: {total.Ganadas}–{total.Perdidas} ({Math.Round(100.0 * total.Ganadas / jugadas)}%)",
-            $"{Textos.T("est_hoy")}: {e.HoyGanadas}–{e.HoyPerdidas}",
-        };
+        var plano = new List<string> { $"{Textos.T("est_total")}: {total.Ganadas}–{total.Perdidas} ({Math.Round(100.0 * total.Ganadas / jugadas)}%)" };
         if (e.Clase is { } clase) plano.Add($"{Textos.T("est_rango")}: {Textos.T("clase_" + clase.ToLowerInvariant())}{(clase != "Mythic" && e.Nivel is { } nv ? " " + nv : "")}");
         foreach (var m in e.Mazos) plano.Add($"• {m.Nombre}: {m.Ganadas}–{m.Perdidas}");
         PanelCartas.MostrarTexto(Textos.T("est_titulo"), [], string.Join("\r\n", plano), conEstadisticas: e);
@@ -2950,7 +2932,28 @@ internal sealed record RespuestaEstadisticas(
     [property: JsonPropertyName("mazos")] MazoEstPuente[]? Mazos,
     [property: JsonPropertyName("rango")] RangoEst? Rango,
     [property: JsonPropertyName("escalera")] PeldanoEstPuente[]? Escalera,
-    [property: JsonPropertyName("mazo")] MazoActualEst? Mazo);
+    [property: JsonPropertyName("mazo")] MazoActualEst? Mazo,
+    [property: JsonPropertyName("partidas")] PartidaEstPuente[]? Partidas = null,
+    [property: JsonPropertyName("escaleraCompleta")] PeldanoCompletoPuente[]? EscaleraCompleta = null,
+    [property: JsonPropertyName("iconos")] Dictionary<string, string>? Iconos = null,
+    [property: JsonPropertyName("mazoArena")] string? MazoArena = null,
+    [property: JsonPropertyName("mazosAnalisis")] MazoAnalisisPuente[]? MazosAnalisis = null);
+internal sealed record PartidaEstPuente([property: JsonPropertyName("cuando")] string? Cuando, [property: JsonPropertyName("gane")] bool Gane, [property: JsonPropertyName("mazo")] string? Mazo);
+internal sealed record PeldanoCompletoPuente(
+    [property: JsonPropertyName("antes")] int Antes, [property: JsonPropertyName("pos")] int Pos,
+    [property: JsonPropertyName("clase")] string? Clase, [property: JsonPropertyName("nivel")] int Nivel,
+    [property: JsonPropertyName("gane")] bool Gane, [property: JsonPropertyName("cuando")] string? Cuando,
+    [property: JsonPropertyName("mazo")] string? Mazo, [property: JsonPropertyName("subio")] bool Subio);
+internal sealed record MazoAnalisisPuente(
+    [property: JsonPropertyName("nombre")] string? Nombre, [property: JsonPropertyName("ganadas")] int Ganadas, [property: JsonPropertyName("perdidas")] int Perdidas,
+    [property: JsonPropertyName("actual")] bool Actual, [property: JsonPropertyName("analisis")] AnalisisPuente? Analisis);
+internal sealed record AnalisisPuente(
+    [property: JsonPropertyName("tierras")] int Tierras, [property: JsonPropertyName("medio")] double Medio,
+    [property: JsonPropertyName("mano")] ManoEst? Mano, [property: JsonPropertyName("landDrops")] LandDropEst[]? LandDrops,
+    [property: JsonPropertyName("curva")] ColumnaPuente[]? Curva);
+internal sealed record ColumnaPuente([property: JsonPropertyName("cmc")] int Cmc, [property: JsonPropertyName("total")] int Total, [property: JsonPropertyName("tipos")] TipoPuente[]? Tipos);
+internal sealed record TipoPuente([property: JsonPropertyName("tipo")] string? Tipo, [property: JsonPropertyName("n")] int N, [property: JsonPropertyName("cartas")] CartaCurvaPuente[]? Cartas);
+internal sealed record CartaCurvaPuente([property: JsonPropertyName("nombre")] string? Nombre, [property: JsonPropertyName("n")] int N);
 internal sealed record MarcadorEst([property: JsonPropertyName("ganadas")] int Ganadas, [property: JsonPropertyName("perdidas")] int Perdidas);
 internal sealed record RachaEst([property: JsonPropertyName("gane")] bool Gane, [property: JsonPropertyName("n")] int N);
 internal sealed record EvolucionEst([property: JsonPropertyName("porDia")] bool PorDia, [property: JsonPropertyName("puntos")] PuntoEstPuente[]? Puntos);

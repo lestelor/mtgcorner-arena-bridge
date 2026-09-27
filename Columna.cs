@@ -104,8 +104,6 @@ internal static class Columna
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
     [DllImport("gdi32.dll")] private static extern IntPtr CreatePen(int estilo, int ancho, uint color);
-    [DllImport("gdi32.dll")] private static extern bool Arc(IntPtr hdc, int izq, int arriba, int der, int abajo, int x1, int y1, int x2, int y2);
-    [DllImport("gdi32.dll")] private static extern int SetArcDirection(IntPtr hdc, int direccion);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int ancho, int alto);
     [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hdc);
     [DllImport("gdi32.dll")] private static extern bool BitBlt(IntPtr destino, int x, int y, int ancho, int alto, IntPtr origen, int x1, int y1, uint op);
@@ -244,9 +242,6 @@ internal static class Columna
     /// <summary>El marcador de la sesión, en la cabecera abierta: verde si vas ganando, rojo si perdiendo.</summary>
     public static void Marcador(int v, int d) { victorias = v; derrotas = d; Refrescar(); }
 
-    private static double progreso;
-    /// <summary>El aro alrededor del trébol: qué parte de tu mazo has visto ya (0 a 1).</summary>
-    public static void Progreso(double p) { var q = Math.Clamp(p, 0, 1); if (Math.Abs(q - progreso) < 0.01) return; progreso = q; Refrescar(); }
 
     private static readonly Dictionary<string, string> miniaturas = new();
     /// <summary>La miniatura de una carta (fichero) para la fila de parecidas cuyo dato empieza por ese grpId.</summary>
@@ -693,20 +688,6 @@ internal static class Columna
             // La marca: la flor del programa, centrada en la parte estrecha. Si
             // el icono no se pudiera cargar, el cuadro ámbar con «MC» de antes.
             var cuadro = new RECT { Left = 11, Top = 9, Right = 35, Bottom = 33 };
-            // EL ARO DEL MAZO: alrededor del trébol, lo que llevas visto de tu mazo.
-            if (progreso > 0)
-            {
-                var plumaAro = CreatePen(0, 2, Rgb(245, 158, 11));
-                var plumaAnterior = SelectObject(hdc, plumaAro);
-                var pincelAnterior = SelectObject(hdc, GetStockObject(5 /* NULL_BRUSH */));
-                SetArcDirection(hdc, 2 /* AD_CLOCKWISE */);
-                var cx = 23; var cy = 21; var r = 16;
-                var ang = 2 * Math.PI * progreso;
-                var xFin = cx + (int)Math.Round(r * Math.Sin(ang)); var yFin = cy - (int)Math.Round(r * Math.Cos(ang));
-                if (progreso >= 0.999) Ellipse(hdc, cx - r, cy - r, cx + r, cy + r);
-                else Arc(hdc, cx - r, cy - r, cx + r, cy + r, cx, cy - r, xFin, yFin);
-                SelectObject(hdc, pincelAnterior); SelectObject(hdc, plumaAnterior); DeleteObject(plumaAro);
-            }
             // EL LATIDO: con algo nuevo esperando (un resumen, una versión), el
             // trébol respira: crece y encoge suave.
             bool late; lock (destacadas) late = destacadas.Count > 0;
