@@ -130,6 +130,8 @@ internal static class Contexto
 
     /// <summary>Algo de lo de arriba ha cambiado. Salta en el hilo del vigía.</summary>
     public static event Action? Cambio;
+    /// <summary>Arena ha vuelto a empezar el registro (lo rota al arrancar): sesión nueva, marcador a cero.</summary>
+    public static event Action? RegistroReiniciado;
 
     // El nombre del mazo va dentro del `request`, que es JSON escapado dentro
     // de una cadena JSON: las comillas llegan como \" . Se acepta cualquier
@@ -194,6 +196,17 @@ internal static class Contexto
     private static int miAsiento;
     /// <summary>La cronología de la partida en curso y lo que hace falta para cerrarla.</summary>
     private static readonly List<Turno> turnos = new();
+    /// <summary>
+    /// EL ÚLTIMO TURNO DE LA PARTIDA QUE ACABA DE TERMINAR: las vidas finales (el
+    /// −25 del golpe de gracia) llegan unas líneas DESPUÉS de MatchCompleted
+    /// (visto el 2026-09-27: la curva se quedaba en 10 y el usuario había perdido),
+    /// así que se siguen apuntando aquí hasta que empieza otra partida.
+    /// </summary>
+    private static Turno? turnoFinal;
+    /// <summary>La partida ha acabado y aún no ha empezado otra: los mensajes de estado que siguen (traen turnInfo) no abren turnos nuevos.</summary>
+    private static bool acabada;
+    /// <summary>Lo que quedó de la última lectura sin su salto de línea: Arena aún lo estaba escribiendo, y se completa con la siguiente.</summary>
+    private static string resto = "";
     private static readonly List<ManoOfrecida> manos = new();
     private static readonly Dictionary<int, int> equipoPorAsiento = new();
     private static string idPartida = "";
@@ -218,6 +231,41 @@ internal static class Contexto
     private const long COLA_AL_EMPEZAR = 4 * 1024 * 1024;
 
     /// <summary>Empieza a vigilar ese fichero (aunque todavía no exista). Una vez.</summary>
+    /// <summary>
+    /// VICTORIAS Y DERROTAS DE TODA LA SESIÓN DE ARENA, leyendo el registro entero
+    /// una vez (Arena lo empieza de cero al arrancar, así que «el fichero» es «la
+    /// sesión»). El seguimiento normal empieza por la cola (COLA_AL_EMPEZAR) y el
+    /// marcador salía a medias: el 2026-09-27 el usuario llevaba 2-12 y veía 2-0.
+    /// Misma lógica de asiento y equipo que el seguimiento; sin ningún efecto.
+    /// </summary>
+    public static (int Victorias, int Derrotas) MarcadorDelRegistro(string rutaLog)
+    {
+        int v = 0, d = 0, asiento = 0; var equipos = new Dictionary<int, int>(); var id = "";
+        try
+        {
+            using var fs = new FileStream(rutaLog, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var sr = new StreamReader(fs, System.Text.Encoding.UTF8);
+            while (sr.ReadLine() is { } linea)
+            {
+                var idm = IdPartida.Match(linea);
+                if (idm.Success && idm.Groups[1].Value != id) { id = idm.Groups[1].Value; equipos.Clear(); }
+                var a = Asiento.Match(linea);
+                if (a.Success) asiento = int.Parse(a.Groups[1].Value);
+                foreach (Match eq in Equipo.Matches(linea)) equipos[int.Parse(eq.Groups[1].Value)] = int.Parse(eq.Groups[2].Value);
+                if (!linea.Contains("MatchGameRoomStateType_MatchCompleted", StringComparison.Ordinal)) continue;
+                // El mensaje se repite varias veces por partida; sólo la primera trae los equipos aún puestos.
+                var g = Ganador.Match(linea);
+                if (g.Success && asiento != 0 && equipos.TryGetValue(asiento, out var mio))
+                {
+                    if (int.Parse(g.Groups[1].Value) == mio) v++; else d++;
+                }
+                equipos.Clear(); id = "";
+            }
+        }
+        catch { /* sin registro: 0-0 */ }
+        return (v, d);
+    }
+
     public static void Iniciar(string rutaLog)
     {
         if (hilo is not null) return;
@@ -250,7 +298,11 @@ internal static class Contexto
             turnos.Clear();
             manos.Clear();
             equipoPorAsiento.Clear();
+            turnoFinal = null;
+            acabada = false;
+            resto = "";
             idPartida = "";
+            try { RegistroReiniciado?.Invoke(); } catch { /* cosa de quien escucha */ }
             Cambiar(null, null, null, null, null, false, "", [], []);
         }
         if (estrenando)
@@ -262,8 +314,16 @@ internal static class Contexto
         if (fs.Length == posicion) return;
         fs.Seek(posicion, SeekOrigin.Begin);
         using var sr = new StreamReader(fs, System.Text.Encoding.UTF8);
-        var texto = sr.ReadToEnd();
+        var texto = resto + sr.ReadToEnd();
         posicion = fs.Length;
+        // LÍNEAS ENTERAS: la última puede venir a medias (Arena la sigue
+        // escribiendo), y un mensaje partido en dos se pierde para todas las
+        // expresiones de abajo —asiento, equipos, resultado—. Se guarda y se
+        // completa con la lectura siguiente.
+        var corte = texto.LastIndexOf('\n');
+        if (corte < 0) { resto = texto; return; }
+        resto = texto[(corte + 1)..];
+        texto = texto[..corte];
 
         string? mazo = Mazo; int? carta = Carta; int? otraCara = CartaOtraCara;
         int? rival = CartaRival; int? rivalOtra = CartaRivalOtraCara; bool enPartida = EnPartida;
@@ -317,13 +377,15 @@ internal static class Contexto
             if (idm.Success && idm.Groups[1].Value != idPartida)
             {
                 idPartida = idm.Groups[1].Value;
+                turnoFinal = null;
+                acabada = false;
                 turnos.Clear();
                 manos.Clear();
                 equipoPorAsiento.Clear();
             }
             foreach (Match eq in Equipo.Matches(linea)) equipoPorAsiento[int.Parse(eq.Groups[1].Value)] = int.Parse(eq.Groups[2].Value);
             var ti = TurnoInfo.Match(linea);
-            if (ti.Success)
+            if (ti.Success && !acabada)
             {
                 var n = int.Parse(ti.Groups[1].Value);
                 if (turnos.Count == 0 || turnos[^1].N != n)
@@ -335,9 +397,9 @@ internal static class Contexto
                     turnos.Add(turno);
                 }
             }
-            if (turnos.Count > 0)
+            var actual = turnos.Count > 0 ? turnos[^1] : turnoFinal;
+            if (actual is not null)
             {
-                var actual = turnos[^1];
                 foreach (Match v in Vida.Matches(linea))
                 {
                     var vida = int.Parse(v.Groups[1].Value);
@@ -451,10 +513,14 @@ internal static class Contexto
                     UltimaPartida = new Partida(formato, mazo, gane, razon, turnos.ToArray(), manos.ToArray());
                     try { PartidaAcabada?.Invoke(); } catch { /* cosa de quien escucha */ }
                 }
+                turnoFinal = turnos.Count > 0 ? turnos[^1] : null;
+                acabada = true;
                 turnos.Clear();
                 manos.Clear();
                 equipoPorAsiento.Clear();
-                idPartida = "";
+                // El id de la partida se conserva: las líneas que siguen al fin
+                // (las de las vidas finales) lo repiten, y borrarlo aquí las hacía
+                // pasar por «partida nueva» y tiraba turnoFinal antes de tiempo.
                 enPartida = false;
                 carta = null;
                 otraCara = null;

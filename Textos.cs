@@ -1233,5 +1233,15 @@ internal static class Textos
             "キーを押すと閉じます…",
             "按任意键关闭…",
         ],
+        ["res_aciertos"] =
+        [
+            "What went well", "Aciertos", "Was gut lief", "Ce qui a bien marché",
+            "O que correu bem", "Cosa è andato bene", "良かった点", "亮点",
+        ],
+        ["res_vidas_final"] =
+        [
+            "Life totals when the game ended", "Vidas al acabar la partida", "Lebenspunkte am Ende der Partie", "Points de vie à la fin de la partie",
+            "Pontos de vida no fim da partida", "Punti vita alla fine della partita", "試合終了時のライフ", "对局结束时的生命值",
+        ],
     };
 }

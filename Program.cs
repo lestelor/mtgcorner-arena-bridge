@@ -537,6 +537,11 @@ internal static class Program
             Contexto.Iniciar(args.Length > 1 ? args[1] : Path.Combine(LogArena.Carpeta(), "Player.log"));
             Console.WriteLine("Vigilando el registro durante 60 s…");
             await Task.Delay(TimeSpan.FromSeconds(60));
+            // Al final, las vidas con que quedó el último turno (llegan DESPUÉS
+            // del fin de partida, ver turnoFinal) y el marcador de la sesión.
+            if (Contexto.UltimaPartida?.Turnos is { Count: > 0 } ts) Console.WriteLine($"VIDAS FINALES: yo {ts[^1].VidaYo?.ToString() ?? "?"} / rival {ts[^1].VidaRival?.ToString() ?? "?"}");
+            var (vic, der) = Contexto.MarcadorDelRegistro(args.Length > 1 ? args[1] : Path.Combine(LogArena.Carpeta(), "Player.log"));
+            Console.WriteLine($"MARCADOR DEL REGISTRO ENTERO: {vic} – {der}");
             return 0;
         }
 
@@ -1152,11 +1157,30 @@ internal static class Program
             if (Contexto.UltimaPartida?.Gane == true) victoriasSesion++;
             else if (Contexto.UltimaPartida?.Gane == false) derrotasSesion++;
             Columna.Marcador(victoriasSesion, derrotasSesion);
+            // Y una línea por partida en partidas.log (junto a dispositivo.json):
+            // el 2026-09-27 el marcador no cuadraba con lo jugado y no había con
+            // qué mirarlo. Sin cartas ni nombres: resultado, motivo y marcador.
+            try
+            {
+                var carpeta = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MtgCornerArenaBridge");
+                Directory.CreateDirectory(carpeta);
+                var p = Contexto.UltimaPartida;
+                File.AppendAllText(Path.Combine(carpeta, "partidas.log"),
+                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  gané={p?.Gane?.ToString() ?? "?"}  razón={p?.Razon ?? "?"}  turnos={p?.Turnos.Count}  formato={p?.Formato ?? "?"}  marcador={victoriasSesion}-{derrotasSesion}\r\n");
+            }
+            catch { /* sin disco: da igual */ }
             Columna.Destacar("resumen");
             Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_resumen"), 8);
             ActualizarColumna();
         };
-        Contexto.Iniciar(Path.Combine(LogArena.Carpeta(), "Player.log"));
+        // EL MARCADOR ARRANCA CON LA SESIÓN ENTERA de Arena, no con lo que caiga
+        // en la cola del registro: leído una vez, aparte (ver MarcadorDelRegistro).
+        // Si Arena vuelve a empezar el registro, a cero.
+        var rutaRegistro = Path.Combine(LogArena.Carpeta(), "Player.log");
+        (victoriasSesion, derrotasSesion) = Contexto.MarcadorDelRegistro(rutaRegistro);
+        Columna.Marcador(victoriasSesion, derrotasSesion);
+        Contexto.RegistroReiniciado += () => { victoriasSesion = derrotasSesion = 0; Columna.Marcador(0, 0); };
+        Contexto.Iniciar(rutaRegistro);
 
         // Lo acaba de lanzar una ejecución normal, que ya ha subido: la primera
         // vuelta no sube nada y se pone a vigilar directamente.
@@ -1394,13 +1418,13 @@ internal static class Program
     private static string tonoActual = "directo";
     private static HttpClient? httpResidente;
 
-    /// <summary>Los errores del entrenador por turno («T8: …»), para las calaveras de la curva.</summary>
-    private static Dictionary<int, string> NotasPorTurno(RespuestaResumen d)
+    /// <summary>Las notas del entrenador por turno («T8: …») de una sección: los errores (calaveras de la curva) o los aciertos (copas).</summary>
+    private static Dictionary<int, string> NotasPorTurno(RespuestaResumen d, string clave = "errores")
     {
         var notas = new Dictionary<int, string>();
         foreach (var s in d.Secciones ?? [])
         {
-            if (s.Clave != "errores") continue;
+            if (s.Clave != clave) continue;
             foreach (var parrafo in s.Parrafos ?? [])
             {
                 var m = System.Text.RegularExpressions.Regex.Match(parrafo, @"^\s*T\s*(\d+)\s*[:.\-–]");
@@ -1410,13 +1434,22 @@ internal static class Program
         return notas;
     }
 
+    /// <summary>Una fecha ISO de Moxfield («2026-09-12T…») como «12 sept 2026» en el idioma del programa; null si no hay o no se entiende.</summary>
+    private static string? FechaCorta(string? iso)
+    {
+        if (string.IsNullOrWhiteSpace(iso) || !DateTime.TryParse(iso, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var f)) return null;
+        System.Globalization.CultureInfo cultura;
+        try { cultura = new System.Globalization.CultureInfo(Textos.Idioma); } catch { cultura = System.Globalization.CultureInfo.InvariantCulture; }
+        return f.ToLocalTime().ToString("d MMM yyyy", cultura);
+    }
+
     private static async Task EnsenarResumen(RespuestaResumen d)
     {
         var secciones = (d.Secciones ?? [])
             .Where(s => s.Parrafos is { Length: > 0 })
             .Select(s => new PanelCartas.SeccionTexto(
-                Textos.T(s.Clave switch { "como_fue" => "res_como_fue", "arranque" => "res_arranque", "motivo" => "res_motivo", "errores" => "res_errores", "consejos" => "res_consejos", _ => "col_resumen" }),
-                s.Parrafos!, s.Clave is "errores" or "consejos"))
+                Textos.T(s.Clave switch { "como_fue" => "res_como_fue", "arranque" => "res_arranque", "motivo" => "res_motivo", "aciertos" => "res_aciertos", "errores" => "res_errores", "consejos" => "res_consejos", _ => "col_resumen" }),
+                s.Parrafos!, s.Clave is "errores" or "consejos" or "aciertos"))
             .ToArray();
         if (secciones.Length == 0) secciones = [new PanelCartas.SeccionTexto(Textos.T("col_resumen"), [d.Texto ?? ""], false)];
         // Los mazos que pudo llevar el rival: enlaces a la página de cartas con ese mazo.
@@ -1425,7 +1458,7 @@ internal static class Program
         var avatares = await Task.WhenAll(mazos.Select(m => BajarImagen(m.Avatar)));
         var enlaces = mazos.Select((m, i) => new PanelCartas.Enlace(
                 $"{m.Nombre} · {Textos.T("res_mazo_coinciden", m.Coincidencias)} · {Textos.T(m.Tipo == "meta" ? "res_mazo_meta" : m.Tipo == "moxfield" ? "res_mazo_moxfield" : "res_mazo_gente")}",
-                m.Ruta!, logosMazos[i], m.Autor, avatares[i])).ToArray();
+                m.Ruta!, logosMazos[i], m.Autor, avatares[i], FechaCorta(m.Fecha))).ToArray();
         // Lo que se copia: los títulos y sus párrafos, en plano; y los mazos, con su enlace.
         var plano = string.Join("\r\n\r\n", secciones.Select(s => s.Titulo + "\r\n" + string.Join("\r\n", s.Parrafos.Select(p => s.Lista ? "• " + p : p))));
         if (enlaces.Length > 0)
@@ -1462,7 +1495,7 @@ internal static class Program
                 });
             },
             Textos.T("res_jugada"), Textos.T("res_vidas"), Textos.T("res_tu"), Textos.T("res_rival"), Textos.T("res_tono"),
-            NotasPorTurno(d));
+            NotasPorTurno(d), NotasPorTurno(d, "aciertos"), Textos.T("res_vidas_final"));
         if (d.Titular is { Length: > 0 }) plano = d.Titular + (d.Nota is { } n ? $" — {n}/10" : "") + "\r\n\r\n" + plano;
         PanelCartas.AlAbrir = AbrirDelPanel;
         PanelCartas.MostrarTexto(Textos.T("col_resumen"), secciones, plano, enlaces, Textos.T("res_mazo_rival"), compras, Textos.T("res_compras"), extras);
@@ -2810,7 +2843,8 @@ internal sealed record MazoRivalPuente(
     [property: JsonPropertyName("ruta")] string? Ruta,
     [property: JsonPropertyName("logo")] string? Logo,
     [property: JsonPropertyName("autor")] string? Autor,
-    [property: JsonPropertyName("avatar")] string? Avatar);
+    [property: JsonPropertyName("avatar")] string? Avatar,
+    [property: JsonPropertyName("fecha")] string? Fecha = null);
 
 internal sealed record SeccionResumen(
     [property: JsonPropertyName("clave")] string? Clave,

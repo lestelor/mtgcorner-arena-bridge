@@ -203,7 +203,7 @@ internal static class PanelCartas
 
     /// <summary>Un enlace al final del texto: los mazos que pudo llevar el rival, que abren la web.</summary>
     /// <summary>Un mazo sugerido: el texto, y a la derecha el autor (avatar y nombre) y el logo de su origen (MTG Corner o Moxfield).</summary>
-    public sealed record Enlace(string Texto, string Ruta, string? Logo = null, string? Autor = null, string? Avatar = null);
+    public sealed record Enlace(string Texto, string Ruta, string? Logo = null, string? Autor = null, string? Avatar = null, string? Fecha = null);
     private const int ANCHO_AUTOR = 150, LADO_AVATAR = 18;
 
     /// <summary>
@@ -223,6 +223,11 @@ internal static class PanelCartas
     private static RECT[] rectAvatares = [];
     private static RECT[] rectTurnos = [];
     private const int BAJO_TURNO = -300, BAJO_AVATAR = -400;
+    /// <summary>La carta de la jugada y la leyenda de la curva, en la ventana, para el ratón (zoom y explicación).</summary>
+    private static RECT rectJugada, rectLeyenda;
+    private const int BAJO_JUGADA = -500, BAJO_LEYENDA = -600;
+    /// <summary>La fila de abajo de cada mazo sugerido: avatar, autor, fecha y logo.</summary>
+    private const int PIE_MAZO = 28;
 
     /// <summary>
     /// LO QUE HACE DIVERTIDO EL RESUMEN (ideas aprobadas por el usuario el
@@ -235,7 +240,9 @@ internal static class PanelCartas
         int?[] VidaYo, int?[] VidaRival,
         string[] Tonos, string[] TonoEtiquetas, string?[] TonoAvatares, string TonoActual, Action<string>? CambiarTono,
         string RotuloJugada, string RotuloVidas, string RotuloTu, string RotuloRival, string RotuloTono,
-        IReadOnlyDictionary<int, string>? NotasPorTurno = null);
+        IReadOnlyDictionary<int, string>? NotasPorTurno = null,
+        IReadOnlyDictionary<int, string>? AciertosPorTurno = null,
+        string? RotuloVidasFinal = null);
 
     private static ResumenExtras? extras;
     private static RECT[] rectTonos = [];
@@ -273,6 +280,7 @@ internal static class PanelCartas
         enlaces = conEnlaces?.ToArray() ?? [];
         rectEnlaces = new RECT[enlaces.Length];
         rectAvatares = new RECT[enlaces.Length];
+        rectJugada = default; rectLeyenda = default;
         compras = (conCompras ?? []).Take(3).ToArray();
         rectCompras = new RECT[compras.Length];
         rectTurnos = new RECT[Math.Max(conExtras?.VidaYo.Length ?? 0, conExtras?.VidaRival.Length ?? 0)];
@@ -360,13 +368,14 @@ internal static class PanelCartas
         }
         if (enlaces.Length > 0)
         {
+            // BAJO LA CURVA, en la columna izquierda (el usuario, 2026-09-27): cada
+            // mazo en dos filas —el texto entero arriba, sin recortar; debajo el
+            // avatar, el autor, la fecha y el logo de su origen—.
+            var colMazos = dosColumnas ? 1 : 0;
             var rotulo = tituloEnlaces ?? "";
-            lista.Add(new Bloque(rotulo, true, false, Medir(rotulo, anchoTodo, true)));
+            lista.Add(new Bloque(rotulo, true, false, Medir(rotulo, AnchoDe(colMazos), true), Col: colMazos));
             for (var i = 0; i < enlaces.Length; i++)
-            {
-                var reserva = (enlaces[i].Logo is not null ? LADO_LOGO + 10 : 0) + (enlaces[i].Autor is { Length: > 0 } ? ANCHO_AUTOR + LADO_AVATAR + 12 : 0) + 8;
-                lista.Add(new Bloque(enlaces[i].Texto, false, true, Math.Max(LADO_AVATAR + 4, Medir(enlaces[i].Texto, anchoTodo - SANGRIA_VINETA - reserva - MARGEN, false)), i));
-            }
+                lista.Add(new Bloque(enlaces[i].Texto, false, true, Medir(enlaces[i].Texto, AnchoDe(colMazos) - SANGRIA_VINETA, false) + PIE_MAZO, i, Col: colMazos));
         }
         if (compras.Length > 0)
         {
@@ -564,6 +573,7 @@ internal static class PanelCartas
                         GdipDrawImageRectI(g, img, MARGEN, y + 28, 70, 98);
                         GdipDeleteGraphics(g);
                     }
+                    rectJugada = new RECT { Left = MARGEN, Top = arriba + y + 28, Right = MARGEN + 70, Bottom = arriba + y + 28 + 98 };
                     tx += 80;
                 }
                 SelectObject(zona, fTexto);
@@ -582,7 +592,7 @@ internal static class PanelCartas
                 var rt = new RECT { Left = MARGEN, Top = y, Right = MARGEN + anchoZona, Bottom = y + 24 };
                 DrawText(zona, ex.RotuloVidas, -1, ref rt, DT_LEFT | DT_SINGLELINE);
                 // El área del gráfico.
-                var gx = MARGEN + 30; var gy = y + 34; var gw = anchoZona - 30 - 90; var gh = ALTO_GRAFICO - 30;
+                var gx = MARGEN + 30; var gy = y + 34; var gw = anchoZona - 30 - 100; var gh = ALTO_GRAFICO - 30;
                 var n = Math.Max(ex.VidaYo.Length, ex.VidaRival.Length);
                 var maximo = Math.Max(20, Math.Max(ex.VidaYo.Max(v => v ?? 0), ex.VidaRival.Max(v => v ?? 0)));
                 var eje = CreateSolidBrush(Rgb(51, 65, 85));
@@ -629,15 +639,19 @@ internal static class PanelCartas
                 {
                     var turno = i + 1;
                     rectTurnos[i] = new RECT { Left = X(i) - 9, Top = arriba + gy, Right = X(i) + 9, Bottom = arriba + gy + gh + 22 };
+                    // La calavera es SIEMPRE un error tuyo; la copa, algo que hiciste
+                    // bien (un acierto del entrenador o tu jugada decisiva); el golpe
+                    // decisivo del rival, una explosión (el usuario, 2026-09-27).
                     var esError = ex.NotasPorTurno?.ContainsKey(turno) == true;
-                    var esClave = ex.JugadaTurno == turno;
-                    if (!esError && !esClave) continue;
-                    var trofeo = esClave && ex.JugadaBando != "rival" && !esError;
-                    SetTextColor(zona, trofeo ? Rgb(252, 211, 77) : Rgb(248, 113, 113));
+                    var esAcierto = ex.AciertosPorTurno?.ContainsKey(turno) == true || (ex.JugadaTurno == turno && ex.JugadaBando != "rival");
+                    var golpeRival = ex.JugadaTurno == turno && ex.JugadaBando == "rival";
+                    if (!esError && !esAcierto && !golpeRival) continue;
+                    var glifo = esError ? "\U0001F480" : esAcierto ? "\U0001F3C6" : "\U0001F4A5";
+                    SetTextColor(zona, esError ? Rgb(248, 113, 113) : esAcierto ? Rgb(252, 211, 77) : Rgb(251, 146, 60));
                     var vy = ex.VidaYo.Length > i ? ex.VidaYo[i] : null;
                     var my = vy is { } vv ? Y(vv) - 24 : gy;
                     var rMarca = new RECT { Left = X(i) - 12, Top = Math.Max(gy - 2, my), Right = X(i) + 12, Bottom = Math.Max(gy - 2, my) + 22 };
-                    DrawText(zona, trofeo ? "\U0001F3C6" : "\U0001F480", -1, ref rMarca, DT_CENTER | DT_SINGLELINE);
+                    DrawText(zona, glifo, -1, ref rMarca, DT_CENTER | DT_SINGLELINE);
                 }
                 SelectObject(zona, anteriorEmoji); DeleteObject(fEmoji);
                 // El número de turno bajo el eje, cada pocos turnos.
@@ -657,9 +671,14 @@ internal static class PanelCartas
                 SetTextColor(zona, Rgb(203, 213, 225));
                 var rl1 = new RECT { Left = lx + 16, Top = gy - 2, Right = lx + 80, Bottom = gy + 14 }; DrawText(zona, ex.RotuloTu, -1, ref rl1, DT_LEFT | DT_SINGLELINE);
                 var rl2 = new RECT { Left = lx + 16, Top = gy + 20, Right = lx + 80, Bottom = gy + 36 }; DrawText(zona, ex.RotuloRival, -1, ref rl2, DT_LEFT | DT_SINGLELINE);
+                // LAS VIDAS AL ACABAR, junto a cada nombre y nunca por debajo de 0
+                // (un «10 · 13» suelto no se entendía: el usuario, 2026-09-27); al
+                // pasar el ratón por la leyenda se explica.
                 var ultimoYo = ex.VidaYo.LastOrDefault(v => v is not null); var ultimoRival = ex.VidaRival.LastOrDefault(v => v is not null);
-                var rl3 = new RECT { Left = lx, Top = gy + 44, Right = lx + 90, Bottom = gy + 60 };
-                DrawText(zona, $"{ultimoYo?.ToString() ?? "?"} · {ultimoRival?.ToString() ?? "?"}", -1, ref rl3, DT_LEFT | DT_SINGLELINE);
+                SetTextColor(zona, Rgb(255, 255, 255));
+                var rn1 = new RECT { Left = lx + 16, Top = gy - 2, Right = lx + 88, Bottom = gy + 14 }; DrawText(zona, ultimoYo is { } uy ? $"{Math.Max(0, uy)}" : "?", -1, ref rn1, DT_RIGHT | DT_SINGLELINE);
+                var rn2 = new RECT { Left = lx + 16, Top = gy + 20, Right = lx + 88, Bottom = gy + 36 }; DrawText(zona, ultimoRival is { } ur ? $"{Math.Max(0, ur)}" : "?", -1, ref rn2, DT_RIGHT | DT_SINGLELINE);
+                rectLeyenda = new RECT { Left = lx, Top = arriba + gy - 4, Right = lx + 92, Bottom = arriba + gy + 40 };
                 break;
             }
         }
@@ -880,6 +899,10 @@ internal static class PanelCartas
             var yr = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
             var rb = RectBotonCopiar();
             if (xr >= rb.Left && xr < rb.Right && yr >= rb.Top && yr < rb.Bottom) return BAJO_COPIAR;
+            // El avatar antes que su mazo: está dentro de su tarjeta.
+            var rav = rectAvatares;
+            for (var i = 0; i < rav.Length; i++)
+                if (rav[i].Right > 0 && xr >= rav[i].Left && xr < rav[i].Right && yr >= rav[i].Top && yr < rav[i].Bottom) return BAJO_AVATAR - i;
             var rects = rectEnlaces;
             for (var i = 0; i < rects.Length; i++)
                 if (xr >= rects[i].Left && xr < rects[i].Right && yr >= rects[i].Top && yr < rects[i].Bottom) return BAJO_ENLACE - i;
@@ -889,12 +912,11 @@ internal static class PanelCartas
             var rtn = rectTonos;
             for (var i = 0; i < rtn.Length; i++)
                 if (xr >= rtn[i].Left && xr < rtn[i].Right && yr >= rtn[i].Top && yr < rtn[i].Bottom) return BAJO_TONO - i;
-            var rav = rectAvatares;
-            for (var i = 0; i < rav.Length; i++)
-                if (rav[i].Right > 0 && xr >= rav[i].Left && xr < rav[i].Right && yr >= rav[i].Top && yr < rav[i].Bottom) return BAJO_AVATAR - i;
             var rtu = rectTurnos;
             for (var i = 0; i < rtu.Length; i++)
                 if (rtu[i].Right > 0 && xr >= rtu[i].Left && xr < rtu[i].Right && yr >= rtu[i].Top && yr < rtu[i].Bottom) return BAJO_TURNO - i;
+            if (rectJugada.Right > 0 && xr >= rectJugada.Left && xr < rectJugada.Right && yr >= rectJugada.Top && yr < rectJugada.Bottom) return BAJO_JUGADA;
+            if (rectLeyenda.Right > 0 && xr >= rectLeyenda.Left && xr < rectLeyenda.Right && yr >= rectLeyenda.Top && yr < rectLeyenda.Bottom) return BAJO_LEYENDA;
         }
         var x = (short)(lParam.ToInt64() & 0xFFFF);
         var y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
@@ -926,7 +948,7 @@ internal static class PanelCartas
             {
                 var i = bajoRaton;
                 var lista = huecos;
-                var pulsable = i == -2 || i == BAJO_COPIAR || (i <= BAJO_ENLACE && i > BAJO_TONO) || (i <= BAJO_TONO && i > BAJO_TURNO) || i <= BAJO_AVATAR
+                var pulsable = i == -2 || i == BAJO_COPIAR || (i <= BAJO_ENLACE && i > BAJO_TONO) || (i <= BAJO_TONO && i > BAJO_TURNO) || (i <= BAJO_AVATAR && i > BAJO_JUGADA)
                     || (i >= 0 && i < lista.Length && (lista[i].Carta?.Ruta ?? lista[i].Seccion.Ruta) is not null);
                 SetCursor(LoadCursor(IntPtr.Zero, pulsable ? IDC_HAND : IDC_ARROW));
                 return new IntPtr(1);
@@ -1065,6 +1087,7 @@ internal static class PanelCartas
                 var rz = new RECT { Left = 0, Top = 0, Right = ANCHO_PANEL, Bottom = altoZona };
                 FillRect(zona, ref rz, fondo);
                 SetBkMode(zona, TRANSPARENT_BK);
+                rectJugada = default; rectLeyenda = default;
                 for (var i = 0; i < bloques.Length; i++)
                 {
                     var b = bloques[i];
@@ -1108,54 +1131,68 @@ internal static class PanelCartas
                         }
                         continue;
                     }
-                    if (b.Enlace >= 0 && b.Enlace < rectEnlaces.Length)
+                    if (b.Enlace >= 0 && b.Enlace < enlaces.Length)
                     {
-                        // Dónde queda en la ventana (la zona empieza en `arriba`), para el ratón.
-                        rectEnlaces[b.Enlace] = new RECT { Left = bx + SANGRIA_VINETA, Top = arriba + y, Right = (bx + bw), Bottom = arriba + y + b.Alto };
+                        // UN MAZO SUGERIDO, en dos filas: el texto entero arriba y,
+                        // debajo, avatar + autor + fecha a la izquierda y el logo del
+                        // origen a la derecha. Su rectángulo en la ventana (la zona
+                        // empieza en `arriba`), para el ratón.
+                        rectEnlaces[b.Enlace] = new RECT { Left = bx, Top = arriba + y, Right = bx + bw, Bottom = arriba + y + b.Alto };
+                        rectAvatares[b.Enlace] = default;
+                        if (y + b.Alto < 0 || y >= altoZona) continue;
+                        var e = enlaces[b.Enlace];
+                        var sobreEnlace = bajoRaton == BAJO_ENLACE - b.Enlace;
+                        if (sobreEnlace)
+                        {
+                            var pincelSobre = CreateSolidBrush(Rgb(26, 34, 54));
+                            var rSobre = new RECT { Left = bx - 6, Top = y - 3, Right = bx + bw + 6, Bottom = y + b.Alto + 3 };
+                            FillRect(zona, ref rSobre, pincelSobre); DeleteObject(pincelSobre);
+                        }
+                        SelectObject(zona, fTexto);
+                        SetTextColor(zona, sobreEnlace ? Rgb(255, 255, 255) : Rgb(56, 189, 248));
+                        var rv = new RECT { Left = bx, Top = y, Right = bx + SANGRIA_VINETA, Bottom = y + b.Alto };
+                        DrawText(zona, "›", -1, ref rv, DT_LEFT);
+                        var rb = new RECT { Left = bx + SANGRIA_VINETA, Top = y, Right = bx + bw, Bottom = y + b.Alto - PIE_MAZO };
+                        DrawText(zona, b.Texto, -1, ref rb, DT_LEFT | DT_WORDBREAK);
+                        var yPie = y + b.Alto - PIE_MAZO + 6;
+                        var xPie = bx + SANGRIA_VINETA;
+                        var imgLogoDer = e.Logo is not null ? Imagen(e.Logo) : IntPtr.Zero;
+                        var imgAvatar = e.Avatar is not null ? Imagen(e.Avatar) : IntPtr.Zero;
+                        IniciarGdiPlus();
+                        if (GdipCreateFromHDC(zona, out var gd) == 0 && gd != IntPtr.Zero)
+                        {
+                            GdipSetInterpolationMode(gd, 7);
+                            if (imgAvatar != IntPtr.Zero)
+                            {
+                                GdipDrawImageRectI(gd, imgAvatar, xPie, yPie, LADO_AVATAR, LADO_AVATAR);
+                                rectAvatares[b.Enlace] = new RECT { Left = xPie, Top = arriba + yPie, Right = xPie + LADO_AVATAR, Bottom = arriba + yPie + LADO_AVATAR };
+                                xPie += LADO_AVATAR + 6;
+                            }
+                            if (imgLogoDer != IntPtr.Zero) GdipDrawImageRectI(gd, imgLogoDer, bx + bw - LADO_LOGO, yPie + 1, LADO_LOGO, LADO_LOGO);
+                            GdipDeleteGraphics(gd);
+                        }
+                        var pie = string.Join("  ·  ", new[] { e.Autor, e.Fecha }.Where(v => v is { Length: > 0 }));
+                        if (pie.Length > 0)
+                        {
+                            var fAutor = CreateFont(15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                            var anteriorAutor = SelectObject(zona, fAutor);
+                            SetTextColor(zona, Rgb(148, 163, 184));
+                            var ra = new RECT { Left = xPie, Top = yPie, Right = bx + bw - (imgLogoDer != IntPtr.Zero ? LADO_LOGO + 8 : 0), Bottom = yPie + LADO_AVATAR };
+                            DrawText(zona, pie, -1, ref ra, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                            SelectObject(zona, anteriorAutor); DeleteObject(fAutor);
+                        }
+                        continue;
                     }
                     if (y + b.Alto >= 0 && y < altoZona)
                     {
                         SelectObject(zona, b.Titulo ? fTituloSec : fTexto);
-                        var sobreEnlace = b.Enlace >= 0 && bajoRaton == BAJO_ENLACE - b.Enlace;
-                        SetTextColor(zona, b.Titulo ? Rgb(252, 211, 77) : b.Enlace >= 0 ? (sobreEnlace ? Rgb(255, 255, 255) : Rgb(56, 189, 248)) : Rgb(226, 232, 240));
+                        SetTextColor(zona, b.Titulo ? Rgb(252, 211, 77) : Rgb(226, 232, 240));
                         if (b.Vineta)
                         {
                             var rv = new RECT { Left = bx, Top = y, Right = bx + SANGRIA_VINETA, Bottom = y + b.Alto };
-                            DrawText(zona, b.Enlace >= 0 ? "›" : "•", -1, ref rv, DT_LEFT);
+                            DrawText(zona, "•", -1, ref rv, DT_LEFT);
                         }
-                        var derecha = (bx + bw);
-                        if (b.Enlace >= 0 && b.Enlace < enlaces.Length)
-                        {
-                            // A la derecha: el logo del origen y, si lo hay, el autor con su avatar.
-                            var e = enlaces[b.Enlace];
-                            var imgLogoDer = e.Logo is not null ? Imagen(e.Logo) : IntPtr.Zero;
-                            var imgAvatar = e.Avatar is not null ? Imagen(e.Avatar) : IntPtr.Zero;
-                            IniciarGdiPlus();
-                            if (GdipCreateFromHDC(zona, out var gd) == 0 && gd != IntPtr.Zero)
-                            {
-                                GdipSetInterpolationMode(gd, 7);
-                                if (imgLogoDer != IntPtr.Zero) { derecha -= LADO_LOGO; GdipDrawImageRectI(gd, imgLogoDer, derecha, y + 3, LADO_LOGO, LADO_LOGO); derecha -= 10; }
-                                if (e.Autor is { Length: > 0 })
-                                {
-                                    var fAutor = CreateFont(15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
-                                    var anteriorAutor = SelectObject(zona, fAutor);
-                                    SetTextColor(zona, Rgb(148, 163, 184));
-                                    var rMed = new RECT();
-                                    DrawText(zona, e.Autor, -1, ref rMed, DT_CALCRECT | DT_SINGLELINE);
-                                    var anchoAutor = Math.Min(ANCHO_AUTOR, rMed.Right - rMed.Left);
-                                    var ra = new RECT { Left = derecha - anchoAutor, Top = y + 2, Right = derecha, Bottom = y + 2 + LADO_AVATAR };
-                                    DrawText(zona, e.Autor, -1, ref ra, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-                                    derecha -= anchoAutor + 6;
-                                    if (imgAvatar != IntPtr.Zero) { derecha -= LADO_AVATAR; GdipDrawImageRectI(gd, imgAvatar, derecha, y + 2, LADO_AVATAR, LADO_AVATAR); rectAvatares[b.Enlace] = new RECT { Left = derecha, Top = arriba + y + 2, Right = derecha + LADO_AVATAR, Bottom = arriba + y + 2 + LADO_AVATAR }; derecha -= 6; }
-                                    SelectObject(zona, anteriorAutor); DeleteObject(fAutor);
-                                    SelectObject(zona, fTexto);
-                                    SetTextColor(zona, sobreEnlace ? Rgb(255, 255, 255) : Rgb(56, 189, 248));
-                                }
-                                GdipDeleteGraphics(gd);
-                            }
-                            derecha -= 8;
-                        }
-                        var rb = new RECT { Left = bx + (b.Vineta ? SANGRIA_VINETA : 0), Top = y, Right = derecha, Bottom = y + b.Alto };
+                        var rb = new RECT { Left = bx + (b.Vineta ? SANGRIA_VINETA : 0), Top = y, Right = bx + bw, Bottom = y + b.Alto };
                         DrawText(zona, b.Texto, -1, ref rb, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
                     }
                 }
@@ -1173,28 +1210,40 @@ internal static class PanelCartas
                     {
                         var rc = rectAvatares[BAJO_AVATAR - bajoRaton];
                         const int lado = 72;
-                        var zx = Math.Max(MARGEN, Math.Min(rc.Left - lado - 8, ANCHO_PANEL - MARGEN - lado));
+                        var zx = Math.Min(rc.Right + 8, ANCHO_PANEL - MARGEN - lado);
                         var zy = Math.Clamp(rc.Top - lado / 2, ALTO_CABECERA, Math.Max(ALTO_CABECERA, alto - ALTO_PIE - MARGEN - lado));
                         GdipDrawImageRectI(grafico, img, zx, zy, lado, lado);
                     }
                 }
                 // LA NOTA DEL TURNO bajo el ratón en la curva: el error de ese turno
                 // o la jugada decisiva, en una caja encima del gráfico.
-                if (bajoRaton <= BAJO_TURNO && bajoRaton > BAJO_AVATAR && extras is { } exN)
+                if (extras is { } exN && ((bajoRaton <= BAJO_TURNO && bajoRaton > BAJO_AVATAR) || bajoRaton == BAJO_LEYENDA))
                 {
-                    var turno = BAJO_TURNO - bajoRaton + 1;
-                    string? nota = null;
-                    if (exN.NotasPorTurno is { } notas && notas.TryGetValue(turno, out var n1)) nota = n1;
-                    else if (exN.JugadaTurno == turno) nota = (exN.JugadaNombre ?? "") + ": " + (exN.JugadaFrase ?? "");
+                    string? nota = null; RECT rc;
+                    if (bajoRaton == BAJO_LEYENDA)
+                    {
+                        rc = rectLeyenda;
+                        var vYo = exN.VidaYo.LastOrDefault(v => v is not null); var vRival = exN.VidaRival.LastOrDefault(v => v is not null);
+                        nota = $"{exN.RotuloVidasFinal}: {exN.RotuloTu} {(vYo is { } a1 ? Math.Max(0, a1).ToString() : "?")} · {exN.RotuloRival} {(vRival is { } a2 ? Math.Max(0, a2).ToString() : "?")}";
+                    }
+                    else
+                    {
+                        var turno = BAJO_TURNO - bajoRaton + 1;
+                        rc = rectTurnos[BAJO_TURNO - bajoRaton];
+                        var trozos = new List<string>();
+                        if (exN.NotasPorTurno is { } notas && notas.TryGetValue(turno, out var n1)) trozos.Add(n1);
+                        if (exN.AciertosPorTurno is { } aciertos && aciertos.TryGetValue(turno, out var n2)) trozos.Add(n2);
+                        if (exN.JugadaTurno == turno) trozos.Add((exN.JugadaNombre ?? "") + ": " + (exN.JugadaFrase ?? ""));
+                        if (trozos.Count > 0) nota = string.Join("\n\n", trozos);
+                    }
                     if (nota is not null)
                     {
                         var fNota = CreateFont(15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
                         var anteriorNota = SelectObject(hdc, fNota);
-                        var rc = rectTurnos[BAJO_TURNO - bajoRaton];
                         var anchoCaja = 300;
                         var rm = new RECT { Left = 0, Top = 0, Right = anchoCaja - 16, Bottom = 0 };
                         DrawText(hdc, nota, -1, ref rm, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
-                        var altoCaja = Math.Min(120, rm.Bottom - rm.Top + 16);
+                        var altoCaja = Math.Min(200, rm.Bottom - rm.Top + 16);
                         var cx0 = Math.Clamp(rc.Left - anchoCaja / 2, MARGEN, ANCHO_PANEL - MARGEN - anchoCaja);
                         var cy0 = Math.Max(ALTO_CABECERA, rc.Top - altoCaja - 6);
                         var rCaja = new RECT { Left = cx0, Top = cy0, Right = cx0 + anchoCaja, Bottom = cy0 + altoCaja };
@@ -1205,6 +1254,20 @@ internal static class PanelCartas
                         var rTexto = new RECT { Left = rCaja.Left + 8, Top = rCaja.Top + 8, Right = rCaja.Right - 8, Bottom = rCaja.Bottom - 6 };
                         DrawText(hdc, nota, -1, ref rTexto, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
                         SelectObject(hdc, anteriorNota); DeleteObject(fNota);
+                    }
+                }
+
+                // LA CARTA DE LA JUGADA, grande, al pasar el ratón por ella (el
+                // usuario, 2026-09-27): a su derecha, dentro del panel.
+                if (bajoRaton == BAJO_JUGADA && extras?.JugadaFichero is { } ficheroJugada && grafico != IntPtr.Zero)
+                {
+                    var imgJugada = Imagen(ficheroJugada);
+                    if (imgJugada != IntPtr.Zero)
+                    {
+                        var rj = rectJugada;
+                        var jx = rj.Right + 8 + ANCHO_VISTA <= ANCHO_PANEL - MARGEN ? rj.Right + 8 : Math.Max(MARGEN, rj.Left - 8 - ANCHO_VISTA);
+                        var jy = Math.Clamp(rj.Top + (rj.Bottom - rj.Top) / 2 - ALTO_VISTA / 2, ALTO_CABECERA, Math.Max(ALTO_CABECERA, alto - ALTO_PIE - MARGEN - ALTO_VISTA));
+                        GdipDrawImageRectI(grafico, imgJugada, jx, jy, ANCHO_VISTA, ALTO_VISTA);
                     }
                 }
 
