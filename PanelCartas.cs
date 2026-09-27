@@ -36,7 +36,7 @@ namespace MtgCornerArenaBridge;
 /// es la fila de la columna (Columna.EnCurso), que no tapa nada: la gente está
 /// jugando y no quiere la mesa tapada por un panel a medias.
 /// </summary>
-internal static class PanelCartas
+internal static partial class PanelCartas
 {
     /// <summary>Una carta del panel: su imagen en disco y a dónde lleva en la web.</summary>
     public sealed record Carta(string Nombre, string Fichero, string? Ruta, double? PrecioUsd);
@@ -203,7 +203,8 @@ internal static class PanelCartas
 
     /// <summary>Un enlace al final del texto: los mazos que pudo llevar el rival, que abren la web.</summary>
     /// <summary>Un mazo sugerido: el texto, y a la derecha el autor (avatar y nombre) y el logo de su origen (MTG Corner o Moxfield).</summary>
-    public sealed record Enlace(string Texto, string Ruta, string? Logo = null, string? Autor = null, string? Avatar = null, string? Fecha = null);
+    public sealed record Enlace(string Texto, string Ruta, string? Logo = null, string? Autor = null, string? Avatar = null, string? Fecha = null,
+        string? Origen = null, string? Coinciden = null, int Nivel = 0, string? Cartas = null, string? RotuloCartas = null);
     private const int ANCHO_AUTOR = 150, LADO_AVATAR = 18;
 
     /// <summary>
@@ -226,8 +227,11 @@ internal static class PanelCartas
     /// <summary>La carta de la jugada y la leyenda de la curva, en la ventana, para el ratón (zoom y explicación).</summary>
     private static RECT rectJugada, rectLeyenda;
     private const int BAJO_JUGADA = -500, BAJO_LEYENDA = -600;
-    /// <summary>La fila de abajo de cada mazo sugerido: avatar, autor, fecha y logo.</summary>
-    private const int PIE_MAZO = 28;
+    /// <summary>La fila de arriba de cada mazo sugerido: logo y origen, autor y fecha, y «N en común».</summary>
+    private const int CABEZA_MAZO = 26;
+    /// <summary>La etiqueta «N en común» de cada mazo, para el ratón (sus cartas al pasar).</summary>
+    private static RECT[] rectCoinciden = [];
+    private const int BAJO_COINCIDEN = -700;   // la etiqueta del mazo i: BAJO_COINCIDEN - i
 
     /// <summary>
     /// LO QUE HACE DIVERTIDO EL RESUMEN (ideas aprobadas por el usuario el
@@ -270,16 +274,19 @@ internal static class PanelCartas
     private const int BAJO_COPIAR = -3;
 
     /// <summary>Enseña el resumen por secciones. <paramref name="textoPlano"/> es lo que copia el botón.</summary>
-    public static void MostrarTexto(string tituloPanel, IReadOnlyList<SeccionTexto> secciones, string textoPlano, IReadOnlyList<Enlace>? conEnlaces = null, string? tituloEnlaces = null, IReadOnlyList<Compra>? conCompras = null, string? tituloCompras = null, ResumenExtras? conExtras = null)
+    public static void MostrarTexto(string tituloPanel, IReadOnlyList<SeccionTexto> secciones, string textoPlano, IReadOnlyList<Enlace>? conEnlaces = null, string? tituloEnlaces = null, IReadOnlyList<Compra>? conCompras = null, string? tituloCompras = null, ResumenExtras? conExtras = null, Estadisticas? conEstadisticas = null)
     {
         Cerrar();
         titulo = tituloPanel;
         copia = textoPlano;
         extras = conExtras;
+        est = conEstadisticas;
+        rectPuntosEst = []; rectMazosEst = []; centroPuntosEst = [];
         rectTonos = new RECT[conExtras?.Tonos.Length ?? 0];
         enlaces = conEnlaces?.ToArray() ?? [];
         rectEnlaces = new RECT[enlaces.Length];
         rectAvatares = new RECT[enlaces.Length];
+        rectCoinciden = new RECT[enlaces.Length];
         rectJugada = default; rectLeyenda = default;
         compras = (conCompras ?? []).Take(3).ToArray();
         rectCompras = new RECT[compras.Length];
@@ -290,7 +297,7 @@ internal static class PanelCartas
         var (anchoArena, altoArena) = MedidasDeArena();
         // EL ANCHO: con extras (el resumen), a dos columnas y tan ancho como
         // permita Arena hasta 1180; sin ellos, el de siempre (758).
-        var anchoDeseado = extras is not null ? Math.Clamp(anchoArena - 80, 760, 1180) : 758;
+        var anchoDeseado = extras is not null || est is not null ? Math.Clamp(anchoArena - 80, 760, 1180) : 758;
         (anchoCarta, altoCarta) = ((anchoDeseado - MARGEN * 2 - (POR_FILA - 1) * AIRE) / POR_FILA, 237);
         var altoMaximo = altoArena - 60;
 
@@ -301,7 +308,7 @@ internal static class PanelCartas
         {
             Disponer(secciones, tituloEnlaces, tituloCompras);
             var altoNecesario = ALTO_CABECERA + MARGEN / 2 + altoTexto + MARGEN + ALTO_PIE + MARGEN / 2;
-            if (extras is null || altoNecesario <= altoMaximo || intento >= 2) break;
+            if ((extras is null && est is null) || altoNecesario <= altoMaximo || intento >= 2) break;
             TAM_TITULO_SECCION -= 2; TAM_TEXTO -= 1;
         }
         alto = Math.Min(altoMaximo, ALTO_CABECERA + MARGEN / 2 + altoTexto + MARGEN + ALTO_PIE + MARGEN / 2);
@@ -325,13 +332,15 @@ internal static class PanelCartas
         var fTexto = CreateFont(TAM_TEXTO, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
         var anterior = SelectObject(hdc, fTexto);
         var anchoTodo = ANCHO_PANEL - MARGEN * 2;
-        var dosColumnas = extras is not null;
-        var anchoIzq = dosColumnas ? (anchoTodo - HUECO_COLUMNAS) * 42 / 100 : anchoTodo;
+        var dosColumnas = extras is not null || est is not null;
+        // Stats reparte casi a medias (la evolución y los mazos piden sitio); el resumen, 42/58.
+        var anchoIzq = dosColumnas ? (anchoTodo - HUECO_COLUMNAS) * (est is not null ? 54 : 42) / 100 : anchoTodo;
         var anchoDer = dosColumnas ? anchoTodo - HUECO_COLUMNAS - anchoIzq : anchoTodo;
         int AnchoDe(int col) => col == 1 ? anchoIzq : col == 2 ? anchoDer : anchoTodo;
         var colTexto = dosColumnas ? 2 : 0;
 
         var lista = new List<Bloque>();
+        if (est is { } estadisticas) AnadirBloquesEstadisticas(lista, estadisticas);
         int Medir(string t, int anchoCol, bool titulo)
         {
             SelectObject(hdc, titulo ? fTitulo : fTexto);
@@ -368,14 +377,15 @@ internal static class PanelCartas
         }
         if (enlaces.Length > 0)
         {
-            // BAJO LA CURVA, en la columna izquierda (el usuario, 2026-09-27): cada
-            // mazo en dos filas —el texto entero arriba, sin recortar; debajo el
-            // avatar, el autor, la fecha y el logo de su origen—.
+            // BAJO LA CURVA, en la columna izquierda, cada mazo en dos filas
+            // (el usuario, 2026-09-27): arriba, pequeño, DE DÓNDE VIENE —logo y
+            // nombre del origen, autor con su avatar, fecha— y a la derecha
+            // cuántas cartas coinciden; debajo, el nombre del mazo entero.
             var colMazos = dosColumnas ? 1 : 0;
             var rotulo = tituloEnlaces ?? "";
             lista.Add(new Bloque(rotulo, true, false, Medir(rotulo, AnchoDe(colMazos), true), Col: colMazos));
             for (var i = 0; i < enlaces.Length; i++)
-                lista.Add(new Bloque(enlaces[i].Texto, false, true, Medir(enlaces[i].Texto, AnchoDe(colMazos) - SANGRIA_VINETA, false) + PIE_MAZO, i, Col: colMazos));
+                lista.Add(new Bloque(enlaces[i].Texto, false, true, CABEZA_MAZO + Medir(enlaces[i].Texto, AnchoDe(colMazos) - SANGRIA_VINETA, false) + 2, i, Col: colMazos));
         }
         if (compras.Length > 0)
         {
@@ -821,7 +831,8 @@ internal static class PanelCartas
 
             altoRegion = alto;
             SetWindowRgn(ventana, CreateRoundRectRgn(0, 0, ANCHO_PANEL + 1, alto + 1, 16, 16), true);
-            SetLayeredWindowAttributes(ventana, 0, 244, LWA_ALPHA);
+            // Stats casi opaco: sus gráficas no se leen con el juego asomando por detrás.
+            SetLayeredWindowAttributes(ventana, 0, (byte)(est is not null ? 252 : 244), LWA_ALPHA);
             SetTimer(ventana, new IntPtr(1), 500, IntPtr.Zero);   // seguir a Arena
             ShowWindow(ventana, ver ? SW_SHOWNOACTIVATE : 0);
             UpdateWindow(ventana);
@@ -903,6 +914,15 @@ internal static class PanelCartas
             var rav = rectAvatares;
             for (var i = 0; i < rav.Length; i++)
                 if (rav[i].Right > 0 && xr >= rav[i].Left && xr < rav[i].Right && yr >= rav[i].Top && yr < rav[i].Bottom) return BAJO_AVATAR - i;
+            var rme = rectMazosEst;
+            for (var i = 0; i < rme.Length; i++)
+                if (rme[i].Right > 0 && xr >= rme[i].Left && xr < rme[i].Right && yr >= rme[i].Top && yr < rme[i].Bottom) return BAJO_MAZO_EST - i;
+            var rpe = rectPuntosEst;
+            for (var i = 0; i < rpe.Length; i++)
+                if (rpe[i].Right > 0 && xr >= rpe[i].Left && xr < rpe[i].Right && yr >= rpe[i].Top && yr < rpe[i].Bottom) return BAJO_PUNTO_EST - i;
+            var rco = rectCoinciden;
+            for (var i = 0; i < rco.Length; i++)
+                if (rco[i].Right > 0 && xr >= rco[i].Left && xr < rco[i].Right && yr >= rco[i].Top && yr < rco[i].Bottom) return BAJO_COINCIDEN - i;
             var rects = rectEnlaces;
             for (var i = 0; i < rects.Length; i++)
                 if (xr >= rects[i].Left && xr < rects[i].Right && yr >= rects[i].Top && yr < rects[i].Bottom) return BAJO_ENLACE - i;
@@ -948,7 +968,8 @@ internal static class PanelCartas
             {
                 var i = bajoRaton;
                 var lista = huecos;
-                var pulsable = i == -2 || i == BAJO_COPIAR || (i <= BAJO_ENLACE && i > BAJO_TONO) || (i <= BAJO_TONO && i > BAJO_TURNO) || (i <= BAJO_AVATAR && i > BAJO_JUGADA)
+                var pulsable = i == -2 || i == BAJO_COPIAR || (i <= BAJO_ENLACE && i > BAJO_TONO) || (i <= BAJO_TONO && i > BAJO_TURNO) || (i <= BAJO_AVATAR && i > BAJO_JUGADA) || (i <= BAJO_COINCIDEN && i > BAJO_MAZO_EST)
+                    || (i <= BAJO_MAZO_EST && i > BAJO_PUNTO_EST && est is { } esC && BAJO_MAZO_EST - i < esC.Mazos.Length && esC.Mazos[BAJO_MAZO_EST - i].Ruta is not null)
                     || (i >= 0 && i < lista.Length && (lista[i].Carta?.Ruta ?? lista[i].Seccion.Ruta) is not null);
                 SetCursor(LoadCursor(IntPtr.Zero, pulsable ? IDC_HAND : IDC_ARROW));
                 return new IntPtr(1);
@@ -983,6 +1004,17 @@ internal static class PanelCartas
                 var i = QueHayEn(lParam);
                 if (i == -2) { PostMessage(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero); return IntPtr.Zero; }
                 if (i == BAJO_COPIAR) { copiado = Copiar(copia); InvalidateRect(hWnd, IntPtr.Zero, false); return IntPtr.Zero; }
+                if (i <= BAJO_MAZO_EST && i > BAJO_PUNTO_EST && est is { } esM && BAJO_MAZO_EST - i < esM.Mazos.Length && esM.Mazos[BAJO_MAZO_EST - i].Ruta is { } rutaEst && AlAbrir is { } abrirEst)
+                {
+                    _ = Task.Run(() => { try { abrirEst(rutaEst); } catch { /* lo cuenta quien lo montó */ } });
+                    return IntPtr.Zero;
+                }
+                if (i <= BAJO_COINCIDEN && BAJO_COINCIDEN - i < enlaces.Length && AlAbrir is { } abrirMazo)
+                {
+                    var rutaMazo = enlaces[BAJO_COINCIDEN - i].Ruta;
+                    _ = Task.Run(() => { try { abrirMazo(rutaMazo); } catch { /* lo cuenta quien lo montó */ } });
+                    return IntPtr.Zero;
+                }
                 if (i <= BAJO_AVATAR && BAJO_AVATAR - i < enlaces.Length && AlAbrir is { } abrirAvatar)
                 {
                     var rutaAvatar = enlaces[BAJO_AVATAR - i].Ruta;
@@ -1094,6 +1126,11 @@ internal static class PanelCartas
                     var y = (i < topBloques.Length ? topBloques[i] : 0) - desplazamiento;
                     var bx = i < xBloques.Length ? xBloques[i] : MARGEN;
                     var bw = i < anchoBloques.Length ? anchoBloques[i] : ANCHO_PANEL - MARGEN * 2;
+                    if (b.Especial is { } especialEst && especialEst.StartsWith("est_", StringComparison.Ordinal) && est is { } es)
+                    {
+                        if (y + b.Alto >= 0 && y < altoZona) PintarEstadistica(zona, especialEst, es, y, b.Alto, arriba, bx, bw);
+                        continue;
+                    }
                     if (b.Especial is { } especial && extras is { } ex)
                     {
                         if (y + b.Alto >= 0 && y < altoZona) PintarEspecial(zona, especial, ex, y, b.Alto, arriba, fTituloSec, fTexto, bx, bw);
@@ -1133,54 +1170,88 @@ internal static class PanelCartas
                     }
                     if (b.Enlace >= 0 && b.Enlace < enlaces.Length)
                     {
-                        // UN MAZO SUGERIDO, en dos filas: el texto entero arriba y,
-                        // debajo, avatar + autor + fecha a la izquierda y el logo del
-                        // origen a la derecha. Su rectángulo en la ventana (la zona
-                        // empieza en `arriba`), para el ratón.
+                        // UN MAZO SUGERIDO, en dos filas. Arriba, pequeño: el logo y el
+                        // nombre de su origen, el autor con su avatar y la fecha, y a la
+                        // derecha «N en común». Debajo, en azul, el nombre del mazo entero.
+                        // Su rectángulo en la ventana (la zona empieza en `arriba`), para el ratón.
                         rectEnlaces[b.Enlace] = new RECT { Left = bx, Top = arriba + y, Right = bx + bw, Bottom = arriba + y + b.Alto };
                         rectAvatares[b.Enlace] = default;
+                        rectCoinciden[b.Enlace] = default;
                         if (y + b.Alto < 0 || y >= altoZona) continue;
                         var e = enlaces[b.Enlace];
-                        var sobreEnlace = bajoRaton == BAJO_ENLACE - b.Enlace;
+                        var sobreEnlace = bajoRaton == BAJO_ENLACE - b.Enlace || bajoRaton == BAJO_COINCIDEN - b.Enlace;
                         if (sobreEnlace)
                         {
                             var pincelSobre = CreateSolidBrush(Rgb(26, 34, 54));
                             var rSobre = new RECT { Left = bx - 6, Top = y - 3, Right = bx + bw + 6, Bottom = y + b.Alto + 3 };
                             FillRect(zona, ref rSobre, pincelSobre); DeleteObject(pincelSobre);
                         }
+                        // «N en común», a la derecha: verde con 3 o más, ámbar con 2, gris con 1.
+                        var limite = bx + bw;
+                        if (e.Coinciden is { Length: > 0 } coinciden)
+                        {
+                            var fEtiqueta = CreateFont(14, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                            var anteriorEtiqueta = SelectObject(zona, fEtiqueta);
+                            var rMide = new RECT();
+                            DrawText(zona, coinciden, -1, ref rMide, DT_CALCRECT | DT_SINGLELINE);
+                            var anchoEtiqueta = rMide.Right - rMide.Left + 16;
+                            var rEtiqueta = new RECT { Left = bx + bw - anchoEtiqueta, Top = y + 2, Right = bx + bw, Bottom = y + 22 };
+                            var sobreEtiqueta = bajoRaton == BAJO_COINCIDEN - b.Enlace;
+                            var (fondoEtiqueta, letraEtiqueta) = e.Nivel >= 3 ? (Rgb(22, 101, 52), Rgb(220, 252, 231))
+                                : e.Nivel == 2 ? (Rgb(120, 53, 15), Rgb(254, 243, 199)) : (Rgb(51, 65, 85), Rgb(226, 232, 240));
+                            var pincelEtiqueta = CreateSolidBrush(sobreEtiqueta ? Rgb(56, 189, 248) : fondoEtiqueta);
+                            FillRect(zona, ref rEtiqueta, pincelEtiqueta); DeleteObject(pincelEtiqueta);
+                            SetTextColor(zona, sobreEtiqueta ? Rgb(9, 13, 24) : letraEtiqueta);
+                            DrawText(zona, coinciden, -1, ref rEtiqueta, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                            SelectObject(zona, anteriorEtiqueta); DeleteObject(fEtiqueta);
+                            rectCoinciden[b.Enlace] = new RECT { Left = rEtiqueta.Left, Top = arriba + rEtiqueta.Top, Right = rEtiqueta.Right, Bottom = arriba + rEtiqueta.Bottom };
+                            limite = rEtiqueta.Left - 10;
+                        }
+                        // El logo del origen, delante.
+                        var imgLogo = e.Logo is not null ? Imagen(e.Logo) : IntPtr.Zero;
+                        var imgAvatar = e.Avatar is not null ? Imagen(e.Avatar) : IntPtr.Zero;
+                        var xCab = bx + SANGRIA_VINETA;
+                        IniciarGdiPlus();
+                        if (imgLogo != IntPtr.Zero && GdipCreateFromHDC(zona, out var gLogo) == 0 && gLogo != IntPtr.Zero)
+                        {
+                            GdipSetInterpolationMode(gLogo, 7);
+                            GdipDrawImageRectI(gLogo, imgLogo, bx, y + 4, LADO_LOGO, LADO_LOGO);
+                            GdipDeleteGraphics(gLogo);
+                        }
+                        // Su nombre («MTG Corner · Meta», «Moxfield»), más claro.
+                        var fOrigen = CreateFont(15, 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                        var fAutor = CreateFont(15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                        var anteriorOrigen = SelectObject(zona, fOrigen);
+                        int Escribir(string t, uint color, bool recortar)
+                        {
+                            if (xCab >= limite || t.Length == 0) return 0;
+                            SetTextColor(zona, color);
+                            var rMed = new RECT();
+                            DrawText(zona, t, -1, ref rMed, DT_CALCRECT | DT_SINGLELINE);
+                            var r = new RECT { Left = xCab, Top = y + 2, Right = Math.Min(limite, xCab + rMed.Right - rMed.Left), Bottom = y + 22 };
+                            DrawText(zona, t, -1, ref r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | (recortar ? DT_END_ELLIPSIS : 0));
+                            return r.Right - r.Left;
+                        }
+                        xCab += Escribir(e.Origen ?? "", Rgb(203, 213, 225), true);
+                        SelectObject(zona, fAutor);
+                        var hayAutor = e.Autor is { Length: > 0 } || imgAvatar != IntPtr.Zero;
+                        if (hayAutor || e.Fecha is { Length: > 0 }) xCab += Escribir("  ·  ", Rgb(100, 116, 139), false);
+                        if (imgAvatar != IntPtr.Zero && xCab + LADO_AVATAR < limite && GdipCreateFromHDC(zona, out var gAvatar) == 0 && gAvatar != IntPtr.Zero)
+                        {
+                            GdipSetInterpolationMode(gAvatar, 7);
+                            GdipDrawImageRectI(gAvatar, imgAvatar, xCab, y + 3, LADO_AVATAR, LADO_AVATAR);
+                            GdipDeleteGraphics(gAvatar);
+                            rectAvatares[b.Enlace] = new RECT { Left = xCab, Top = arriba + y + 3, Right = xCab + LADO_AVATAR, Bottom = arriba + y + 3 + LADO_AVATAR };
+                            xCab += LADO_AVATAR + 6;
+                        }
+                        var resto = string.Join("  ·  ", new[] { e.Autor, e.Fecha }.Where(v => v is { Length: > 0 }));
+                        Escribir(resto, Rgb(148, 163, 184), true);
+                        SelectObject(zona, anteriorOrigen); DeleteObject(fOrigen); DeleteObject(fAutor);
+                        // Debajo, el nombre del mazo entero, en azul (blanco al pasar).
                         SelectObject(zona, fTexto);
                         SetTextColor(zona, sobreEnlace ? Rgb(255, 255, 255) : Rgb(56, 189, 248));
-                        var rv = new RECT { Left = bx, Top = y, Right = bx + SANGRIA_VINETA, Bottom = y + b.Alto };
-                        DrawText(zona, "›", -1, ref rv, DT_LEFT);
-                        var rb = new RECT { Left = bx + SANGRIA_VINETA, Top = y, Right = bx + bw, Bottom = y + b.Alto - PIE_MAZO };
-                        DrawText(zona, b.Texto, -1, ref rb, DT_LEFT | DT_WORDBREAK);
-                        var yPie = y + b.Alto - PIE_MAZO + 6;
-                        var xPie = bx + SANGRIA_VINETA;
-                        var imgLogoDer = e.Logo is not null ? Imagen(e.Logo) : IntPtr.Zero;
-                        var imgAvatar = e.Avatar is not null ? Imagen(e.Avatar) : IntPtr.Zero;
-                        IniciarGdiPlus();
-                        if (GdipCreateFromHDC(zona, out var gd) == 0 && gd != IntPtr.Zero)
-                        {
-                            GdipSetInterpolationMode(gd, 7);
-                            if (imgAvatar != IntPtr.Zero)
-                            {
-                                GdipDrawImageRectI(gd, imgAvatar, xPie, yPie, LADO_AVATAR, LADO_AVATAR);
-                                rectAvatares[b.Enlace] = new RECT { Left = xPie, Top = arriba + yPie, Right = xPie + LADO_AVATAR, Bottom = arriba + yPie + LADO_AVATAR };
-                                xPie += LADO_AVATAR + 6;
-                            }
-                            if (imgLogoDer != IntPtr.Zero) GdipDrawImageRectI(gd, imgLogoDer, bx + bw - LADO_LOGO, yPie + 1, LADO_LOGO, LADO_LOGO);
-                            GdipDeleteGraphics(gd);
-                        }
-                        var pie = string.Join("  ·  ", new[] { e.Autor, e.Fecha }.Where(v => v is { Length: > 0 }));
-                        if (pie.Length > 0)
-                        {
-                            var fAutor = CreateFont(15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
-                            var anteriorAutor = SelectObject(zona, fAutor);
-                            SetTextColor(zona, Rgb(148, 163, 184));
-                            var ra = new RECT { Left = xPie, Top = yPie, Right = bx + bw - (imgLogoDer != IntPtr.Zero ? LADO_LOGO + 8 : 0), Bottom = yPie + LADO_AVATAR };
-                            DrawText(zona, pie, -1, ref ra, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-                            SelectObject(zona, anteriorAutor); DeleteObject(fAutor);
-                        }
+                        var rNombre = new RECT { Left = bx + SANGRIA_VINETA, Top = y + CABEZA_MAZO, Right = bx + bw, Bottom = y + b.Alto };
+                        DrawText(zona, b.Texto, -1, ref rNombre, DT_LEFT | DT_WORDBREAK);
                         continue;
                     }
                     if (y + b.Alto >= 0 && y < altoZona)
@@ -1215,6 +1286,33 @@ internal static class PanelCartas
                         GdipDrawImageRectI(grafico, img, zx, zy, lado, lado);
                     }
                 }
+                // STATS: el día (o la partida) bajo el ratón en la evolución.
+                PintarAyudaEstadisticas(hdc);
+
+                // LAS CARTAS EN COMÚN con un mazo sugerido, al pasar por su etiqueta.
+                if (bajoRaton <= BAJO_COINCIDEN && BAJO_COINCIDEN - bajoRaton < enlaces.Length && enlaces[BAJO_COINCIDEN - bajoRaton].Cartas is { Length: > 0 } cartasComun)
+                {
+                    var ec = enlaces[BAJO_COINCIDEN - bajoRaton];
+                    var textoCaja = (ec.RotuloCartas is { Length: > 0 } rot ? rot + "\n" : "") + cartasComun;
+                    var fCaja = CreateFont(15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                    var anteriorCaja = SelectObject(hdc, fCaja);
+                    const int anchoCaja = 260;
+                    var rm = new RECT { Left = 0, Top = 0, Right = anchoCaja - 16, Bottom = 0 };
+                    DrawText(hdc, textoCaja, -1, ref rm, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
+                    var altoCaja = Math.Min(220, rm.Bottom - rm.Top + 16);
+                    var rc = rectCoinciden[BAJO_COINCIDEN - bajoRaton];
+                    var cx0 = Math.Clamp(rc.Right - anchoCaja, MARGEN, ANCHO_PANEL - MARGEN - anchoCaja);
+                    var cy0 = rc.Bottom + 6 + altoCaja <= alto - ALTO_PIE ? rc.Bottom + 6 : Math.Max(ALTO_CABECERA, rc.Top - altoCaja - 6);
+                    var rCaja = new RECT { Left = cx0, Top = cy0, Right = cx0 + anchoCaja, Bottom = cy0 + altoCaja };
+                    var pincelCaja = CreateSolidBrush(Rgb(30, 41, 59)); FillRect(hdc, ref rCaja, pincelCaja); DeleteObject(pincelCaja);
+                    var pincelBorde = CreateSolidBrush(Rgb(56, 189, 248));
+                    var rBorde = new RECT { Left = rCaja.Left, Top = rCaja.Top, Right = rCaja.Right, Bottom = rCaja.Top + 2 }; FillRect(hdc, ref rBorde, pincelBorde); DeleteObject(pincelBorde);
+                    SetTextColor(hdc, Rgb(241, 245, 249));
+                    var rTexto = new RECT { Left = rCaja.Left + 8, Top = rCaja.Top + 8, Right = rCaja.Right - 8, Bottom = rCaja.Bottom - 6 };
+                    DrawText(hdc, textoCaja, -1, ref rTexto, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
+                    SelectObject(hdc, anteriorCaja); DeleteObject(fCaja);
+                }
+
                 // LA NOTA DEL TURNO bajo el ratón en la curva: el error de ese turno
                 // o la jugada decisiva, en una caja encima del gráfico.
                 if (extras is { } exN && ((bajoRaton <= BAJO_TURNO && bajoRaton > BAJO_AVATAR) || bajoRaton == BAJO_LEYENDA))

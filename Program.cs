@@ -419,7 +419,7 @@ internal static class Program
                     var ficheros = await Task.WhenAll(urls.Select(BajarImagen));
                     Console.WriteLine($"aviso de prueba: {ficheros.Count(f => f is not null)} miniaturas bajadas");
                     Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_sinergia_rival", NombreRegla("cementerio"), "Kiora, the Rising Tide + Bringer of the Last Gift"), 12,
-                        ficheros.Where(f => f is not null).Select(f => f!).ToArray());
+                        ficheros.Where(f => f is not null).Select(f => f!).ToArray(), fijo: true);
                 }
             }
             Console.WriteLine("Columna sobre Arena durante 40 s…");
@@ -476,7 +476,7 @@ internal static class Program
                     var minis = await Task.WhenAll(cartasSin.Select(c => BajarImagen(c.Imagen)));
                     Console.WriteLine($"miniaturas bajadas: {minis.Count(f => f is not null)} de {cartasSin.Length}");
                     Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_sinergia_rival", NombreRegla(g2.Regla), string.Join(" + ", cartasSin.Select(c => c.Nombre))), 8,
-                        minis.Where(f => f is not null).Select(f => f!).ToArray());
+                        minis.Where(f => f is not null).Select(f => f!).ToArray(), fijo: true);
                 }
             }
             catch (Exception ex) { Console.WriteLine("EXCEPCIÓN: " + ex.Message); }
@@ -488,6 +488,17 @@ internal static class Program
         {
             var nov = await BuscarVersionNueva();
             Console.WriteLine($"propia={VersionPropia} comprobado={ultimaComprobacionOk} novedad={(nov is null ? "-" : nov.Numero + " " + nov.Url + " sha=" + (nov.Sha256 ?? "-"))}");
+            return 0;
+        }
+        if (args.Length > 0 && args[0] == "--probar-estadisticas")
+        {
+            // El panel de Stats con una respuesta guardada de /estadisticas, 15 s.
+            var d = JsonSerializer.Deserialize<RespuestaEstadisticas>(File.ReadAllText(args[1]), JsonOpciones)!;
+            PanelCartas.SiempreVisible = true;
+            PanelCartas.AlAbrir = AbrirDelPanel;
+            EnsenarEstadisticas(d);
+            await Task.Delay(TimeSpan.FromSeconds(15));
+            PanelCartas.Cerrar();
             return 0;
         }
         if (args.Length > 0 && args[0] == "--probar-resumen")
@@ -844,6 +855,8 @@ internal static class Program
             try { return await SubirDeFondo(http, col, frag, avisar, alTerminar, abrirNavegador); }
             finally { subiendo.Release(); }
         }
+        // La misma subida, sin aviso, para la partida recién acabada (ver SubirTrasPartida).
+        subirSinAviso = frag => Subir(null, frag, avisar: false);
 
         // LA COLUMNA DE ICONOS SOBRE EL JUEGO (ver Columna.cs): lo que hace cada uno.
         Columna.Iniciar(async (accion, dato) =>
@@ -943,6 +956,11 @@ internal static class Program
                             Abrir($"{Sitio}/api/puente/carta/{cara}?abrir=sinergias&idioma={Textos.Idioma}{otraCara}");
                         }
                     }
+                    break;
+                case Columna.Accion.Estadisticas:
+                    Columna.EnCurso("estadisticas");
+                    try { await PanelEstadisticas(http); }
+                    finally { Columna.EnCurso(null); }
                     break;
                 case Columna.Accion.Resumen:
                     Columna.Olvidar("resumen");
@@ -1153,6 +1171,7 @@ internal static class Program
         Contexto.PartidaAcabada += () =>
         {
             partidaPendiente = Contexto.UltimaPartida;
+            partidaPorSubir = true;
             // El marcador de la sesión: victorias y derrotas desde que se abrió Arena.
             if (Contexto.UltimaPartida?.Gane == true) victoriasSesion++;
             else if (Contexto.UltimaPartida?.Gane == false) derrotasSesion++;
@@ -1221,6 +1240,14 @@ internal static class Program
                 if (!LectorArena.ArenaAbierto()) break;
                 var ahora = LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta()));
                 var h = Huella(ahora.Fragmentos);
+                // Una partida recién acabada no espera a los diez minutos.
+                if (partidaPorSubir && h != huella && ahora.Fragmentos is not null)
+                {
+                    if (await SubirTrasPartida(ahora.Fragmentos)) { huella = h; ultimaSubida = DateTime.UtcNow; avisoPendiente = true; }
+                    continue;
+                }
+                // Ya lo subió Stats al abrirse: nada que hacer.
+                if (h == huellaSubida) { huella = h; continue; }
                 if (h == huella || ahora.Fragmentos is null || DateTime.UtcNow - ultimaSubida < TimeSpan.FromMinutes(10)) continue;
                 if (!await Subir(null, ahora.Fragmentos, avisar: false)) return 1;
                 huella = h;
@@ -1438,9 +1465,12 @@ internal static class Program
     private static string? FechaCorta(string? iso)
     {
         if (string.IsNullOrWhiteSpace(iso) || !DateTime.TryParse(iso, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var f)) return null;
-        System.Globalization.CultureInfo cultura;
-        try { cultura = new System.Globalization.CultureInfo(Textos.Idioma); } catch { cultura = System.Globalization.CultureInfo.InvariantCulture; }
-        return f.ToLocalTime().ToString("d MMM yyyy", cultura);
+        // Los meses, de Textos y no de .NET: el exe va con InvariantGlobalization
+        // (pesa menos) y ahí todas las culturas escriben «May» (visto el 2026-09-27).
+        var local = f.ToLocalTime();
+        var meses = Textos.T("fecha_meses").Split(',');
+        var mes = meses.Length == 12 ? meses[local.Month - 1].Trim() : local.Month.ToString();
+        return Textos.T("fecha_corta", local.Day, mes, local.Year, local.Month);
     }
 
     private static async Task EnsenarResumen(RespuestaResumen d)
@@ -1456,13 +1486,20 @@ internal static class Program
         var mazos = (d.MazosRival ?? []).Where(m => m.Nombre is { Length: > 0 } && m.Ruta is { Length: > 0 }).ToArray();
         var logosMazos = await Task.WhenAll(mazos.Select(m => BajarImagen(m.Logo)));
         var avatares = await Task.WhenAll(mazos.Select(m => BajarImagen(m.Avatar)));
+        // Cada mazo: su nombre, y aparte de dónde viene («MTG Corner · Meta»,
+        // «MTG Corner · Comunidad», «Moxfield») y cuántas cartas coinciden, que el
+        // panel pinta en la fila de arriba (el usuario, 2026-09-27).
         var enlaces = mazos.Select((m, i) => new PanelCartas.Enlace(
-                $"{m.Nombre} · {Textos.T("res_mazo_coinciden", m.Coincidencias)} · {Textos.T(m.Tipo == "meta" ? "res_mazo_meta" : m.Tipo == "moxfield" ? "res_mazo_moxfield" : "res_mazo_gente")}",
-                m.Ruta!, logosMazos[i], m.Autor, avatares[i], FechaCorta(m.Fecha))).ToArray();
+                m.Nombre!, m.Ruta!, logosMazos[i], m.Autor, avatares[i], FechaCorta(m.Fecha),
+                Origen: m.Tipo == "moxfield" ? "Moxfield" : "MTG Corner · " + Textos.T(m.Tipo == "meta" ? "res_origen_meta" : "res_origen_gente"),
+                Coinciden: Textos.T("res_mazo_en_comun", m.Coincidencias),
+                Nivel: m.Coincidencias,
+                Cartas: string.Join("\n", (m.Cartas ?? []).Where(c => c is { Length: > 0 })),
+                RotuloCartas: Textos.T("res_mazo_cuales"))).ToArray();
         // Lo que se copia: los títulos y sus párrafos, en plano; y los mazos, con su enlace.
         var plano = string.Join("\r\n\r\n", secciones.Select(s => s.Titulo + "\r\n" + string.Join("\r\n", s.Parrafos.Select(p => s.Lista ? "• " + p : p))));
         if (enlaces.Length > 0)
-            plano += "\r\n\r\n" + Textos.T("res_mazo_rival") + "\r\n" + string.Join("\r\n", enlaces.Select(e => "• " + e.Texto + " — " + Sitio + e.Ruta));
+            plano += "\r\n\r\n" + Textos.T("res_mazo_rival") + "\r\n" + string.Join("\r\n", enlaces.Select(e => $"• {e.Texto} ({e.Origen} · {e.Coinciden}) — " + (e.Ruta.StartsWith("http") ? e.Ruta : Sitio + e.Ruta)));
         // Dónde comprar: las miniaturas se bajan antes de abrir el panel.
         var candidatas = (d.Compras ?? []).Where(c => c.Nombre is { Length: > 0 } && c.Ruta is { Length: > 0 }).Take(3).ToArray();
         var bajadas = await Task.WhenAll(candidatas.Select(async c => (Compra: c, Fichero: await BajarImagen(c.Imagen), Logo: await BajarImagen(c.Logo))));
@@ -1500,6 +1537,103 @@ internal static class Program
         PanelCartas.AlAbrir = AbrirDelPanel;
         PanelCartas.MostrarTexto(Textos.T("col_resumen"), secciones, plano, enlaces, Textos.T("res_mazo_rival"), compras, Textos.T("res_compras"), extras);
     }
+
+    /// <summary>
+    /// «STATS»: el Overview de la web encima del juego (ver PanelEstadisticas.cs).
+    ///
+    /// ANTES DE PEDIR, LO QUE FALTE POR SUBIR: si acaba de terminar una partida
+    /// y aún no ha llegado a la web, se sube primero, para que el marcador que
+    /// sale ya la cuente.
+    /// </summary>
+    private static async Task PanelEstadisticas(HttpClient http)
+    {
+        try
+        {
+            if (partidaPorSubir) await SubirTrasPartida(LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta())).Fragmentos);
+            var tz = (int)TimeZoneInfo.Local.GetUtcOffset(DateTime.Now).TotalMinutes;
+            var r = await http.GetAsync($"{PuertaDevice}/estadisticas?idioma={Textos.Idioma}&tz={tz}&mazo={Uri.EscapeDataString(Contexto.Mazo ?? "")}");
+            if (!r.IsSuccessStatusCode) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("est_fallo")); return; }
+            var d = await r.Content.ReadFromJsonAsync<RespuestaEstadisticas>(JsonOpciones);
+            if (d is null) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("est_fallo")); return; }
+            PanelCartas.AlAbrir = AbrirDelPanel;
+            EnsenarEstadisticas(d);
+        }
+        catch { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("est_fallo")); }
+    }
+
+    /// <summary>Una fecha del eje: «27 sept» por día, «14:25» por partida; y la larga, para la caja al pasar.</summary>
+    private static (string Corta, string Larga) EtiquetasDeFecha(string iso, bool porDia)
+    {
+        if (!DateTime.TryParse(iso, System.Globalization.CultureInfo.InvariantCulture,
+                porDia ? System.Globalization.DateTimeStyles.None : System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var f))
+            return (iso, iso);
+        if (!porDia) f = f.ToLocalTime();
+        var meses = Textos.T("fecha_meses").Split(',');
+        var mes = meses.Length == 12 ? meses[f.Month - 1].Trim() : f.Month.ToString();
+        var dia = Textos.Idioma is "ja" or "zh" ? $"{f.Month}月{f.Day}日" : Textos.Idioma == "en" ? $"{mes} {f.Day}" : $"{f.Day} {mes}";
+        return porDia ? (dia, Textos.T("fecha_corta", f.Day, mes, f.Year, f.Month)) : (f.ToString("HH:mm"), $"{dia} · {f:HH:mm}");
+    }
+
+    private static void EnsenarEstadisticas(RespuestaEstadisticas d)
+    {
+        var total = d.Total ?? new MarcadorEst(0, 0);
+        if (total.Ganadas + total.Perdidas == 0)
+        {
+            PanelCartas.MostrarTexto(Textos.T("est_titulo"), [new PanelCartas.SeccionTexto(Textos.T("est_titulo"), [Textos.T("est_vacio")], false)], Textos.T("est_vacio"));
+            return;
+        }
+        var porDia = d.Evolucion?.PorDia ?? true;
+        var puntos = (d.Evolucion?.Puntos ?? [])
+            .Select(p => { var (corta, larga) = EtiquetasDeFecha(p.Etiqueta ?? "", porDia); return new PanelCartas.PuntoEvolucion(corta, larga, p.Valor, p.Ganadas, p.Perdidas); })
+            .ToArray();
+        var mazo = d.Mazo;
+        var e = new PanelCartas.Estadisticas(
+            total.Ganadas, total.Perdidas, d.Hoy?.Ganadas ?? 0, d.Hoy?.Perdidas ?? 0,
+            d.Racha?.Gane, d.Racha?.N ?? 0, d.Ultimas ?? [],
+            porDia, puntos,
+            (d.Mazos ?? []).Where(m => m.Nombre is { Length: > 0 }).Select(m => new PanelCartas.MazoEst(m.Nombre!, m.Ganadas, m.Perdidas, m.Ruta, m.Actual)).ToArray(),
+            d.Rango?.Clase, d.Rango?.Nivel,
+            (d.Escalera ?? []).Select(p => new PanelCartas.PeldanoEst(p.Posicion, p.Clase ?? "Bronze", p.Nivel, p.Gane)).ToArray(),
+            mazo?.Nombre ?? Contexto.Mazo, mazo is not null, mazo?.Tierras ?? 0, mazo?.Curva ?? [], mazo?.Medio ?? 0,
+            mazo?.Mano?.Buenas ?? 0, mazo?.LandDrops?.FirstOrDefault(l => l.Turno == 3)?.P ?? 0,
+            (mazo?.Colores ?? []).Select(c => new PanelCartas.ColorEst(c.Color ?? "", c.Fuentes, c.T3)).ToArray());
+        // Lo que se copia: el resumen en unas líneas.
+        var jugadas = total.Ganadas + total.Perdidas;
+        var plano = new List<string>
+        {
+            $"{Textos.T("est_total")}: {total.Ganadas}–{total.Perdidas} ({Math.Round(100.0 * total.Ganadas / jugadas)}%)",
+            $"{Textos.T("est_hoy")}: {e.HoyGanadas}–{e.HoyPerdidas}",
+        };
+        if (e.Clase is { } clase) plano.Add($"{Textos.T("est_rango")}: {Textos.T("clase_" + clase.ToLowerInvariant())}{(clase != "Mythic" && e.Nivel is { } nv ? " " + nv : "")}");
+        foreach (var m in e.Mazos) plano.Add($"• {m.Nombre}: {m.Ganadas}–{m.Perdidas}");
+        PanelCartas.MostrarTexto(Textos.T("est_titulo"), [], string.Join("\r\n", plano), conEstadisticas: e);
+    }
+
+    /// <summary>
+    /// LA PARTIDA RECIÉN ACABADA, A LA WEB EN SEGUIDA. El residente sube el
+    /// registro como mucho cada diez minutos; tras una partida no espera, para
+    /// que el marcador de Stats (y el de la web) la cuente ya. `huellaSubida`
+    /// le dice al bucle del residente que eso ya está subido.
+    /// </summary>
+    private static async Task<bool> SubirTrasPartida(string? fragmentos)
+    {
+        if (!partidaPorSubir || fragmentos is null) return false;
+        await subiendoPartida.WaitAsync();
+        try
+        {
+            if (!partidaPorSubir) return false;
+            var ok = subirSinAviso is { } subir && await subir(fragmentos);
+            if (ok) { partidaPorSubir = false; huellaSubida = Huella(fragmentos); }
+            return ok;
+        }
+        catch { return false; }
+        finally { subiendoPartida.Release(); }
+    }
+    private static volatile bool partidaPorSubir;
+    /// <summary>La subida del residente (su función local, con su turno), sin aviso. Null fuera del residente.</summary>
+    private static Func<string, Task<bool>>? subirSinAviso;
+    private static string? huellaSubida;
+    private static readonly SemaphoreSlim subiendoPartida = new(1, 1);
 
     private static async Task<bool> PanelResumen(HttpClient http)
     {
@@ -1592,7 +1726,7 @@ internal static class Program
                     var piezas = string.Join(" + ", piezasCombo.Select(p => p.Nombre));
                     Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"),
                         Textos.T(a.Lista ? "sup_amenaza" : "sup_amenaza_casi", piezas, a.Combo.Resultado ?? ""), 8,
-                        minis.Where(f => f is not null).Select(f => f!).ToArray());
+                        minis.Where(f => f is not null).Select(f => f!).ToArray(), fijo: true);
                 }
                 // Y LAS SINERGIAS entre lo que ha enseñado: una vez por regla.
                 SinergiaRivalPuente? avisarSin = null;
@@ -1609,7 +1743,7 @@ internal static class Program
                     var minis = await Task.WhenAll(cartasSin.Select(c => BajarImagen(c.Imagen)));
                     var cartas = string.Join(" + ", cartasSin.Select(c => c.Nombre));
                     Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_sinergia_rival", NombreRegla(g2.Regla), cartas), 8,
-                        minis.Where(f => f is not null).Select(f => f!).ToArray());
+                        minis.Where(f => f is not null).Select(f => f!).ToArray(), fijo: true);
                 }
                 alCambiar();
             }
@@ -2806,6 +2940,40 @@ internal sealed record GrupoSinergiaPuente(
     [property: JsonPropertyName("cartas")] CartaSimilar[]? Cartas);
 
 /// <summary>El resumen de la partida que devuelve /api/mtga-device/resumen.</summary>
+/// <summary>La respuesta de /api/mtga-device/estadisticas (ver esa ruta).</summary>
+internal sealed record RespuestaEstadisticas(
+    [property: JsonPropertyName("total")] MarcadorEst? Total,
+    [property: JsonPropertyName("hoy")] MarcadorEst? Hoy,
+    [property: JsonPropertyName("racha")] RachaEst? Racha,
+    [property: JsonPropertyName("ultimas")] bool[]? Ultimas,
+    [property: JsonPropertyName("evolucion")] EvolucionEst? Evolucion,
+    [property: JsonPropertyName("mazos")] MazoEstPuente[]? Mazos,
+    [property: JsonPropertyName("rango")] RangoEst? Rango,
+    [property: JsonPropertyName("escalera")] PeldanoEstPuente[]? Escalera,
+    [property: JsonPropertyName("mazo")] MazoActualEst? Mazo);
+internal sealed record MarcadorEst([property: JsonPropertyName("ganadas")] int Ganadas, [property: JsonPropertyName("perdidas")] int Perdidas);
+internal sealed record RachaEst([property: JsonPropertyName("gane")] bool Gane, [property: JsonPropertyName("n")] int N);
+internal sealed record EvolucionEst([property: JsonPropertyName("porDia")] bool PorDia, [property: JsonPropertyName("puntos")] PuntoEstPuente[]? Puntos);
+internal sealed record PuntoEstPuente(
+    [property: JsonPropertyName("etiqueta")] string? Etiqueta, [property: JsonPropertyName("valor")] int Valor,
+    [property: JsonPropertyName("ganadas")] int Ganadas, [property: JsonPropertyName("perdidas")] int Perdidas);
+internal sealed record MazoEstPuente(
+    [property: JsonPropertyName("nombre")] string? Nombre, [property: JsonPropertyName("ganadas")] int Ganadas, [property: JsonPropertyName("perdidas")] int Perdidas,
+    [property: JsonPropertyName("ruta")] string? Ruta, [property: JsonPropertyName("actual")] bool Actual);
+internal sealed record RangoEst([property: JsonPropertyName("clase")] string? Clase, [property: JsonPropertyName("nivel")] int? Nivel, [property: JsonPropertyName("temporada")] int? Temporada);
+internal sealed record PeldanoEstPuente(
+    [property: JsonPropertyName("posicion")] int Posicion, [property: JsonPropertyName("clase")] string? Clase,
+    [property: JsonPropertyName("nivel")] int Nivel, [property: JsonPropertyName("gane")] bool Gane);
+internal sealed record MazoActualEst(
+    [property: JsonPropertyName("nombre")] string? Nombre, [property: JsonPropertyName("ruta")] string? Ruta,
+    [property: JsonPropertyName("cartas")] int Cartas, [property: JsonPropertyName("tierras")] int Tierras,
+    [property: JsonPropertyName("curva")] int[]? Curva, [property: JsonPropertyName("medio")] double Medio,
+    [property: JsonPropertyName("mano")] ManoEst? Mano, [property: JsonPropertyName("landDrops")] LandDropEst[]? LandDrops,
+    [property: JsonPropertyName("colores")] ColorEstPuente[]? Colores);
+internal sealed record ManoEst([property: JsonPropertyName("pocas")] double Pocas, [property: JsonPropertyName("buenas")] double Buenas, [property: JsonPropertyName("muchas")] double Muchas);
+internal sealed record LandDropEst([property: JsonPropertyName("turno")] int Turno, [property: JsonPropertyName("p")] double P);
+internal sealed record ColorEstPuente([property: JsonPropertyName("color")] string? Color, [property: JsonPropertyName("fuentes")] int Fuentes, [property: JsonPropertyName("t3")] double T3);
+
 internal sealed record RespuestaResumen(
     [property: JsonPropertyName("tono")] string? Tono,
     [property: JsonPropertyName("nota")] int? Nota,

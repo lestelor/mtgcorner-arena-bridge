@@ -19,6 +19,14 @@ namespace MtgCornerArenaBridge;
 /// atraviesa: si te sale justo encima de un botón, pulsas el botón. Un aviso
 /// que se come un clic en mitad de una partida es peor que no avisar.
 ///
+/// SALVO LAS ALERTAS FIJAS (`fijo`): el combo o la sinergia que ha enseñado el
+/// rival se queda hasta que se cierra con su X, y al pasar el ratón por una
+/// miniatura sale la carta en grande a su izquierda (pedido del usuario el
+/// 2026-09-27: en 8 segundos no daba tiempo a leer las cartas). Esas sí se
+/// pueden pulsar —si no, la X no serviría—, así que ocupan su rincón de verdad;
+/// siguen sin robar el foco al juego (WM_MOUSEACTIVATE → MA_NOACTIVATE). La
+/// carta grande es otra ventana, ésa sí transparente al ratón.
+///
 /// NI ROBA EL FOCO. Con WS_EX_NOACTIVATE aparece sin quitarle el teclado al
 /// juego, que es lo que hace que una ventana emergente tire a alguien de una
 /// partida.
@@ -111,6 +119,16 @@ internal static class Superposicion
     [DllImport("user32.dll")] private static extern bool SystemParametersInfo(uint accion, uint param, ref RECT rc, uint win);
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr contexto);
 
+    [DllImport("user32.dll")] private static extern bool InvalidateRect(IntPtr hWnd, IntPtr rc, bool borrar);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TRACKMOUSEEVENT { public uint cbSize, dwFlags; public IntPtr hwndTrack; public uint dwHoverTime; }
+    [DllImport("user32.dll")] private static extern bool TrackMouseEvent(ref TRACKMOUSEEVENT e);
+    [DllImport("user32.dll")] private static extern IntPtr SetCursor(IntPtr cursor);
+    [DllImport("user32.dll")] private static extern IntPtr LoadCursor(IntPtr instancia, int cursor);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int ancho, int alto);
+    [DllImport("gdi32.dll")] private static extern bool BitBlt(IntPtr destino, int x, int y, int ancho, int alto, IntPtr origen, int xo, int yo, uint op);
+    [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hdc);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
     // GDI+ para las miniaturas de las cartas del aviso (ver PanelCartas.cs).
     private struct GdiplusStartupInput { public int GdiplusVersion; public IntPtr DebugEventCallback; public bool SuppressBackgroundThread, SuppressExternalCodecs; }
@@ -138,10 +156,13 @@ internal static class Superposicion
     private const uint WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000;
     private const uint WS_POPUP = 0x80000000;
     private const uint WM_DESTROY = 0x2, WM_CLOSE = 0x10, WM_PAINT = 0xF, WM_TIMER = 0x113;
+    private const uint WM_MOUSEMOVE = 0x200, WM_LBUTTONUP = 0x202, WM_MOUSELEAVE = 0x2A3, WM_MOUSEACTIVATE = 0x21, WM_SETCURSOR = 0x20, WM_ERASEBKGND = 0x14;
+    private const int MA_NOACTIVATE = 3, IDC_HAND = 32649, IDC_ARROW = 32512;
+    private const uint TME_LEAVE = 0x2, SRCCOPY = 0x00CC0020;
     private const int SW_SHOWNOACTIVATE = 4;
     private const uint LWA_ALPHA = 0x2;
     private const int TRANSPARENT_BK = 1;
-    private const uint DT_LEFT = 0x0, DT_SINGLELINE = 0x20, DT_WORDBREAK = 0x10, DT_END_ELLIPSIS = 0x8000;
+    private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_SINGLELINE = 0x20, DT_WORDBREAK = 0x10, DT_END_ELLIPSIS = 0x8000;
     private const uint SPI_GETWORKAREA = 0x30;
 
     /// <summary>Un color de GDI: 0x00BBGGRR, al revés que en la web.</summary>
@@ -156,6 +177,15 @@ internal static class Superposicion
     private static string[] ficherosMini = [];
     private static readonly List<IntPtr> minis = new();
     private static IntPtr gdiplus;
+    /// <summary>La alerta en pantalla es fija: se queda hasta su X y se puede pulsar.</summary>
+    private static bool esFijo;
+    /// <summary>Qué hay bajo el ratón: la X (-2), la miniatura i (0..n) o nada (-1).</summary>
+    private static int bajoRaton = -1;
+    private const int BAJO_X = -2, LADO_X = 28;
+    /// <summary>La carta en grande al pasar por una miniatura: la mitad de la imagen «normal» de Scryfall (488×680), así sale nítida.</summary>
+    private const int ANCHO_ZOOM = 244, ALTO_ZOOM = 340;
+    private static IntPtr ventanaZoom;
+    private static int miniZoom = -1;
 
     // El procedimiento de ventana se guarda en un campo estático A PROPÓSITO:
     // Windows se queda con su puntero, y si el recolector se llevara el
@@ -188,12 +218,13 @@ internal static class Superposicion
     /// antes de que nadie la leyera. Cualquier fallo se traga: un aviso que no
     /// sale no puede estropear una importación que ya salió bien.
     /// </summary>
-    public static void Mostrar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null)
+    public static void Mostrar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false)
     {
         try
         {
-            var hilo = MostrarSinEsperar(titulo, texto, segundos, imagenes);
-            hilo?.Join(TimeSpan.FromSeconds(segundos + 3));
+            var hilo = MostrarSinEsperar(titulo, texto, segundos, imagenes, fijo);
+            // Una fija dura lo que tarde alguien en cerrarla.
+            if (fijo) hilo?.Join(); else hilo?.Join(TimeSpan.FromSeconds(segundos + 3));
         }
         catch { /* ni con esas: el programa sigue igual */ }
     }
@@ -207,13 +238,13 @@ internal static class Superposicion
     /// esto, un «subiendo» de veinte segundos y un «hecho» de seis se apilarían
     /// en el mismo sitio y el de encima taparía al otro.
     /// </summary>
-    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null)
+    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false)
     {
         try
         {
             Ocultar();
             var ficheros = (imagenes ?? []).Where(f => !string.IsNullOrEmpty(f) && File.Exists(f)).Take(MAX_MINIS).ToArray();
-            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos, ficheros); } catch (Exception e) { Console.Error.WriteLine($"[aviso] {e.GetType().Name}: {e.Message}"); } });
+            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos, ficheros, fijo); } catch (Exception e) { Console.Error.WriteLine($"[aviso] {e.GetType().Name}: {e.Message}"); } });
             hilo.IsBackground = true;
             hilo.Start();
             return hilo;
@@ -231,7 +262,7 @@ internal static class Superposicion
     /// <summary>La ventana del aviso que está en pantalla, o cero.</summary>
     private static volatile IntPtr ventanaActual;
 
-    private static void Correr(string titulo, string texto, int segundos, string[] ficheros)
+    private static void Correr(string titulo, string texto, int segundos, string[] ficheros, bool fijo)
     {
         // EN PÍXELES DE VERDAD. `GetWindowRect` devuelve píxeles físicos; sin
         // declararse consciente del DPI, Windows virtualiza las coordenadas y
@@ -243,6 +274,9 @@ internal static class Superposicion
         textoTitulo = titulo;
         textoCuerpo = texto;
         ficherosMini = ficheros;
+        esFijo = fijo;
+        bajoRaton = -1;
+        miniZoom = -1;
         ALTO = ALTO_TEXTO + (ficheros.Length > 0 ? ALTO_MINI + AIRE_MINI : 0);
         procedimiento = Procedimiento;
 
@@ -258,7 +292,8 @@ internal static class Superposicion
 
         var (x, y) = Donde();
         var ventana = CreateWindowEx(
-            WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+            // La fija no lleva WS_EX_TRANSPARENT: tiene que recibir el ratón (la X y el zoom).
+            WS_EX_TOPMOST | (fijo ? 0 : WS_EX_TRANSPARENT) | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
             "MtgCornerAviso", "MTG Corner", WS_POPUP,
             x, y, ANCHO, ALTO, IntPtr.Zero, IntPtr.Zero, instancia, IntPtr.Zero);
         if (ventana == IntPtr.Zero) { Console.Error.WriteLine($"[aviso] CreateWindowEx falló: error {Marshal.GetLastWin32Error()}"); return; }
@@ -268,7 +303,7 @@ internal static class Superposicion
         SetWindowRgn(ventana, CreateRoundRectRgn(0, 0, ANCHO + 1, ALTO + 1, 18, 18), true);
         SetLayeredWindowAttributes(ventana, 0, 240, LWA_ALPHA);
 
-        SetTimer(ventana, new IntPtr(1), (uint)Math.Max(1, segundos) * 1000, IntPtr.Zero);
+        if (!fijo) SetTimer(ventana, new IntPtr(1), (uint)Math.Max(1, segundos) * 1000, IntPtr.Zero);
         ventanaActual = ventana;
         ShowWindow(ventana, SW_SHOWNOACTIVATE);   // sin robarle el foco al juego
         UpdateWindow(ventana);
@@ -282,15 +317,57 @@ internal static class Superposicion
 
     private static IntPtr Procedimiento(IntPtr ventana, uint mensaje, IntPtr wParam, IntPtr lParam)
     {
+        // LA CARTA GRANDE es otra ventana de la misma clase: sólo se pinta y se va.
+        if (ventana == ventanaZoom && ventanaZoom != IntPtr.Zero)
+        {
+            switch (mensaje)
+            {
+                case WM_PAINT: PintarZoom(ventana); return IntPtr.Zero;
+                case WM_ERASEBKGND: return new IntPtr(1);
+                case WM_DESTROY: ventanaZoom = IntPtr.Zero; return IntPtr.Zero;
+            }
+            return DefWindowProc(ventana, mensaje, wParam, lParam);
+        }
         switch (mensaje)
         {
             case WM_PAINT:
                 Pintar(ventana);
                 return IntPtr.Zero;
 
+            case WM_ERASEBKGND:
+                return new IntPtr(1);   // lo pinta todo Pintar, de una vez: sin parpadeo
+
+            // Pulsar la alerta no saca a nadie de la partida.
+            case WM_MOUSEACTIVATE:
+                return new IntPtr(MA_NOACTIVATE);
+
+            case WM_SETCURSOR:
+                SetCursor(LoadCursor(IntPtr.Zero, bajoRaton == BAJO_X ? IDC_HAND : IDC_ARROW));
+                return new IntPtr(1);
+
+            case WM_MOUSEMOVE:
+            {
+                var i = QueHayEn(lParam);
+                if (i != bajoRaton) { bajoRaton = i; InvalidateRect(ventana, IntPtr.Zero, false); Zoom(ventana, i); }
+                var t = new TRACKMOUSEEVENT { cbSize = (uint)Marshal.SizeOf<TRACKMOUSEEVENT>(), dwFlags = TME_LEAVE, hwndTrack = ventana };
+                TrackMouseEvent(ref t);
+                return IntPtr.Zero;
+            }
+
+            case WM_MOUSELEAVE:
+                bajoRaton = -1;
+                InvalidateRect(ventana, IntPtr.Zero, false);
+                Zoom(ventana, -1);
+                return IntPtr.Zero;
+
+            case WM_LBUTTONUP:
+                if (esFijo && QueHayEn(lParam) == BAJO_X) PostMessage(ventana, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                return IntPtr.Zero;
+
             case WM_TIMER:
             case WM_CLOSE:
                 if (ventanaActual == ventana) ventanaActual = IntPtr.Zero;
+                if (ventanaZoom != IntPtr.Zero) DestroyWindow(ventanaZoom);
                 DestroyWindow(ventana);
                 return IntPtr.Zero;
 
@@ -303,13 +380,82 @@ internal static class Superposicion
         return DefWindowProc(ventana, mensaje, wParam, lParam);
     }
 
+    /// <summary>Dónde está la X de una alerta fija, en la ventana.</summary>
+    private static RECT RectX() => new() { Left = ANCHO - LADO_X - 8, Top = 8, Right = ANCHO - 8, Bottom = 8 + LADO_X };
+
+    /// <summary>Dónde está la miniatura i, en la ventana.</summary>
+    private static RECT RectMini(int i) => new() { Left = 18 + i * (ANCHO_MINI + AIRE_MINI), Top = ALTO_TEXTO - 4, Right = 18 + i * (ANCHO_MINI + AIRE_MINI) + ANCHO_MINI, Bottom = ALTO_TEXTO - 4 + ALTO_MINI };
+
+    /// <summary>Qué hay bajo un punto de la ventana: la X, una miniatura o nada. Sólo en las fijas: las otras no ven el ratón.</summary>
+    private static int QueHayEn(IntPtr lParam)
+    {
+        if (!esFijo) return -1;
+        var x = (short)(lParam.ToInt64() & 0xFFFF);
+        var y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
+        bool Dentro(RECT r) => x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
+        if (Dentro(RectX())) return BAJO_X;
+        for (var i = 0; i < ficherosMini.Length; i++) if (Dentro(RectMini(i))) return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// La carta en grande de la miniatura i (o ninguna con -1): una ventana
+    /// aparte a la IZQUIERDA de la alerta —que está pegada a la derecha de
+    /// Arena, así que a la izquierda siempre hay sitio—, a la altura de la
+    /// miniatura. Transparente al ratón y sin foco, como el aviso de siempre.
+    /// </summary>
+    private static void Zoom(IntPtr ventana, int i)
+    {
+        if (i == miniZoom) return;
+        miniZoom = i;
+        // Se destruye SIN soltar antes `ventanaZoom`: su WM_DESTROY tiene que caer
+        // en la rama de la carta grande, no en la de la alerta (que cerraría todo).
+        if (ventanaZoom != IntPtr.Zero) DestroyWindow(ventanaZoom);
+        if (i < 0 || i >= minis.Count || minis[i] == IntPtr.Zero || !GetWindowRect(ventana, out var r)) return;
+        var rm = RectMini(i);
+        var zx = r.Left - 10 - ANCHO_ZOOM;
+        var zy = Math.Max(r.Top, r.Top + rm.Top + (rm.Bottom - rm.Top) / 2 - ALTO_ZOOM / 2);
+        var z = CreateWindowEx(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+            "MtgCornerAviso", "MTG Corner", WS_POPUP, zx, zy, ANCHO_ZOOM, ALTO_ZOOM, IntPtr.Zero, IntPtr.Zero, GetModuleHandle(null), IntPtr.Zero);
+        if (z == IntPtr.Zero) return;
+        ventanaZoom = z;
+        SetWindowRgn(z, CreateRoundRectRgn(0, 0, ANCHO_ZOOM + 1, ALTO_ZOOM + 1, 16, 16), true);
+        SetLayeredWindowAttributes(z, 0, 255, LWA_ALPHA);
+        ShowWindow(z, SW_SHOWNOACTIVATE);
+        UpdateWindow(z);
+    }
+
+    private static void PintarZoom(IntPtr ventana)
+    {
+        var hdc = BeginPaint(ventana, out var ps);
+        try
+        {
+            var fondo = CreateSolidBrush(Rgb(9, 13, 24));
+            var todo = new RECT { Left = 0, Top = 0, Right = ANCHO_ZOOM, Bottom = ALTO_ZOOM };
+            FillRect(hdc, ref todo, fondo);
+            DeleteObject(fondo);
+            var i = miniZoom;
+            if (i >= 0 && i < minis.Count && minis[i] != IntPtr.Zero && GdipCreateFromHDC(hdc, out var g) == 0 && g != IntPtr.Zero)
+            {
+                GdipSetInterpolationMode(g, 7);
+                GdipDrawImageRectI(g, minis[i], 0, 0, ANCHO_ZOOM, ALTO_ZOOM);
+                GdipDeleteGraphics(g);
+            }
+        }
+        finally { EndPaint(ventana, ref ps); }
+    }
+
     /// <summary>
     /// El recuadro: fondo oscuro, filo ámbar a la izquierda como las tarjetas de
-    /// la web, la marca arriba y las dos líneas del mensaje.
+    /// la web, la marca arriba y las dos líneas del mensaje. En un lienzo aparte
+    /// y volcado de una vez, que el paso del ratón lo repinta.
     /// </summary>
     private static void Pintar(IntPtr ventana)
     {
-        var hdc = BeginPaint(ventana, out var ps);
+        var hdcVentana = BeginPaint(ventana, out var ps);
+        var hdc = CreateCompatibleDC(hdcVentana);
+        var lienzo = CreateCompatibleBitmap(hdcVentana, ANCHO, ALTO);
+        var lienzoAnterior = SelectObject(hdc, lienzo);
         var fondo = CreateSolidBrush(Rgb(9, 13, 24));
         var filo = CreateSolidBrush(Rgb(245, 158, 11));
         var marca = CreateFont(13, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
@@ -331,8 +477,20 @@ internal static class Superposicion
 
             SelectObject(hdc, fuerte);
             SetTextColor(hdc, Rgb(255, 255, 255));
-            var rTitulo = new RECT { Left = 18, Top = 30, Right = ANCHO - 18, Bottom = 56 };
+            var rTitulo = new RECT { Left = 18, Top = 30, Right = ANCHO - (esFijo ? LADO_X + 16 : 18), Bottom = 56 };
             DrawText(hdc, textoTitulo, -1, ref rTitulo, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+            // LA X de las fijas, arriba a la derecha; se ilumina al pasar.
+            if (esFijo)
+            {
+                var rx = RectX();
+                if (bajoRaton == BAJO_X) { var resalte = CreateSolidBrush(Rgb(51, 65, 85)); FillRect(hdc, ref rx, resalte); DeleteObject(resalte); }
+                var fx = CreateFont(15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe MDL2 Assets");
+                SelectObject(hdc, fx);
+                SetTextColor(hdc, bajoRaton == BAJO_X ? Rgb(255, 255, 255) : Rgb(186, 196, 214));
+                DrawText(hdc, "\uE711", -1, ref rx, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                DeleteObject(fx);
+            }
 
             SelectObject(hdc, normal);
             SetTextColor(hdc, Rgb(203, 213, 225));
@@ -353,11 +511,16 @@ internal static class Superposicion
                 if (GdipCreateFromHDC(hdc, out var grafico) == 0 && grafico != IntPtr.Zero)
                 {
                     GdipSetInterpolationMode(grafico, 7);
-                    var x = 18;
-                    foreach (var img in minis)
+                    for (var i = 0; i < minis.Count; i++)
                     {
-                        if (img != IntPtr.Zero) GdipDrawImageRectI(grafico, img, x, ALTO_TEXTO - 4, ANCHO_MINI, ALTO_MINI);
-                        x += ANCHO_MINI + AIRE_MINI;
+                        var rm = RectMini(i);
+                        // La que está bajo el ratón, con su filo ámbar: es la que sale en grande.
+                        if (i == bajoRaton)
+                        {
+                            var marco = new RECT { Left = rm.Left - 2, Top = rm.Top - 2, Right = rm.Right + 2, Bottom = rm.Bottom + 2 };
+                            FillRect(hdc, ref marco, filo);
+                        }
+                        if (minis[i] != IntPtr.Zero) GdipDrawImageRectI(grafico, minis[i], rm.Left, rm.Top, ANCHO_MINI, ALTO_MINI);
                     }
                     GdipDeleteGraphics(grafico);
                 }
@@ -365,6 +528,8 @@ internal static class Superposicion
         }
         finally
         {
+            BitBlt(hdcVentana, 0, 0, ANCHO, ALTO, hdc, 0, 0, SRCCOPY);
+            SelectObject(hdc, lienzoAnterior); DeleteObject(lienzo); DeleteDC(hdc);
             EndPaint(ventana, ref ps);
             DeleteObject(fondo);
             DeleteObject(filo);

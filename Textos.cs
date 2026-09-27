@@ -1243,5 +1243,247 @@ internal static class Textos
             "Life totals when the game ended", "Vidas al acabar la partida", "Lebenspunkte am Ende der Partie", "Points de vie à la fin de la partie",
             "Pontos de vida no fim da partida", "Punti vita alla fine della partita", "試合終了時のライフ", "对局结束时的生命值",
         ],
+        ["res_origen_meta"] =
+        [
+            "Meta", "Meta", "Meta", "Méta",
+            "Meta", "Meta", "メタ", "环境",
+        ],
+        ["res_origen_gente"] =
+        [
+            "Community", "Comunidad", "Community", "Communauté",
+            "Comunidade", "Community", "コミュニティ", "社区",
+        ],
+        ["res_mazo_en_comun"] =
+        [
+            "{0} in common", "{0} en común", "{0} gemeinsam", "{0} en commun",
+            "{0} em comum", "{0} in comune", "共通 {0} 枚", "{0} 张相同",
+        ],
+        ["res_mazo_cuales"] =
+        [
+            "Cards in common:", "Cartas en común:", "Gemeinsame Karten:", "Cartes en commun :",
+            "Cartas em comum:", "Carte in comune:", "共通カード:", "相同的牌：",
+        ],
+        // {0} día, {1} mes en letra, {2} año, {3} mes en número.
+        ["fecha_corta"] =
+        [
+            "{1} {0}, {2}", "{0} {1} {2}", "{0}. {1} {2}", "{0} {1} {2}",
+            "{0} {1} {2}", "{0} {1} {2}", "{2}年{3}月{0}日", "{2}年{3}月{0}日",
+        ],
+        ["fecha_meses"] =
+        [
+            "Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec",
+            "ene,feb,mar,abr,may,jun,jul,ago,sept,oct,nov,dic",
+            "Jan.,Feb.,März,Apr.,Mai,Juni,Juli,Aug.,Sept.,Okt.,Nov.,Dez.",
+            "janv.,févr.,mars,avr.,mai,juin,juil.,août,sept.,oct.,nov.,déc.",
+            "jan,fev,mar,abr,mai,jun,jul,ago,set,out,nov,dez",
+            "gen,feb,mar,apr,mag,giu,lug,ago,set,ott,nov,dic",
+            "1月,2月,3月,4月,5月,6月,7月,8月,9月,10月,11月,12月",
+            "1月,2月,3月,4月,5月,6月,7月,8月,9月,10月,11月,12月",
+        ],
+        ["col_estadisticas"] =
+        [
+            "Stats", "Estadísticas", "Statistiken", "Statistiques",
+            "Estatísticas", "Statistiche", "統計", "统计",
+        ],
+        ["ayuda_estadisticas"] =
+        [
+            "Your Arena record on screen: wins and losses, today, your streak, the rank ladder, your decks and the mana curve of the deck you have selected.", "Tu marcador de Arena en pantalla: victorias y derrotas, lo de hoy, tu racha, la escalera de rango, tus mazos y la curva de maná del mazo que tienes elegido.", "Deine Arena-Bilanz auf dem Bildschirm: Siege und Niederlagen, heute, deine Serie, die Rangleiter, deine Decks und die Manakurve des gewählten Decks.", "Ton bilan Arena à l'écran : victoires et défaites, aujourd'hui, ta série, l'échelle de rang, tes decks et la courbe de mana du deck sélectionné.",
+            "Seu histórico do Arena na tela: vitórias e derrotas, hoje, sua sequência, a escada de ranque, seus baralhos e a curva de mana do baralho escolhido.", "Il tuo record di Arena sullo schermo: vittorie e sconfitte, oggi, la tua serie, la scala di rango, i tuoi mazzi e la curva di mana del mazzo scelto.", "Arenaの戦績を画面に：勝敗、今日の成績、連勝・連敗、ランクの推移、デッキ別成績、選択中のデッキのマナカーブ。", "在屏幕上查看 Arena 战绩：胜负、今日战绩、连胜连败、段位走势、各套牌表现以及当前套牌的法术力曲线。",
+        ],
+        ["est_titulo"] =
+        [
+            "Your Arena stats", "Tus estadísticas de Arena", "Deine Arena-Statistiken", "Tes statistiques Arena",
+            "Suas estatísticas do Arena", "Le tue statistiche di Arena", "Arena の統計", "你的 Arena 统计",
+        ],
+        ["est_total"] =
+        [
+            "Total", "Total", "Gesamt", "Total",
+            "Total", "Totale", "通算", "总计",
+        ],
+        ["est_hoy"] =
+        [
+            "Today", "Hoy", "Heute", "Aujourd'hui",
+            "Hoje", "Oggi", "今日", "今天",
+        ],
+        ["est_racha"] =
+        [
+            "Streak", "Racha", "Serie", "Série",
+            "Sequência", "Serie", "連続", "连续",
+        ],
+        ["est_rango"] =
+        [
+            "Rank", "Rango", "Rang", "Rang",
+            "Ranque", "Rango", "ランク", "段位",
+        ],
+        ["est_partidas"] =
+        [
+            "{0} games", "{0} partidas", "{0} Partien", "{0} parties",
+            "{0} partidas", "{0} partite", "{0} 試合", "{0} 局",
+        ],
+        ["est_hoy_nada"] =
+        [
+            "No games yet today", "Hoy aún no has jugado", "Heute noch keine Partie", "Pas encore de partie aujourd'hui",
+            "Nenhuma partida hoje", "Nessuna partita oggi", "今日はまだ対戦なし", "今天还没有对局",
+        ],
+        ["est_racha_v1"] =
+        [
+            "win", "victoria", "Sieg", "victoire",
+            "vitória", "vittoria", "勝", "胜",
+        ],
+        ["est_racha_vn"] =
+        [
+            "wins in a row", "victorias seguidas", "Siege in Folge", "victoires d'affilée",
+            "vitórias seguidas", "vittorie di fila", "連勝", "连胜",
+        ],
+        ["est_racha_d1"] =
+        [
+            "loss", "derrota", "Niederlage", "défaite",
+            "derrota", "sconfitta", "敗", "负",
+        ],
+        ["est_racha_dn"] =
+        [
+            "losses in a row", "derrotas seguidas", "Niederlagen in Folge", "défaites d'affilée",
+            "derrotas seguidas", "sconfitte di fila", "連敗", "连败",
+        ],
+        ["est_nivel"] =
+        [
+            "Tier {0}", "Nivel {0}", "Stufe {0}", "Palier {0}",
+            "Nível {0}", "Livello {0}", "ティア {0}", "{0} 级",
+        ],
+        ["est_sin_rango"] =
+        [
+            "Unranked", "Sin rango", "Ohne Rang", "Non classé",
+            "Sem ranque", "Senza rango", "ランクなし", "无段位",
+        ],
+        ["est_evolucion"] =
+        [
+            "Progress", "Evolución", "Verlauf", "Évolution",
+            "Evolução", "Andamento", "推移", "走势",
+        ],
+        ["est_evolucion_dia"] =
+        [
+            "wins minus losses, by day", "victorias menos derrotas, por día", "Siege minus Niederlagen, pro Tag", "victoires moins défaites, par jour",
+            "vitórias menos derrotas, por dia", "vittorie meno sconfitte, per giorno", "勝ち−負け（日別）", "胜场减负场（按天）",
+        ],
+        ["est_evolucion_partida"] =
+        [
+            "wins minus losses, game by game", "victorias menos derrotas, partida a partida", "Siege minus Niederlagen, Partie für Partie", "victoires moins défaites, partie par partie",
+            "vitórias menos derrotas, partida a partida", "vittorie meno sconfitte, partita per partita", "勝ち−負け（試合ごと）", "胜场减负场（逐局）",
+        ],
+        ["est_punto"] =
+        [
+            "{0} · {1}–{2} · balance {3}", "{0} · {1}–{2} · balance {3}", "{0} · {1}–{2} · Bilanz {3}", "{0} · {1}–{2} · bilan {3}",
+            "{0} · {1}–{2} · saldo {3}", "{0} · {1}–{2} · saldo {3}", "{0} · {1}勝{2}敗 · 収支 {3}", "{0} · {1}胜{2}负 · 净胜 {3}",
+        ],
+        ["est_escalera"] =
+        [
+            "Rank ladder", "Escalera de rango", "Rangleiter", "Échelle de rang",
+            "Escada de ranque", "Scala di rango", "ランク推移", "段位走势",
+        ],
+        ["est_escalera_nota"] =
+        [
+            "last {0} games", "últimas {0} partidas", "letzte {0} Partien", "{0} dernières parties",
+            "últimas {0} partidas", "ultime {0} partite", "直近 {0} 試合", "最近 {0} 局",
+        ],
+        ["est_mazos"] =
+        [
+            "Your decks", "Tus mazos", "Deine Decks", "Tes decks",
+            "Seus baralhos", "I tuoi mazzi", "デッキ別", "你的套牌",
+        ],
+        ["est_mazos_nota"] =
+        [
+            "W–L · win rate", "V–D · % de victorias", "S–N · Siegquote", "V–D · % de victoires",
+            "V–D · % de vitórias", "V–S · % di vittorie", "勝–敗 · 勝率", "胜–负 · 胜率",
+        ],
+        ["est_mazos_nada"] =
+        [
+            "No games linked to a deck yet.", "Aún no hay partidas atadas a un mazo.", "Noch keine Partien mit einem Deck verknüpft.", "Aucune partie liée à un deck pour l'instant.",
+            "Ainda não há partidas ligadas a um baralho.", "Ancora nessuna partita legata a un mazzo.", "デッキに紐づいた試合はまだありません。", "还没有与套牌关联的对局。",
+        ],
+        ["est_en_uso"] =
+        [
+            "in use", "en uso", "aktiv", "en cours",
+            "em uso", "in uso", "使用中", "使用中",
+        ],
+        ["est_curva"] =
+        [
+            "Mana curve", "Curva de maná", "Manakurve", "Courbe de mana",
+            "Curva de mana", "Curva di mana", "マナカーブ", "法术力曲线",
+        ],
+        ["est_tierras"] =
+        [
+            "{0} lands", "{0} tierras", "{0} Länder", "{0} terrains",
+            "{0} terrenos", "{0} terre", "土地 {0} 枚", "{0} 张地",
+        ],
+        ["est_medio"] =
+        [
+            "Avg. mana value {0}", "Coste medio {0}", "Ø Manabetrag {0}", "Valeur de mana moy. {0}",
+            "Valor de mana médio {0}", "Valore di mana medio {0}", "平均マナ総量 {0}", "平均法术力值 {0}",
+        ],
+        ["est_mano"] =
+        [
+            "2–4 lands in opening hand: {0}", "Mano inicial con 2–4 tierras: {0}", "2–4 Länder auf der Starthand: {0}", "2–4 terrains en main de départ : {0}",
+            "Mão inicial com 2–4 terrenos: {0}", "Mano iniziale con 2–4 terre: {0}", "初手に土地2–4枚: {0}", "起手 2–4 张地：{0}",
+        ],
+        ["est_t3"] =
+        [
+            "A land every turn to T3: {0}", "Tierra cada turno hasta el T3: {0}", "Jede Runde ein Land bis Zug 3: {0}", "Un terrain par tour jusqu'au T3 : {0}",
+            "Um terreno por turno até o T3: {0}", "Una terra a turno fino al T3: {0}", "3ターン目まで毎ターン土地: {0}", "前 3 回合每回合有地：{0}",
+        ],
+        ["est_fuentes"] =
+        [
+            "{0} sources", "{0} fuentes", "{0} Quellen", "{0} sources",
+            "{0} fontes", "{0} fonti", "供給源 {0}", "{0} 个来源",
+        ],
+        ["est_sin_mazo"] =
+        [
+            "Choose a deck in Arena to see its curve here.", "Elige un mazo en Arena para ver aquí su curva.", "Wähle in Arena ein Deck, um hier seine Kurve zu sehen.", "Choisis un deck dans Arena pour voir sa courbe ici.",
+            "Escolha um baralho no Arena para ver a curva aqui.", "Scegli un mazzo in Arena per vederne qui la curva.", "Arenaでデッキを選ぶと、ここにカーブが表示されます。", "在 Arena 中选择套牌即可在此查看其曲线。",
+        ],
+        ["est_mazo_no_subido"] =
+        [
+            "This deck isn't on MTG Corner yet: import your collection from the menu to see its curve.", "Este mazo aún no está en MTG Corner: importa tu colección desde el menú para ver su curva.", "Dieses Deck ist noch nicht auf MTG Corner: Importiere deine Sammlung über das Menü, um seine Kurve zu sehen.", "Ce deck n'est pas encore sur MTG Corner : importe ta collection depuis le menu pour voir sa courbe.",
+            "Este baralho ainda não está no MTG Corner: importe sua coleção pelo menu para ver a curva.", "Questo mazzo non è ancora su MTG Corner: importa la collezione dal menu per vederne la curva.", "このデッキはまだ MTG Corner にありません。メニューからコレクションを取り込むとカーブが表示されます。", "该套牌尚未同步到 MTG Corner：从菜单导入收藏即可查看其曲线。",
+        ],
+        ["est_vacio"] =
+        [
+            "No games yet. They are counted from what this program uploads: play a match and open Stats again.", "Aún no hay partidas. Se cuentan las que sube este programa: juega una y vuelve a abrir Estadísticas.", "Noch keine Partien. Gezählt wird, was dieses Programm hochlädt: Spiel eine Partie und öffne Statistiken erneut.", "Pas encore de parties. On compte celles que ce programme envoie : joue une partie et rouvre Statistiques.",
+            "Ainda não há partidas. Contam as que este programa envia: jogue uma e abra Estatísticas de novo.", "Ancora nessuna partita. Si contano quelle che questo programma carica: giocane una e riapri Statistiche.", "まだ試合がありません。このプログラムが送信した試合が集計されます。1試合遊んでから統計を開き直してください。", "还没有对局。统计的是本程序上传的对局：打一局后再次打开统计。",
+        ],
+        ["est_fallo"] =
+        [
+            "Couldn't load your stats. Try again in a moment.", "No se han podido cargar tus estadísticas. Prueba de nuevo en un momento.", "Deine Statistiken konnten nicht geladen werden. Versuch es gleich noch einmal.", "Impossible de charger tes statistiques. Réessaie dans un instant.",
+            "Não foi possível carregar suas estatísticas. Tente de novo em instantes.", "Impossibile caricare le statistiche. Riprova tra poco.", "統計を読み込めませんでした。少し待ってからもう一度お試しください。", "无法加载你的统计。请稍后再试。",
+        ],
+        ["clase_bronze"] =
+        [
+            "Bronze", "Bronce", "Bronze", "Bronze",
+            "Bronze", "Bronzo", "ブロンズ", "青铜",
+        ],
+        ["clase_silver"] =
+        [
+            "Silver", "Plata", "Silber", "Argent",
+            "Prata", "Argento", "シルバー", "白银",
+        ],
+        ["clase_gold"] =
+        [
+            "Gold", "Oro", "Gold", "Or",
+            "Ouro", "Oro", "ゴールド", "黄金",
+        ],
+        ["clase_platinum"] =
+        [
+            "Platinum", "Platino", "Platin", "Platine",
+            "Platina", "Platino", "プラチナ", "铂金",
+        ],
+        ["clase_diamond"] =
+        [
+            "Diamond", "Diamante", "Diamant", "Diamant",
+            "Diamante", "Diamante", "ダイヤモンド", "钻石",
+        ],
+        ["clase_mythic"] =
+        [
+            "Mythic", "Mítico", "Mythisch", "Mythique",
+            "Mítico", "Mitico", "ミシック", "秘稀",
+        ],
     };
 }
