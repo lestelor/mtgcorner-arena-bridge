@@ -188,11 +188,11 @@ internal static class Superposicion
     /// antes de que nadie la leyera. Cualquier fallo se traga: un aviso que no
     /// sale no puede estropear una importación que ya salió bien.
     /// </summary>
-    public static void Mostrar(string titulo, string texto, int segundos = 6)
+    public static void Mostrar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null)
     {
         try
         {
-            var hilo = MostrarSinEsperar(titulo, texto, segundos);
+            var hilo = MostrarSinEsperar(titulo, texto, segundos, imagenes);
             hilo?.Join(TimeSpan.FromSeconds(segundos + 3));
         }
         catch { /* ni con esas: el programa sigue igual */ }
