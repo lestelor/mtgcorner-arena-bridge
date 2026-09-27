@@ -496,6 +496,11 @@ internal static class Program
             // visible aunque Arena no esté delante.
             var d = JsonSerializer.Deserialize<RespuestaResumen>(File.ReadAllText(args[1]), JsonOpciones)!;
             PanelCartas.SiempreVisible = true;
+            // Una partida inventada, para que salga la curva de vidas en la prueba.
+            var turnosPrueba = new List<Contexto.Turno>();
+            int[] vy = [20, 20, 20, 18, 18, 14, 14, 9, 9, 3], vr = [20, 20, 17, 17, 12, 12, 12, 8, 8, 8];
+            for (var i = 0; i < vy.Length; i++) turnosPrueba.Add(new Contexto.Turno { N = i + 1, Activo = i % 2 == 0 ? "yo" : "rival", VidaYo = vy[i], VidaRival = vr[i] });
+            partidaPendiente = new Contexto.Partida("standard", "Mono-White Auras", false, "Concede", turnosPrueba, []);
             await EnsenarResumen(d);
             await Task.Delay(TimeSpan.FromSeconds(10));
             PanelCartas.Cerrar();
@@ -1389,6 +1394,22 @@ internal static class Program
     private static string tonoActual = "directo";
     private static HttpClient? httpResidente;
 
+    /// <summary>Los errores del entrenador por turno («T8: …»), para las calaveras de la curva.</summary>
+    private static Dictionary<int, string> NotasPorTurno(RespuestaResumen d)
+    {
+        var notas = new Dictionary<int, string>();
+        foreach (var s in d.Secciones ?? [])
+        {
+            if (s.Clave != "errores") continue;
+            foreach (var parrafo in s.Parrafos ?? [])
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(parrafo, @"^\s*T\s*(\d+)\s*[:.\-–]");
+                if (m.Success && int.TryParse(m.Groups[1].Value, out var t) && !notas.ContainsKey(t)) notas[t] = parrafo;
+            }
+        }
+        return notas;
+    }
+
     private static async Task EnsenarResumen(RespuestaResumen d)
     {
         var secciones = (d.Secciones ?? [])
@@ -1440,7 +1461,8 @@ internal static class Program
                     finally { Columna.EnCurso(null); }
                 });
             },
-            Textos.T("res_jugada"), Textos.T("res_vidas"), Textos.T("res_tu"), Textos.T("res_rival"), Textos.T("res_tono"));
+            Textos.T("res_jugada"), Textos.T("res_vidas"), Textos.T("res_tu"), Textos.T("res_rival"), Textos.T("res_tono"),
+            NotasPorTurno(d));
         if (d.Titular is { Length: > 0 }) plano = d.Titular + (d.Nota is { } n ? $" — {n}/10" : "") + "\r\n\r\n" + plano;
         PanelCartas.AlAbrir = AbrirDelPanel;
         PanelCartas.MostrarTexto(Textos.T("col_resumen"), secciones, plano, enlaces, Textos.T("res_mazo_rival"), compras, Textos.T("res_compras"), extras);
