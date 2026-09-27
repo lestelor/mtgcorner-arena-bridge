@@ -73,6 +73,9 @@ internal static class Contexto
     /// <summary>Todo lo que el rival ha enseñado en la partida (mesa, cementerio, pila, exilio): grpIds. Para sus sinergias.</summary>
     public static int[] VistasRival { get; private set; } = [];
 
+    /// <summary>Cuántas cartas TUYAS han salido ya de la biblioteca (mano, mesa, cementerio…): el aro del mazo de la columna.</summary>
+    public static int CartasVistasMias { get; private set; }
+
     /// <summary>
     /// LA OTRA CARA de esa carta, si está transformada, o null.
     ///
@@ -466,6 +469,7 @@ internal static class Contexto
         var colores = "";
         var mesa = new SortedSet<int>();
         var vistas = new SortedSet<int>();
+        var vistasMias = 0;
         if (miAsiento != 0)
         {
             var sb = new System.Text.StringBuilder();
@@ -474,6 +478,7 @@ internal static class Contexto
                 if (o.Dueno == miAsiento)
                 {
                     foreach (var c in o.Colores) if (!sb.ToString().Contains(c)) sb.Append(c);
+                    if (o.EsCarta && o.Grp > 0 && o.Zona is { } zmia && zonas.TryGetValue(zmia, out var tzmia) && tzmia != "Library" && tzmia != "Sideboard" && tzmia != "Limbo") vistasMias++;
                 }
                 else if (o.EsCarta && o.Grp > 0 && o.Dueno == 3 - miAsiento && o.Zona is { } z && zonas.TryGetValue(z, out var tz))
                 {
@@ -483,6 +488,7 @@ internal static class Contexto
             }
             colores = sb.ToString();
         }
+        CartasVistasMias = enPartida ? vistasMias : 0;
         Cambiar(mazo, carta, otraCara, rival, rivalOtra, enPartida, colores, [.. mesa], [.. vistas]);
     }
 

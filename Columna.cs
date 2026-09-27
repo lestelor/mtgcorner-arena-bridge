@@ -103,6 +103,9 @@ internal static class Columna
 
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreatePen(int estilo, int ancho, uint color);
+    [DllImport("gdi32.dll")] private static extern bool Arc(IntPtr hdc, int izq, int arriba, int der, int abajo, int x1, int y1, int x2, int y2);
+    [DllImport("gdi32.dll")] private static extern int SetArcDirection(IntPtr hdc, int direccion);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int ancho, int alto);
     [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hdc);
     [DllImport("gdi32.dll")] private static extern bool BitBlt(IntPtr destino, int x, int y, int ancho, int alto, IntPtr origen, int x1, int y1, uint op);
@@ -133,7 +136,7 @@ internal static class Columna
     private const int SW_HIDE = 0, SW_SHOWNOACTIVATE = 4;
     private const uint LWA_ALPHA = 0x2;
     private const int TRANSPARENT_BK = 1;
-    private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_SINGLELINE = 0x20, DT_CALCRECT = 0x400, DT_WORDBREAK = 0x10, DT_END_ELLIPSIS = 0x8000;
+    private const uint DT_LEFT = 0x0, DT_RIGHT = 0x2, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_SINGLELINE = 0x20, DT_CALCRECT = 0x400, DT_WORDBREAK = 0x10, DT_END_ELLIPSIS = 0x8000;
     private const uint TME_LEAVE = 0x2;
     private const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_HIDEWINDOW = 0x80;
     private static readonly IntPtr HWND_TOPMOST = new(-1);
@@ -235,6 +238,26 @@ internal static class Columna
     /// <summary>La versión del programa, para la fila que la enseña. La pone Program al arrancar.</summary>
     public static string Version { get; set; } = "";
 
+    // ── Lo de la sesión y de la partida (ideas del usuario, 2026-09-27) ──
+    private static volatile int victorias, derrotas;
+    /// <summary>El marcador de la sesión, en la cabecera abierta: verde si vas ganando, rojo si perdiendo.</summary>
+    public static void Marcador(int v, int d) { victorias = v; derrotas = d; Refrescar(); }
+
+    private static double progreso;
+    /// <summary>El aro alrededor del trébol: qué parte de tu mazo has visto ya (0 a 1).</summary>
+    public static void Progreso(double p) { var q = Math.Clamp(p, 0, 1); if (Math.Abs(q - progreso) < 0.01) return; progreso = q; Refrescar(); }
+
+    private static readonly Dictionary<string, string> miniaturas = new();
+    /// <summary>La miniatura de una carta (fichero) para la fila de parecidas cuyo dato empieza por ese grpId.</summary>
+    public static void Miniatura(string grp, string fichero) { lock (miniaturas) miniaturas[grp] = fichero; Refrescar(); }
+
+    private static volatile bool soloContexto;
+    private static (Accion Accion, string Dato, string Etiqueta)[] ultimoContexto = [];
+    /// <summary>Modo compacto: en partida, sólo las filas del momento.</summary>
+    public static void SoloContexto(bool solo) { if (soloContexto == solo) return; soloContexto = solo; FilasDeContexto(ultimoContexto); }
+
+    private static int faseLatido;
+
     public static void EnCurso(string? dato)
     {
         enCurso = dato;
@@ -279,11 +302,13 @@ internal static class Columna
 
     public static void FilasDeContexto(params (Accion Accion, string Dato, string Etiqueta)[] contexto)
     {
-        var nuevas = new Fila[contexto.Length + Fijas.Length];
+        ultimoContexto = contexto;
+        var conFijas = !(soloContexto && contexto.Length > 0);
+        var nuevas = new Fila[contexto.Length + (conFijas ? Fijas.Length : 0)];
         for (var i = 0; i < contexto.Length; i++)
             nuevas[i] = new Fila(contexto[i].Accion, GlifoDe(contexto[i].Accion), "", contexto[i].Dato, contexto[i].Etiqueta);
-        Array.Copy(Fijas, 0, nuevas, contexto.Length, Fijas.Length);
-        cuantasDeContexto = contexto.Length;
+        if (conFijas) Array.Copy(Fijas, 0, nuevas, contexto.Length, Fijas.Length);
+        cuantasDeContexto = conFijas ? contexto.Length : 0;
         Filas = nuevas;
         MedirAncho();   // el nombre del mazo o de la carta cambia lo que mide
         Refrescar();
@@ -332,6 +357,35 @@ internal static class Columna
     /// </summary>
     private static IntPtr iconoMarca;
     private static bool iconoBuscado;
+
+    // GDI+ para la miniatura de la carta en la fila (como en PanelCartas).
+    private struct GdiplusStartupInput { public int GdiplusVersion; public IntPtr DebugEventCallback; public bool SuppressBackgroundThread, SuppressExternalCodecs; }
+    [DllImport("gdiplus.dll")] private static extern int GdiplusStartup(out IntPtr token, ref GdiplusStartupInput entrada, IntPtr salida);
+    [DllImport("gdiplus.dll", CharSet = CharSet.Unicode)] private static extern int GdipLoadImageFromFile(string fichero, out IntPtr imagen);
+    [DllImport("gdiplus.dll")] private static extern int GdipCreateFromHDC(IntPtr hdc, out IntPtr grafico);
+    [DllImport("gdiplus.dll")] private static extern int GdipDeleteGraphics(IntPtr grafico);
+    [DllImport("gdiplus.dll")] private static extern int GdipSetInterpolationMode(IntPtr grafico, int modo);
+    [DllImport("gdiplus.dll")] private static extern int GdipDrawImageRectI(IntPtr grafico, IntPtr imagen, int x, int y, int ancho, int alto);
+    private static IntPtr gdiplus;
+    private static readonly Dictionary<string, IntPtr> imagenesMini = new();
+
+    /// <summary>La carta pequeña (22×31) centrada en el hueco del glifo. False si no se pudo cargar.</summary>
+    private static bool PintarMiniatura(IntPtr hdc, string fichero, RECT hueco)
+    {
+        if (gdiplus == IntPtr.Zero) { var entrada = new GdiplusStartupInput { GdiplusVersion = 1 }; GdiplusStartup(out gdiplus, ref entrada, IntPtr.Zero); }
+        if (!imagenesMini.TryGetValue(fichero, out var img))
+        {
+            img = GdipLoadImageFromFile(fichero, out var cargada) == 0 ? cargada : IntPtr.Zero;
+            imagenesMini[fichero] = img;
+        }
+        if (img == IntPtr.Zero) return false;
+        if (GdipCreateFromHDC(hdc, out var g) != 0 || g == IntPtr.Zero) return false;
+        GdipSetInterpolationMode(g, 7);
+        const int w = 22, h = 31;
+        GdipDrawImageRectI(g, img, hueco.Left + (hueco.Right - hueco.Left - w) / 2, hueco.Top + (hueco.Bottom - hueco.Top - h) / 2, w, h);
+        GdipDeleteGraphics(g);
+        return true;
+    }
 
     private static IntPtr IconoMarca(int tam)
     {
@@ -529,7 +583,9 @@ internal static class Columna
                     // EL VISOR: las etiquetas que no caben se desplazan de lado
                     // (pedido del usuario el 2026-09-26: «a veces se recortan las
                     // letras»). Sólo se repinta cuando hay algo que mover.
-                    if (abierta && hayDesbordadas) { ticksVisor++; InvalidateRect(hWnd, IntPtr.Zero, false); }
+                    bool late; lock (destacadas) late = destacadas.Count > 0;
+                    if (late) faseLatido++;
+                    if ((abierta && hayDesbordadas) || late) { ticksVisor++; InvalidateRect(hWnd, IntPtr.Zero, false); }
                     else ticksVisor = 0;
                     return IntPtr.Zero;
                 }
@@ -636,11 +692,29 @@ internal static class Columna
             // La marca: la flor del programa, centrada en la parte estrecha. Si
             // el icono no se pudiera cargar, el cuadro ámbar con «MC» de antes.
             var cuadro = new RECT { Left = 11, Top = 9, Right = 35, Bottom = 33 };
+            // EL ARO DEL MAZO: alrededor del trébol, lo que llevas visto de tu mazo.
+            if (progreso > 0)
+            {
+                var plumaAro = CreatePen(0, 2, Rgb(245, 158, 11));
+                var plumaAnterior = SelectObject(hdc, plumaAro);
+                var pincelAnterior = SelectObject(hdc, GetStockObject(5 /* NULL_BRUSH */));
+                SetArcDirection(hdc, 2 /* AD_CLOCKWISE */);
+                var cx = 23; var cy = 21; var r = 16;
+                var ang = 2 * Math.PI * progreso;
+                var xFin = cx + (int)Math.Round(r * Math.Sin(ang)); var yFin = cy - (int)Math.Round(r * Math.Cos(ang));
+                if (progreso >= 0.999) Ellipse(hdc, cx - r, cy - r, cx + r, cy + r);
+                else Arc(hdc, cx - r, cy - r, cx + r, cy + r, cx, cy - r, xFin, yFin);
+                SelectObject(hdc, pincelAnterior); SelectObject(hdc, plumaAnterior); DeleteObject(plumaAro);
+            }
+            // EL LATIDO: con algo nuevo esperando (un resumen, una versión), el
+            // trébol respira: crece y encoge suave.
+            bool late; lock (destacadas) late = destacadas.Count > 0;
+            var extra = late ? (int)Math.Round(2.5 * (1 + Math.Sin(faseLatido / 9.0))) : 0;
             var flor = IconoMarca(cuadro.Right - cuadro.Left);
             if (flor != IntPtr.Zero)
             {
-                DrawIconEx(hdc, cuadro.Left, cuadro.Top, flor,
-                    cuadro.Right - cuadro.Left, cuadro.Bottom - cuadro.Top, 0, IntPtr.Zero, DI_NORMAL);
+                DrawIconEx(hdc, cuadro.Left - extra, cuadro.Top - extra, flor,
+                    cuadro.Right - cuadro.Left + extra * 2, cuadro.Bottom - cuadro.Top + extra * 2, 0, IntPtr.Zero, DI_NORMAL);
             }
             else
             {
@@ -654,6 +728,15 @@ internal static class Columna
                 SetTextColor(hdc, Rgb(252, 211, 77));
                 var rMarca = new RECT { Left = ANCHO_CERRADA + 2, Top = 9, Right = ancho - 10, Bottom = 33 };
                 DrawText(hdc, "MTG CORNER", -1, ref rMarca, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                // EL MARCADOR DE LA SESIÓN, a la derecha: «3 – 1».
+                if (victorias + derrotas > 0)
+                {
+                    SelectObject(hdc, texto);
+                    SetTextColor(hdc, victorias > derrotas ? Rgb(74, 222, 128) : derrotas > victorias ? Rgb(248, 113, 113) : Rgb(203, 213, 225));
+                    var rMarcador = new RECT { Left = ancho - 90, Top = 9, Right = ancho - 12, Bottom = 33 };
+                    DrawText(hdc, $"{victorias} – {derrotas}", -1, ref rMarcador, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+                    SelectObject(hdc, marca);
+                }
             }
 
             var filas = Filas;
@@ -680,7 +763,11 @@ internal static class Columna
                 SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : nueva ? Rgb(252, 211, 77) : Rgb(186, 196, 214));
                 var rGlifo = new RECT { Left = 0, Top = arriba, Right = ANCHO_CERRADA, Bottom = arriba + ALTO_FILA };
                 var ocupada = enCurso is not null && filas[i].Dato == enCurso;
-                DrawText(hdc, ocupada ? "" : filas[i].Glifo, -1, ref rGlifo, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                string? mini = null;
+                if (!ocupada && filas[i].Accion == Accion.Similares && filas[i].Dato is { } datoMini)
+                    lock (miniaturas) miniaturas.TryGetValue(datoMini.Split(':')[0], out mini);
+                if (mini is not null && PintarMiniatura(hdc, mini, rGlifo)) { /* la carta en vez del glifo */ }
+                else DrawText(hdc, ocupada ? "" : filas[i].Glifo, -1, ref rGlifo, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 if (nueva && !ocupada)
                 {
                     // El punto: en la esquina del glifo, sin borde.

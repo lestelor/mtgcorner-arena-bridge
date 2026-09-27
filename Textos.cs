@@ -1106,6 +1106,51 @@ internal static class Textos
             "Moxfield deck", "mazo de Moxfield", "Moxfield-Deck", "deck Moxfield",
             "baralho do Moxfield", "mazzo di Moxfield", "Moxfield のデッキ", "Moxfield 套牌",
         ],
+        ["sup_version_error"] =
+        [
+            "Couldn't check for updates right now (you have v{0}). Try again in a while.", "No se ha podido comprobar ahora si hay una versión nueva (tienes la v{0}). Prueba en un rato.", "Update-Prüfung gerade nicht möglich (du hast v{0}). Versuch es später noch einmal.", "Impossible de vérifier les mises à jour pour l'instant (vous avez la v{0}). Réessayez plus tard.",
+            "Não foi possível verificar agora se há versão nova (tens a v{0}). Tenta daqui a pouco.", "Impossibile controllare adesso se c'è una versione nuova (hai la v{0}). Riprova tra un po'.", "今は更新を確認できませんでした（現在 v{0}）。しばらくしてからお試しください。", "现在无法检查更新（你当前是 v{0}）。请稍后再试。",
+        ],
+        ["tono_amable"] =
+        [
+            "Kind", "Amable", "Freundlich", "Bienveillant",
+            "Amável", "Gentile", "やさしい", "温和",
+        ],
+        ["tono_directo"] =
+        [
+            "Direct", "Directo", "Direkt", "Direct",
+            "Direto", "Diretto", "率直", "直接",
+        ],
+        ["tono_sargento"] =
+        [
+            "Sergeant", "Sargento", "Feldwebel", "Sergent",
+            "Sargento", "Sergente", "鬼軍曹", "教官",
+        ],
+        ["res_tono"] =
+        [
+            "Coach", "Entrenador", "Trainer", "Coach",
+            "Treinador", "Allenatore", "コーチ", "教练",
+        ],
+        ["res_jugada"] =
+        [
+            "Play of the match", "La jugada de la partida", "Spielzug der Partie", "L'action de la partie",
+            "A jogada da partida", "La giocata della partita", "この試合のプレイ", "本局关键一手",
+        ],
+        ["res_vidas"] =
+        [
+            "Life totals", "Las vidas", "Lebenspunkte", "Points de vie",
+            "Pontos de vida", "Punti vita", "ライフ推移", "生命值",
+        ],
+        ["res_tu"] =
+        [
+            "You", "Tú", "Du", "Vous",
+            "Tu", "Tu", "自分", "你",
+        ],
+        ["res_rival"] =
+        [
+            "Opponent", "Rival", "Gegner", "Adversaire",
+            "Adversário", "Avversario", "相手", "对手",
+        ],
         ["col_esta_carta"] =
         [
             "this card", "esta carta", "diese Karte", "cette carte",

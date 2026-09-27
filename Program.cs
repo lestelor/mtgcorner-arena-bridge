@@ -97,8 +97,42 @@ internal static class Program
     /// —sin red, GitHub caído, un límite de peticiones— y si la versión coincide
     /// no escribe nada. Nunca impide usar el programa.
     /// </summary>
+    /// <summary>Si la última comprobación LLEGÓ a saber cuál es la última versión. Sin esto, «no hay novedad» y «no se pudo mirar» se confundían: con el límite de peticiones de GitHub agotado, la fila de la columna decía «tienes la última» (el usuario, 2026-09-27, con la 1.14.5 y la 1.14.6 publicada).</summary>
+    private static bool ultimaComprobacionOk;
+
     private static async Task<Novedad?> BuscarVersionNueva()
     {
+        ultimaComprobacionOk = false;
+        // PRIMERO SIN LA API: la página /releases/latest redirige a la etiqueta
+        // de la última versión, y esa redirección no tiene límite de
+        // peticiones (la API son 60 por hora y por IP sin token, y se agotan).
+        try
+        {
+            using var sinSaltos = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(4) };
+            sinSaltos.DefaultRequestHeaders.UserAgent.ParseAdd($"MtgCornerArenaBridge/{VersionPropia}");
+            using var r = await sinSaltos.GetAsync("https://github.com/lestelor/mtgcorner-arena-bridge/releases/latest");
+            var destino = r.Headers.Location?.ToString() ?? "";
+            var m = System.Text.RegularExpressions.Regex.Match(destino, @"/tag/v?(\d+\.\d+\.\d+)$");
+            if (m.Success && Version.TryParse(m.Groups[1].Value, out var ultimaWeb))
+            {
+                ultimaComprobacionOk = true;
+                if (!Version.TryParse(VersionPropia, out var mia) || ultimaWeb <= mia) return null;
+                var numero = $"{ultimaWeb.Major}.{ultimaWeb.Minor}.{ultimaWeb.Build}";
+                var url = $"https://github.com/lestelor/mtgcorner-arena-bridge/releases/download/v{numero}/MtgCornerArenaBridge-{numero}.exe";
+                string? sha = null;
+                try
+                {
+                    using var conSaltos = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
+                    conSaltos.DefaultRequestHeaders.UserAgent.ParseAdd($"MtgCornerArenaBridge/{VersionPropia}");
+                    var huellas = await conSaltos.GetStringAsync($"https://github.com/lestelor/mtgcorner-arena-bridge/releases/download/v{numero}/SHA256.txt");
+                    var h = System.Text.RegularExpressions.Regex.Match(huellas, @"([0-9a-fA-F]{64})");
+                    if (h.Success) sha = h.Groups[1].Value;
+                }
+                catch { /* sin huella se avisa y se deja la página, como siempre */ }
+                return new Novedad(ultimaWeb, url, sha);
+            }
+        }
+        catch { /* se prueba con la API */ }
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
@@ -106,6 +140,7 @@ internal static class Program
             http.DefaultRequestHeaders.UserAgent.ParseAdd($"MtgCornerArenaBridge/{VersionPropia}");
             var json = await http.GetStringAsync(ReleasesApi);
             if (JsonNode.Parse(json) is not JsonArray releases) return null;
+            ultimaComprobacionOk = true;
 
             Version? ultima = null;
             JsonNode? mejor = null;
@@ -449,6 +484,12 @@ internal static class Program
         }
         // Ver el panel de cartas encima de Arena sin jugar: con el arena_id que
         // se le pase, o el de una carta cualquiera de la partida de pruebas.
+        if (args.Length > 0 && args[0] == "--probar-version")
+        {
+            var nov = await BuscarVersionNueva();
+            Console.WriteLine($"propia={VersionPropia} comprobado={ultimaComprobacionOk} novedad={(nov is null ? "-" : nov.Numero + " " + nov.Url + " sha=" + (nov.Sha256 ?? "-"))}");
+            return 0;
+        }
         if (args.Length > 0 && args[0] == "--probar-resumen")
         {
             // El panel de texto con un resumen guardado (JSON de /resumen), 10 s,
@@ -915,7 +956,7 @@ internal static class Program
                     try
                     {
                         var novedad = await BuscarVersionNueva();
-                        if (novedad is null) Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_version_ultima", VersionPropia));
+                        if (novedad is null) Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T(ultimaComprobacionOk ? "sup_version_ultima" : "sup_version_error", VersionPropia));
                         else
                         {
                             Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_version_nueva", novedad.Numero, VersionPropia), 8);
@@ -1022,6 +1063,8 @@ internal static class Program
             // Al acabar una partida, el resumen por IA se queda ofrecido hasta que
             // empieza la siguiente.
             if (partidaPendiente is not null && !Contexto.EnPartida) filas.Add((Columna.Accion.Resumen, "resumen", Textos.T("col_resumen")));
+            // MODO COMPACTO: en partida, sólo lo del momento; al acabar vuelven las de siempre.
+            Columna.SoloContexto(Contexto.EnPartida && filas.Count > 0);
             Columna.FilasDeContexto(filas.ToArray());
         }
         async Task NombrarCarta(int grp, int? otraCara)
@@ -1058,7 +1101,16 @@ internal static class Program
                 else if (r.IsSuccessStatusCode)
                 {
                     var c = await r.Content.ReadFromJsonAsync<CartaPuente>(JsonOpciones);
-                    if (c?.Nombre is { Length: > 0 } n) { lock (nombres) nombres[grp] = n; }
+                    if (c?.Nombre is { Length: > 0 } n)
+                    {
+                        lock (nombres) nombres[grp] = n;
+                        // Y su miniatura, para la fila de la columna (ver Columna.Miniatura).
+                        if (c.Imagen is { Length: > 0 } urlMini)
+                        {
+                            var fMini = await BajarImagen(urlMini);
+                            if (fMini is not null) Columna.Miniatura(grp.ToString(), fMini);
+                        }
+                    }
                     else { lock (pidiendo) reintentar[grp] = DateTime.UtcNow.AddMinutes(1); }
                 }
                 else
@@ -1076,13 +1128,25 @@ internal static class Program
                 if (Contexto.Carta == grp || Contexto.CartaRival == grp) ActualizarColumna();
             }
         }
+        httpResidente = http;
         Contexto.Cambio += ActualizarColumna;
         Contexto.Cambio += () => VigilarAmenazas(http, ActualizarColumna);
+        // EL ARO DEL MAZO: cuántas cartas tuyas han salido ya, sobre el tamaño del
+        // mazo (100 en Brawl y Commander, 60 en el resto).
+        Contexto.Cambio += () =>
+        {
+            var tam = Contexto.Formato is "brawl" or "historicbrawl" or "commander" ? 100 : 60;
+            Columna.Progreso(Contexto.EnPartida ? Math.Min(1.0, Contexto.CartasVistasMias / (double)tam) : 0);
+        };
         _ = Task.Run(async () => { try { if (await BuscarVersionNueva() is not null) Columna.Destacar("version"); } catch { /* sin red */ } });
         Contexto.Cambio += () => { if (Contexto.EnPartida && partidaPendiente is not null) { partidaPendiente = null; Columna.Olvidar("resumen"); } };
         Contexto.PartidaAcabada += () =>
         {
             partidaPendiente = Contexto.UltimaPartida;
+            // El marcador de la sesión: victorias y derrotas desde que se abrió Arena.
+            if (Contexto.UltimaPartida?.Gane == true) victoriasSesion++;
+            else if (Contexto.UltimaPartida?.Gane == false) derrotasSesion++;
+            Columna.Marcador(victoriasSesion, derrotasSesion);
             Columna.Destacar("resumen");
             Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_resumen"), 8);
             ActualizarColumna();
@@ -1316,8 +1380,14 @@ internal static class Program
     /// Pedido del usuario el 2026-09-26: «críticas constructivas para aprender».
     /// </summary>
     private static Contexto.Partida? partidaPendiente;
+    private static int victoriasSesion, derrotasSesion;
     /// <summary>El resumen ya pedido de ESA partida: al reabrir el panel se enseña sin otra consulta (pedido del usuario el 2026-09-26).</summary>
-    private static (Contexto.Partida Partida, RespuestaResumen Resumen)? resumenListo;
+    /// <summary>Los resúmenes ya pedidos de la partida pendiente, uno por tono del entrenador; se vacía con cada partida.</summary>
+    private static readonly Dictionary<string, RespuestaResumen> resumenesListos = new();
+    private static Contexto.Partida? partidaDeResumenes;
+    private static readonly string[] TONOS = ["amable", "directo", "sargento"];
+    private static string tonoActual = "directo";
+    private static HttpClient? httpResidente;
 
     private static async Task EnsenarResumen(RespuestaResumen d)
     {
@@ -1331,9 +1401,10 @@ internal static class Program
         // Los mazos que pudo llevar el rival: enlaces a la página de cartas con ese mazo.
         var mazos = (d.MazosRival ?? []).Where(m => m.Nombre is { Length: > 0 } && m.Ruta is { Length: > 0 }).ToArray();
         var logosMazos = await Task.WhenAll(mazos.Select(m => BajarImagen(m.Logo)));
+        var avatares = await Task.WhenAll(mazos.Select(m => BajarImagen(m.Avatar)));
         var enlaces = mazos.Select((m, i) => new PanelCartas.Enlace(
                 $"{m.Nombre} · {Textos.T("res_mazo_coinciden", m.Coincidencias)} · {Textos.T(m.Tipo == "meta" ? "res_mazo_meta" : m.Tipo == "moxfield" ? "res_mazo_moxfield" : "res_mazo_gente")}",
-                m.Ruta!, logosMazos[i])).ToArray();
+                m.Ruta!, logosMazos[i], m.Autor, avatares[i])).ToArray();
         // Lo que se copia: los títulos y sus párrafos, en plano; y los mazos, con su enlace.
         var plano = string.Join("\r\n\r\n", secciones.Select(s => s.Titulo + "\r\n" + string.Join("\r\n", s.Parrafos.Select(p => s.Lista ? "• " + p : p))));
         if (enlaces.Length > 0)
@@ -1348,24 +1419,48 @@ internal static class Program
             .ToArray();
         if (compras.Length > 0)
             plano += "\r\n\r\n" + Textos.T("res_compras") + "\r\n" + string.Join("\r\n", compras.Select(c => "• " + c.Nombre + " — " + c.Etiqueta + " — " + Sitio + c.Ruta));
+        // LO DIVERTIDO: titular y nota arriba, la jugada de la partida, el gráfico
+        // de vidas y el tono del entrenador con su avatar (ideas del 2026-09-27).
+        var turnos = partidaPendiente?.Turnos ?? [];
+        var ficheroJugada = d.Jugada?.Imagen is { Length: > 0 } ? await BajarImagen(d.Jugada.Imagen) : null;
+        var avataresTono = await Task.WhenAll(TONOS.Select(t => BajarImagen($"{Sitio}{PuertaDevice}/logo/entrenador-{t}.png")));
+        var extras = new PanelCartas.ResumenExtras(
+            d.Titular, d.Nota,
+            d.Jugada?.Nombre, ficheroJugada, d.Jugada?.Bando, d.Jugada?.Turno, d.Jugada?.Frase,
+            turnos.Select(t => t.VidaYo).ToArray(), turnos.Select(t => t.VidaRival).ToArray(),
+            TONOS, TONOS.Select(t => Textos.T("tono_" + t)).ToArray(), avataresTono, tonoActual,
+            t =>
+            {
+                if (t == tonoActual || httpResidente is null) return;
+                tonoActual = t;
+                _ = Task.Run(async () =>
+                {
+                    Columna.EnCurso("resumen");
+                    try { await PanelResumen(httpResidente); }
+                    finally { Columna.EnCurso(null); }
+                });
+            },
+            Textos.T("res_jugada"), Textos.T("res_vidas"), Textos.T("res_tu"), Textos.T("res_rival"), Textos.T("res_tono"));
+        if (d.Titular is { Length: > 0 }) plano = d.Titular + (d.Nota is { } n ? $" — {n}/10" : "") + "\r\n\r\n" + plano;
         PanelCartas.AlAbrir = AbrirDelPanel;
-        PanelCartas.MostrarTexto(Textos.T("col_resumen"), secciones, plano, enlaces, Textos.T("res_mazo_rival"), compras, Textos.T("res_compras"));
+        PanelCartas.MostrarTexto(Textos.T("col_resumen"), secciones, plano, enlaces, Textos.T("res_mazo_rival"), compras, Textos.T("res_compras"), extras);
     }
 
     private static async Task<bool> PanelResumen(HttpClient http)
     {
         var partida = partidaPendiente;
         if (partida is null) return false;
-        if (resumenListo is { } ya && ReferenceEquals(ya.Partida, partida)) { await EnsenarResumen(ya.Resumen); return true; }
+        if (!ReferenceEquals(partidaDeResumenes, partida)) { resumenesListos.Clear(); partidaDeResumenes = partida; }
+        if (resumenesListos.TryGetValue(tonoActual, out var ya)) { await EnsenarResumen(ya); return true; }
         try
         {
             var envio = new PartidaEnvio(partida.Manos.Select(m => new ManoEnvio(m.Cartas, m.Aceptada)).ToArray(), partida.Formato, partida.Mazo, partida.Gane, partida.Razon,
                 partida.Turnos.Select(t => new TurnoEnvio(t.N, t.Activo, t.VidaYo, t.VidaRival, [.. t.JugadasYo], [.. t.JugadasRival], t.DanoAYo, t.DanoARival, [.. t.ManoYo])).ToArray());
-            using var r = await http.PostAsJsonAsync($"{PuertaDevice}/resumen", new { idioma = Textos.Idioma, partida = envio }, JsonOpciones);
+            using var r = await http.PostAsJsonAsync($"{PuertaDevice}/resumen", new { idioma = Textos.Idioma, tono = tonoActual, partida = envio }, JsonOpciones);
             if (!r.IsSuccessStatusCode) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_resumen_fallo")); return true; }
             var d = await r.Content.ReadFromJsonAsync<RespuestaResumen>(JsonOpciones);
             if (d is null || (d.Texto is not { Length: > 0 } && d.Secciones is not { Length: > 0 })) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_resumen_fallo")); return true; }
-            resumenListo = (partida, d);
+            resumenesListos[tonoActual] = d;
             await EnsenarResumen(d);
             return true;
         }
@@ -2657,10 +2752,22 @@ internal sealed record GrupoSinergiaPuente(
 
 /// <summary>El resumen de la partida que devuelve /api/mtga-device/resumen.</summary>
 internal sealed record RespuestaResumen(
+    [property: JsonPropertyName("tono")] string? Tono,
+    [property: JsonPropertyName("nota")] int? Nota,
+    [property: JsonPropertyName("titular")] string? Titular,
+    [property: JsonPropertyName("jugada")] JugadaPuente? Jugada,
     [property: JsonPropertyName("texto")] string? Texto,
     [property: JsonPropertyName("secciones")] SeccionResumen[]? Secciones,
     [property: JsonPropertyName("mazosRival")] MazoRivalPuente[]? MazosRival,
     [property: JsonPropertyName("compras")] CompraPuente[]? Compras);
+
+/// <summary>La carta que decidió la partida, según el entrenador.</summary>
+internal sealed record JugadaPuente(
+    [property: JsonPropertyName("nombre")] string? Nombre,
+    [property: JsonPropertyName("imagen")] string? Imagen,
+    [property: JsonPropertyName("bando")] string? Bando,
+    [property: JsonPropertyName("turno")] int? Turno,
+    [property: JsonPropertyName("frase")] string? Frase);
 
 /// <summary>Algo que comprar tras la partida (sellado de la edición o carta cara del rival), con su mejor precio y tienda.</summary>
 internal sealed record CompraPuente(
@@ -2679,7 +2786,9 @@ internal sealed record MazoRivalPuente(
     [property: JsonPropertyName("coincidencias")] int Coincidencias,
     [property: JsonPropertyName("cartas")] string[]? Cartas,
     [property: JsonPropertyName("ruta")] string? Ruta,
-    [property: JsonPropertyName("logo")] string? Logo);
+    [property: JsonPropertyName("logo")] string? Logo,
+    [property: JsonPropertyName("autor")] string? Autor,
+    [property: JsonPropertyName("avatar")] string? Avatar);
 
 internal sealed record SeccionResumen(
     [property: JsonPropertyName("clave")] string? Clave,
@@ -2768,7 +2877,7 @@ internal sealed record CartaSimilar(
     [property: JsonPropertyName("ruta")] string? Ruta);
 
 /// <summary>Lo que devuelve /api/puente/carta/&lt;arena_id&gt;: el nombre para la columna.</summary>
-internal sealed record CartaPuente([property: JsonPropertyName("nombre")] string? Nombre);
+internal sealed record CartaPuente([property: JsonPropertyName("nombre")] string? Nombre, [property: JsonPropertyName("imagen")] string? Imagen);
 
 internal sealed record RespuestaImportar(
     [property: JsonPropertyName("pendiente")] string? Pendiente,

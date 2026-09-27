@@ -132,6 +132,11 @@ internal static class PanelCartas
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
 
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreatePen(int estilo, int ancho, uint color);
+    [DllImport("gdi32.dll")] private static extern bool MoveToEx(IntPtr hdc, int x, int y, IntPtr anterior);
+    [DllImport("gdi32.dll")] private static extern bool LineTo(IntPtr hdc, int x, int y);
+    [DllImport("gdi32.dll")] private static extern bool Ellipse(IntPtr hdc, int izq, int arriba, int der, int abajo);
+    [DllImport("gdi32.dll")] private static extern IntPtr GetStockObject(int objeto);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int ancho, int alto);
     [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hdc);
@@ -156,6 +161,8 @@ internal static class PanelCartas
     [DllImport("gdiplus.dll")] private static extern int GdipDeleteGraphics(IntPtr grafico);
     [DllImport("gdiplus.dll")] private static extern int GdipSetInterpolationMode(IntPtr grafico, int modo);
     [DllImport("gdiplus.dll")] private static extern int GdipDrawImageRectI(IntPtr grafico, IntPtr imagen, int x, int y, int ancho, int alto);
+    [DllImport("gdiplus.dll")] private static extern int GdipGetImageWidth(IntPtr imagen, out uint ancho);
+    [DllImport("gdiplus.dll")] private static extern int GdipGetImageHeight(IntPtr imagen, out uint alto);
 
     private const uint WS_POPUP = 0x80000000;
     private const uint WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000;
@@ -164,7 +171,7 @@ internal static class PanelCartas
     private const int IDC_HAND = 32649, IDC_ARROW = 32512;
     private const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_HIDEWINDOW = 0x80;
     private const uint LWA_ALPHA = 0x2, TME_LEAVE = 0x2;
-    private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_WORDBREAK = 0x10, DT_SINGLELINE = 0x20, DT_CALCRECT = 0x400, DT_END_ELLIPSIS = 0x8000;
+    private const uint DT_LEFT = 0x0, DT_RIGHT = 0x2, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_WORDBREAK = 0x10, DT_SINGLELINE = 0x20, DT_CALCRECT = 0x400, DT_END_ELLIPSIS = 0x8000;
     private const uint SRCCOPY = 0x00CC0020;
     private const int TRANSPARENT_BK = 1, SW_SHOWNOACTIVATE = 4, MA_NOACTIVATE = 3;
     private static readonly IntPtr HWND_TOPMOST = new(-1);
@@ -195,7 +202,9 @@ internal static class PanelCartas
     public sealed record SeccionTexto(string Titulo, IReadOnlyList<string> Parrafos, bool Lista);
 
     /// <summary>Un enlace al final del texto: los mazos que pudo llevar el rival, que abren la web.</summary>
-    public sealed record Enlace(string Texto, string Ruta, string? Logo = null);
+    /// <summary>Un mazo sugerido: el texto, y a la derecha el autor (avatar y nombre) y el logo de su origen (MTG Corner o Moxfield).</summary>
+    public sealed record Enlace(string Texto, string Ruta, string? Logo = null, string? Autor = null, string? Avatar = null);
+    private const int ANCHO_AUTOR = 150, LADO_AVATAR = 18;
 
     /// <summary>
     /// Algo que comprar tras la partida: miniatura, nombre y una etiqueta con
@@ -205,7 +214,24 @@ internal static class PanelCartas
     public sealed record Compra(string Nombre, string Fichero, string? Ruta, string Etiqueta, string? Logo = null);
     private const int LADO_LOGO = 16, ANCHO_VISTA = 210, ALTO_VISTA = 294;
 
-    private sealed record Bloque(string Texto, bool Titulo, bool Vineta, int Alto, int Enlace = -1, bool Compras = false);
+    private sealed record Bloque(string Texto, bool Titulo, bool Vineta, int Alto, int Enlace = -1, bool Compras = false, string? Especial = null);
+
+    /// <summary>
+    /// LO QUE HACE DIVERTIDO EL RESUMEN (ideas aprobadas por el usuario el
+    /// 2026-09-27): el titular con la nota, el entrenador con su tono y su
+    /// avatar, la jugada que decidió la partida y el gráfico de vidas.
+    /// </summary>
+    public sealed record ResumenExtras(
+        string? Titular, int? Nota,
+        string? JugadaNombre, string? JugadaFichero, string? JugadaBando, int? JugadaTurno, string? JugadaFrase,
+        int?[] VidaYo, int?[] VidaRival,
+        string[] Tonos, string[] TonoEtiquetas, string?[] TonoAvatares, string TonoActual, Action<string>? CambiarTono,
+        string RotuloJugada, string RotuloVidas, string RotuloTu, string RotuloRival, string RotuloTono);
+
+    private static ResumenExtras? extras;
+    private static RECT[] rectTonos = [];
+    private const int BAJO_TONO = -200;   // el tono i está bajo el ratón: BAJO_TONO - i
+    private const int ALTO_TONOS = 44, LADO_AVATAR_TONO = 34, ALTO_GRAFICO = 120, ALTO_JUGADA = 104;
 
     private static Compra[] compras = [];
     private static RECT[] rectCompras = [];
@@ -226,11 +252,13 @@ internal static class PanelCartas
     private const int BAJO_COPIAR = -3;
 
     /// <summary>Enseña el resumen por secciones. <paramref name="textoPlano"/> es lo que copia el botón.</summary>
-    public static void MostrarTexto(string tituloPanel, IReadOnlyList<SeccionTexto> secciones, string textoPlano, IReadOnlyList<Enlace>? conEnlaces = null, string? tituloEnlaces = null, IReadOnlyList<Compra>? conCompras = null, string? tituloCompras = null)
+    public static void MostrarTexto(string tituloPanel, IReadOnlyList<SeccionTexto> secciones, string textoPlano, IReadOnlyList<Enlace>? conEnlaces = null, string? tituloEnlaces = null, IReadOnlyList<Compra>? conCompras = null, string? tituloCompras = null, ResumenExtras? conExtras = null)
     {
         Cerrar();
         titulo = tituloPanel;
         copia = textoPlano;
+        extras = conExtras;
+        rectTonos = new RECT[conExtras?.Tonos.Length ?? 0];
         enlaces = conEnlaces?.ToArray() ?? [];
         rectEnlaces = new RECT[enlaces.Length];
         compras = (conCompras ?? []).Take(3).ToArray();
@@ -248,6 +276,25 @@ internal static class PanelCartas
         var fTexto = CreateFont(TAM_TEXTO, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
         var anterior = SelectObject(hdc, fTexto);
         var lista = new List<Bloque>();
+        if (extras is { } ex)
+        {
+            // El titular (grande) con la nota a la derecha.
+            if (ex.Titular is { Length: > 0 })
+            {
+                var fGrande = CreateFont(26, 0, 0, 0, 800, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                SelectObject(hdc, fGrande);
+                var rt = new RECT { Left = 0, Top = 0, Right = ANCHO_PANEL - MARGEN * 2 - 90, Bottom = 0 };
+                DrawText(hdc, ex.Titular, -1, ref rt, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
+                DeleteObject(fGrande);
+                lista.Add(new Bloque(ex.Titular, false, false, Math.Max(40, rt.Bottom - rt.Top), Especial: "titular"));
+            }
+            // El entrenador: los tonos, con avatar si lo hay.
+            lista.Add(new Bloque("", false, false, ALTO_TONOS, Especial: "tonos"));
+            // La jugada de la partida.
+            if (ex.JugadaNombre is { Length: > 0 }) lista.Add(new Bloque("", false, false, ALTO_JUGADA, Especial: "jugada"));
+            // El gráfico de vidas, si hay al menos dos turnos con vida.
+            if (ex.VidaYo.Count(v => v is not null) >= 2) lista.Add(new Bloque("", false, false, ALTO_GRAFICO, Especial: "vidas"));
+        }
         foreach (var sec in secciones)
         {
             SelectObject(hdc, fTitulo);
@@ -273,7 +320,8 @@ internal static class PanelCartas
             SelectObject(hdc, fTexto);
             for (var i = 0; i < enlaces.Length; i++)
             {
-                var re = new RECT { Left = 0, Top = 0, Right = ANCHO_PANEL - MARGEN * 2 - SANGRIA_VINETA, Bottom = 0 };
+                var reserva = (enlaces[i].Logo is not null ? LADO_LOGO + 10 : 0) + (enlaces[i].Autor is { Length: > 0 } ? ANCHO_AUTOR + LADO_AVATAR + 12 : 0) + 8;
+                var re = new RECT { Left = 0, Top = 0, Right = ANCHO_PANEL - MARGEN * 2 - SANGRIA_VINETA - reserva, Bottom = 0 };
                 DrawText(hdc, enlaces[i].Texto, -1, ref re, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
                 lista.Add(new Bloque(enlaces[i].Texto, false, true, re.Bottom - re.Top, i));
             }
@@ -305,6 +353,184 @@ internal static class PanelCartas
         Left = ANCHO_PANEL - MARGEN - ANCHO_BOTON, Top = alto - ALTO_PIE - MARGEN / 2 - (ALTO_BOTON - ALTO_PIE) / 2,
         Right = ANCHO_PANEL - MARGEN, Bottom = alto - ALTO_PIE - MARGEN / 2 - (ALTO_BOTON - ALTO_PIE) / 2 + ALTO_BOTON,
     };
+
+    /// <summary>
+    /// Los bloques del resumen que no son texto: el titular con la nota, los
+    /// tonos del entrenador, la jugada de la partida y el gráfico de vidas.
+    /// Se pintan en la zona de texto (que ya va desplazada por la rueda).
+    /// </summary>
+    private static void PintarEspecial(IntPtr zona, string especial, ResumenExtras ex, int y, int alto, int arriba, IntPtr fTituloSec, IntPtr fTexto)
+    {
+        var anchoZona = ANCHO_PANEL - MARGEN * 2;
+        switch (especial)
+        {
+            case "titular":
+            {
+                var fGrande = CreateFont(26, 0, 0, 0, 800, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                SelectObject(zona, fGrande);
+                SetTextColor(zona, Rgb(255, 255, 255));
+                var rt = new RECT { Left = MARGEN, Top = y, Right = MARGEN + anchoZona - 90, Bottom = y + alto };
+                DrawText(zona, ex.Titular ?? "", -1, ref rt, DT_LEFT | DT_WORDBREAK);
+                DeleteObject(fGrande);
+                if (ex.Nota is { } nota)
+                {
+                    // La nota, en un círculo: verde de 8 para arriba, ámbar de 5 a 7, rojo por debajo.
+                    var color = nota >= 8 ? Rgb(34, 197, 94) : nota >= 5 ? Rgb(245, 158, 11) : Rgb(239, 68, 68);
+                    var pincel = CreateSolidBrush(color);
+                    var pincelAnterior = SelectObject(zona, pincel);
+                    var plumaAnterior = SelectObject(zona, GetStockObject(8 /* NULL_PEN */));
+                    var cx = MARGEN + anchoZona - 36; var cy = y + 20;
+                    Ellipse(zona, cx - 24, cy - 24, cx + 24, cy + 24);
+                    SelectObject(zona, plumaAnterior); SelectObject(zona, pincelAnterior); DeleteObject(pincel);
+                    var fNota = CreateFont(22, 0, 0, 0, 800, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                    SelectObject(zona, fNota);
+                    SetTextColor(zona, Rgb(9, 13, 24));
+                    var rn = new RECT { Left = cx - 24, Top = cy - 24, Right = cx + 24, Bottom = cy + 24 };
+                    DrawText(zona, $"{nota}", -1, ref rn, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    DeleteObject(fNota);
+                    SelectObject(zona, fTexto);
+                    SetTextColor(zona, Rgb(148, 163, 184));
+                    var r10 = new RECT { Left = cx - 30, Top = cy + 26, Right = cx + 30, Bottom = cy + 44 };
+                    DrawText(zona, "/10", -1, ref r10, DT_CENTER | DT_SINGLELINE);
+                }
+                break;
+            }
+            case "tonos":
+            {
+                SelectObject(zona, fTexto);
+                SetTextColor(zona, Rgb(148, 163, 184));
+                var rr = new RECT { Left = MARGEN, Top = y, Right = MARGEN + 120, Bottom = y + ALTO_TONOS };
+                DrawText(zona, ex.RotuloTono + ":", -1, ref rr, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                var x = MARGEN + 110;
+                IniciarGdiPlus();
+                GdipCreateFromHDC(zona, out var g);
+                if (g != IntPtr.Zero) GdipSetInterpolationMode(g, 7);
+                for (var i = 0; i < ex.Tonos.Length; i++)
+                {
+                    var activo = ex.Tonos[i] == ex.TonoActual;
+                    var sobre = bajoRaton == BAJO_TONO - i;
+                    var etiqueta = ex.TonoEtiquetas[i];
+                    var rm = new RECT();
+                    DrawText(zona, etiqueta, -1, ref rm, DT_CALCRECT | DT_SINGLELINE);
+                    var imgAvatar = ex.TonoAvatares[i] is not null ? Imagen(ex.TonoAvatares[i]!) : IntPtr.Zero;
+                    var conAvatar = imgAvatar != IntPtr.Zero;
+                    // El avatar a la altura del chip, con su proporción (son retratos verticales).
+                    var anchoAvatar = LADO_AVATAR_TONO;
+                    if (conAvatar && GdipGetImageWidth(imgAvatar, out var aw) == 0 && GdipGetImageHeight(imgAvatar, out var ah) == 0 && ah > 0)
+                        anchoAvatar = Math.Max(14, (int)Math.Round(LADO_AVATAR_TONO * (double)aw / ah));
+                    var anchoFicha = 16 + (conAvatar ? anchoAvatar + 6 : 0) + (rm.Right - rm.Left);
+                    var rf = new RECT { Left = x, Top = y + 3, Right = x + anchoFicha, Bottom = y + ALTO_TONOS - 3 };
+                    rectTonos[i] = new RECT { Left = rf.Left, Top = arriba + rf.Top, Right = rf.Right, Bottom = arriba + rf.Bottom };
+                    var pincel = CreateSolidBrush(activo ? Rgb(56, 189, 248) : sobre ? Rgb(40, 52, 78) : Rgb(26, 34, 54));
+                    FillRect(zona, ref rf, pincel);
+                    DeleteObject(pincel);
+                    var tx = x + 8;
+                    if (conAvatar && g != IntPtr.Zero) { GdipDrawImageRectI(g, imgAvatar, tx, y + 5, anchoAvatar, LADO_AVATAR_TONO); tx += anchoAvatar + 6; }
+                    SetTextColor(zona, activo ? Rgb(9, 13, 24) : Rgb(226, 232, 240));
+                    var rt = new RECT { Left = tx, Top = rf.Top, Right = rf.Right - 8, Bottom = rf.Bottom };
+                    DrawText(zona, etiqueta, -1, ref rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                    x += anchoFicha + 8;
+                }
+                if (g != IntPtr.Zero) GdipDeleteGraphics(g);
+                break;
+            }
+            case "jugada":
+            {
+                var rival = ex.JugadaBando == "rival";
+                SelectObject(zona, fTituloSec);
+                SetTextColor(zona, rival ? Rgb(248, 113, 113) : Rgb(252, 211, 77));
+                var rt = new RECT { Left = MARGEN, Top = y, Right = MARGEN + anchoZona, Bottom = y + 26 };
+                DrawText(zona, ex.RotuloJugada + (ex.JugadaTurno is { } t ? $" · T{t}" : ""), -1, ref rt, DT_LEFT | DT_SINGLELINE);
+                var img = ex.JugadaFichero is not null ? Imagen(ex.JugadaFichero) : IntPtr.Zero;
+                var tx = MARGEN;
+                if (img != IntPtr.Zero)
+                {
+                    IniciarGdiPlus();
+                    if (GdipCreateFromHDC(zona, out var g) == 0 && g != IntPtr.Zero)
+                    {
+                        GdipSetInterpolationMode(g, 7);
+                        GdipDrawImageRectI(g, img, MARGEN, y + 28, 52, 72);
+                        GdipDeleteGraphics(g);
+                    }
+                    tx += 60;
+                }
+                SelectObject(zona, fTexto);
+                SetTextColor(zona, Rgb(255, 255, 255));
+                var rn = new RECT { Left = tx, Top = y + 28, Right = MARGEN + anchoZona, Bottom = y + 50 };
+                DrawText(zona, ex.JugadaNombre ?? "", -1, ref rn, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+                SetTextColor(zona, Rgb(226, 232, 240));
+                var rf = new RECT { Left = tx, Top = y + 50, Right = MARGEN + anchoZona, Bottom = y + ALTO_JUGADA };
+                DrawText(zona, ex.JugadaFrase ?? "", -1, ref rf, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
+                break;
+            }
+            case "vidas":
+            {
+                SelectObject(zona, fTituloSec);
+                SetTextColor(zona, Rgb(252, 211, 77));
+                var rt = new RECT { Left = MARGEN, Top = y, Right = MARGEN + anchoZona, Bottom = y + 24 };
+                DrawText(zona, ex.RotuloVidas, -1, ref rt, DT_LEFT | DT_SINGLELINE);
+                // El área del gráfico.
+                var gx = MARGEN + 30; var gy = y + 30; var gw = anchoZona - 30 - 90; var gh = ALTO_GRAFICO - 40;
+                var n = Math.Max(ex.VidaYo.Length, ex.VidaRival.Length);
+                var maximo = Math.Max(20, Math.Max(ex.VidaYo.Max(v => v ?? 0), ex.VidaRival.Max(v => v ?? 0)));
+                var eje = CreateSolidBrush(Rgb(51, 65, 85));
+                var rEjeX = new RECT { Left = gx, Top = gy + gh, Right = gx + gw, Bottom = gy + gh + 1 };
+                var rEjeY = new RECT { Left = gx, Top = gy, Right = gx + 1, Bottom = gy + gh };
+                FillRect(zona, ref rEjeX, eje); FillRect(zona, ref rEjeY, eje);
+                DeleteObject(eje);
+                SelectObject(zona, fPieChico());
+                SetTextColor(zona, Rgb(100, 116, 139));
+                var r0 = new RECT { Left = gx - 30, Top = gy + gh - 8, Right = gx - 4, Bottom = gy + gh + 8 };
+                DrawText(zona, "0", -1, ref r0, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+                var rM = new RECT { Left = gx - 30, Top = gy - 8, Right = gx - 4, Bottom = gy + 8 };
+                DrawText(zona, $"{maximo}", -1, ref rM, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+                int X(int i) => n <= 1 ? gx : gx + (int)((long)i * gw / (n - 1));
+                int Y(int v) => gy + gh - (int)((long)Math.Clamp(v, 0, maximo) * gh / maximo);
+                // La línea del turno clave.
+                if (ex.JugadaTurno is { } tc && tc >= 1 && tc <= n)
+                {
+                    var marca = CreateSolidBrush(Rgb(245, 158, 11));
+                    var rk = new RECT { Left = X(tc - 1), Top = gy, Right = X(tc - 1) + 2, Bottom = gy + gh };
+                    FillRect(zona, ref rk, marca); DeleteObject(marca);
+                }
+                foreach (var (serie, color) in new[] { (ex.VidaYo, Rgb(56, 189, 248)), (ex.VidaRival, Rgb(248, 113, 113)) })
+                {
+                    var pluma = CreatePen(0, 2, color);
+                    var plumaAnterior = SelectObject(zona, pluma);
+                    var hayPrevio = false; var prevV = 0;
+                    for (var i = 0; i < n; i++)
+                    {
+                        var v = i < serie.Length ? serie[i] : null;
+                        if (v is null) { if (hayPrevio) v = prevV; else continue; }
+                        if (!hayPrevio) { MoveToEx(zona, X(i), Y(v.Value), IntPtr.Zero); hayPrevio = true; }
+                        else LineTo(zona, X(i), Y(v.Value));
+                        prevV = v.Value;
+                    }
+                    SelectObject(zona, plumaAnterior); DeleteObject(pluma);
+                }
+                // La leyenda, a la derecha.
+                var lx = gx + gw + 12;
+                var azul = CreateSolidBrush(Rgb(56, 189, 248)); var rojo = CreateSolidBrush(Rgb(248, 113, 113));
+                var r1 = new RECT { Left = lx, Top = gy + 4, Right = lx + 12, Bottom = gy + 8 }; FillRect(zona, ref r1, azul);
+                var r2 = new RECT { Left = lx, Top = gy + 26, Right = lx + 12, Bottom = gy + 30 }; FillRect(zona, ref r2, rojo);
+                DeleteObject(azul); DeleteObject(rojo);
+                SetTextColor(zona, Rgb(203, 213, 225));
+                var rl1 = new RECT { Left = lx + 16, Top = gy - 2, Right = lx + 80, Bottom = gy + 14 }; DrawText(zona, ex.RotuloTu, -1, ref rl1, DT_LEFT | DT_SINGLELINE);
+                var rl2 = new RECT { Left = lx + 16, Top = gy + 20, Right = lx + 80, Bottom = gy + 36 }; DrawText(zona, ex.RotuloRival, -1, ref rl2, DT_LEFT | DT_SINGLELINE);
+                var ultimoYo = ex.VidaYo.LastOrDefault(v => v is not null); var ultimoRival = ex.VidaRival.LastOrDefault(v => v is not null);
+                var rl3 = new RECT { Left = lx, Top = gy + 44, Right = lx + 90, Bottom = gy + 60 };
+                DrawText(zona, $"{ultimoYo?.ToString() ?? "?"} · {ultimoRival?.ToString() ?? "?"}", -1, ref rl3, DT_LEFT | DT_SINGLELINE);
+                break;
+            }
+        }
+    }
+
+    private static IntPtr fuentePieChico;
+    private static IntPtr fPieChico()
+    {
+        if (fuentePieChico == IntPtr.Zero) fuentePieChico = CreateFont(13, 0, 0, 0, 500, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        return fuentePieChico;
+    }
 
     /// <summary>Lo que se ve del texto: entre la cabecera y el pie.</summary>
     private static int AltoVisibleTexto => alto - ALTO_CABECERA - MARGEN / 2 - ALTO_PIE - MARGEN;
@@ -520,6 +746,9 @@ internal static class PanelCartas
             var rc = rectCompras;
             for (var i = 0; i < rc.Length; i++)
                 if (xr >= rc[i].Left && xr < rc[i].Right && yr >= rc[i].Top && yr < rc[i].Bottom) return BAJO_COMPRA - i;
+            var rtn = rectTonos;
+            for (var i = 0; i < rtn.Length; i++)
+                if (xr >= rtn[i].Left && xr < rtn[i].Right && yr >= rtn[i].Top && yr < rtn[i].Bottom) return BAJO_TONO - i;
         }
         var x = (short)(lParam.ToInt64() & 0xFFFF);
         var y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
@@ -551,7 +780,7 @@ internal static class PanelCartas
             {
                 var i = bajoRaton;
                 var lista = huecos;
-                var pulsable = i == -2 || i == BAJO_COPIAR || i <= BAJO_ENLACE
+                var pulsable = i == -2 || i == BAJO_COPIAR || i <= BAJO_ENLACE || i <= BAJO_TONO
                     || (i >= 0 && i < lista.Length && (lista[i].Carta?.Ruta ?? lista[i].Seccion.Ruta) is not null);
                 SetCursor(LoadCursor(IntPtr.Zero, pulsable ? IDC_HAND : IDC_ARROW));
                 return new IntPtr(1);
@@ -586,6 +815,12 @@ internal static class PanelCartas
                 var i = QueHayEn(lParam);
                 if (i == -2) { PostMessage(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero); return IntPtr.Zero; }
                 if (i == BAJO_COPIAR) { copiado = Copiar(copia); InvalidateRect(hWnd, IntPtr.Zero, false); return IntPtr.Zero; }
+                if (i <= BAJO_TONO && extras is { } exT && BAJO_TONO - i < exT.Tonos.Length)
+                {
+                    var tono = exT.Tonos[BAJO_TONO - i];
+                    if (tono != exT.TonoActual && exT.CambiarTono is { } cambiar) _ = Task.Run(() => { try { cambiar(tono); } catch { /* lo cuenta quien lo montó */ } });
+                    return IntPtr.Zero;
+                }
                 if (i <= BAJO_COMPRA && BAJO_COMPRA - i < compras.Length && AlAbrir is { } abrirCompra)
                 {
                     var rutaCompra = compras[BAJO_COMPRA - i].Ruta;
@@ -683,6 +918,13 @@ internal static class PanelCartas
                 {
                     var b = bloques[i];
                     if (b.Titulo && i > 0) y += AIRE_ANTES_TITULO;
+                    if (b.Especial is { } especial && extras is { } ex)
+                    {
+                        if (y + b.Alto >= 0 && y < altoZona) PintarEspecial(zona, especial, ex, y, b.Alto, arriba, fTituloSec, fTexto);
+                        else if (especial == "tonos") for (var k = 0; k < rectTonos.Length; k++) rectTonos[k] = default;
+                        y += b.Alto + AIRE_PARRAFO;
+                        continue;
+                    }
                     if (b.Compras)
                     {
                         // Cada compra: miniatura a la izquierda y dos líneas al lado
@@ -727,26 +969,43 @@ internal static class PanelCartas
                         SetTextColor(zona, b.Titulo ? Rgb(252, 211, 77) : b.Enlace >= 0 ? (sobreEnlace ? Rgb(255, 255, 255) : Rgb(56, 189, 248)) : Rgb(226, 232, 240));
                         if (b.Vineta)
                         {
-                            var logoEnlace = b.Enlace >= 0 && b.Enlace < enlaces.Length ? enlaces[b.Enlace].Logo : null;
-                            var imgLogo = logoEnlace is not null ? Imagen(logoEnlace) : IntPtr.Zero;
-                            if (imgLogo != IntPtr.Zero)
-                            {
-                                IniciarGdiPlus();
-                                if (GdipCreateFromHDC(zona, out var gl) == 0 && gl != IntPtr.Zero)
-                                {
-                                    GdipSetInterpolationMode(gl, 7);
-                                    GdipDrawImageRectI(gl, imgLogo, MARGEN, y + 3, LADO_LOGO, LADO_LOGO);
-                                    GdipDeleteGraphics(gl);
-                                }
-                            }
-                            else
-                            {
-                                var rv = new RECT { Left = MARGEN, Top = y, Right = MARGEN + SANGRIA_VINETA, Bottom = y + b.Alto };
-                                DrawText(zona, b.Enlace >= 0 ? "›" : "•", -1, ref rv, DT_LEFT);
-                            }
+                            var rv = new RECT { Left = MARGEN, Top = y, Right = MARGEN + SANGRIA_VINETA, Bottom = y + b.Alto };
+                            DrawText(zona, b.Enlace >= 0 ? "›" : "•", -1, ref rv, DT_LEFT);
                         }
-                        var rb = new RECT { Left = MARGEN + (b.Vineta ? SANGRIA_VINETA : 0), Top = y, Right = ANCHO_PANEL - MARGEN, Bottom = y + b.Alto };
-                        DrawText(zona, b.Texto, -1, ref rb, DT_LEFT | DT_WORDBREAK);
+                        var derecha = ANCHO_PANEL - MARGEN;
+                        if (b.Enlace >= 0 && b.Enlace < enlaces.Length)
+                        {
+                            // A la derecha: el logo del origen y, si lo hay, el autor con su avatar.
+                            var e = enlaces[b.Enlace];
+                            var imgLogoDer = e.Logo is not null ? Imagen(e.Logo) : IntPtr.Zero;
+                            var imgAvatar = e.Avatar is not null ? Imagen(e.Avatar) : IntPtr.Zero;
+                            IniciarGdiPlus();
+                            if (GdipCreateFromHDC(zona, out var gd) == 0 && gd != IntPtr.Zero)
+                            {
+                                GdipSetInterpolationMode(gd, 7);
+                                if (imgLogoDer != IntPtr.Zero) { derecha -= LADO_LOGO; GdipDrawImageRectI(gd, imgLogoDer, derecha, y + 3, LADO_LOGO, LADO_LOGO); derecha -= 10; }
+                                if (e.Autor is { Length: > 0 })
+                                {
+                                    var fAutor = CreateFont(15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+                                    var anteriorAutor = SelectObject(zona, fAutor);
+                                    SetTextColor(zona, Rgb(148, 163, 184));
+                                    var rMed = new RECT();
+                                    DrawText(zona, e.Autor, -1, ref rMed, DT_CALCRECT | DT_SINGLELINE);
+                                    var anchoAutor = Math.Min(ANCHO_AUTOR, rMed.Right - rMed.Left);
+                                    var ra = new RECT { Left = derecha - anchoAutor, Top = y + 2, Right = derecha, Bottom = y + 2 + LADO_AVATAR };
+                                    DrawText(zona, e.Autor, -1, ref ra, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                                    derecha -= anchoAutor + 6;
+                                    if (imgAvatar != IntPtr.Zero) { derecha -= LADO_AVATAR; GdipDrawImageRectI(gd, imgAvatar, derecha, y + 2, LADO_AVATAR, LADO_AVATAR); derecha -= 6; }
+                                    SelectObject(zona, anteriorAutor); DeleteObject(fAutor);
+                                    SelectObject(zona, fTexto);
+                                    SetTextColor(zona, sobreEnlace ? Rgb(255, 255, 255) : Rgb(56, 189, 248));
+                                }
+                                GdipDeleteGraphics(gd);
+                            }
+                            derecha -= 8;
+                        }
+                        var rb = new RECT { Left = MARGEN + (b.Vineta ? SANGRIA_VINETA : 0), Top = y, Right = derecha, Bottom = y + b.Alto };
+                        DrawText(zona, b.Texto, -1, ref rb, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
                     }
                     y += b.Alto + AIRE_PARRAFO;
                 }
