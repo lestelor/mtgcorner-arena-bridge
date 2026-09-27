@@ -1091,6 +1091,16 @@ internal static class Textos
             "{0} decks are waiting for your OK: the review page is opening in your browser.", "{0} mazos esperan tu visto bueno: se abre la página de revisión en el navegador.", "{0} Decks warten auf dein OK: die Prüfseite öffnet sich im Browser.", "{0} decks attendent votre accord : la page de vérification s'ouvre dans le navigateur.",
             "{0} baralhos esperam a tua aprovação: a página de revisão abre-se no navegador.", "{0} mazzi aspettano il tuo OK: la pagina di revisione si apre nel browser.", "{0} 個のデッキが確認待ちです。ブラウザーで確認ページを開きます。", "{0} 副套牌等待你的确认：正在浏览器中打开审核页面。",
         ],
+        ["res_compras"] =
+        [
+            "Where to buy (best price we know; click to compare)", "Dónde comprar (mejor precio que conocemos; pulsa para comparar)", "Wo kaufen (bester bekannter Preis; klicken zum Vergleichen)", "Où acheter (meilleur prix connu ; cliquez pour comparer)",
+            "Onde comprar (melhor preço que conhecemos; clica para comparar)", "Dove comprare (miglior prezzo che conosciamo; clicca per confrontare)", "購入先（把握している最安値。クリックで比較）", "购买渠道（我们已知的最低价；点击比价）",
+        ],
+        ["res_compras_ver"] =
+        [
+            "see prices", "ver precios", "Preise ansehen", "voir les prix",
+            "ver preços", "vedi prezzi", "価格を見る", "查看价格",
+        ],
         ["col_esta_carta"] =
         [
             "this card", "esta carta", "diese Karte", "cette carte",

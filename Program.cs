@@ -420,13 +420,29 @@ internal static class Program
         {
             using var h = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(1) };
             h.DefaultRequestHeaders.Add("X-Bridge-Version", VersionPropia);
+            // Con nombres («Thassa's Oracle,Demonic Consultation») o, si el primer
+            // argumento son arena_ids separados por comas, con `ids=` y `vistas=`
+            // como manda el residente. Y el aviso con miniaturas, como en partida.
             var nombresMesa = args.Length > 1 ? string.Join(",", args.Skip(1)) : "Thassa's Oracle,Demonic Consultation";
+            var porIds = args.Length > 1 && args[1].All(ch => char.IsDigit(ch) || ch == ',');
             try
             {
-                var r = await h.GetFromJsonAsync<RespuestaAmenazas>($"{PuertaDevice}/amenazas?nombres={Uri.EscapeDataString(nombresMesa)}&idioma={Textos.Idioma}", JsonOpciones);
+                var consulta = porIds
+                    ? $"{PuertaDevice}/amenazas?ids={Uri.EscapeDataString(args[1])}&vistas={Uri.EscapeDataString(args[1])}&idioma={Textos.Idioma}&formato=standard"
+                    : $"{PuertaDevice}/amenazas?nombres={Uri.EscapeDataString(nombresMesa)}&idioma={Textos.Idioma}";
+                var r = await h.GetFromJsonAsync<RespuestaAmenazas>(consulta, JsonOpciones);
                 foreach (var c in r?.Listos ?? []) Console.WriteLine($"LISTO  {c.Resultado} | {string.Join(" + ", (c.Piezas ?? []).Select(p => p.Nombre + (p.EnMesa ? " (en mesa)" : "")))} | {c.Url}");
                 foreach (var c in (r?.Casi ?? []).Take(3)) Console.WriteLine($"CASI   {c.Resultado} | {string.Join(" + ", (c.Piezas ?? []).Select(p => p.Nombre + (p.EnMesa ? " (en mesa)" : "")))}");
-                Console.WriteLine($"({(r?.Listos ?? []).Length} listos, {(r?.Casi ?? []).Length} casi)");
+                foreach (var g in r?.Sinergias ?? []) Console.WriteLine($"SINERGIA {g.Regla} | {string.Join(" + ", (g.Cartas ?? []).Select(c => c.Nombre + " [" + c.Papel + (c.EnMesa ? ", en mesa" : "") + "]"))}");
+                Console.WriteLine($"({(r?.Listos ?? []).Length} listos, {(r?.Casi ?? []).Length} casi, {(r?.Sinergias ?? []).Length} sinergias)");
+                if ((r?.Sinergias ?? []).FirstOrDefault(g => g.Cartas is { Length: >= 2 }) is { } g2)
+                {
+                    var cartasSin = (g2.Cartas ?? []).OrderByDescending(c => c.EnMesa).Take(4).ToArray();
+                    var minis = await Task.WhenAll(cartasSin.Select(c => BajarImagen(c.Imagen)));
+                    Console.WriteLine($"miniaturas bajadas: {minis.Count(f => f is not null)} de {cartasSin.Length}");
+                    Superposicion.Mostrar(Textos.T("sup_titulo"), Textos.T("sup_sinergia_rival", NombreRegla(g2.Regla), string.Join(" + ", cartasSin.Select(c => c.Nombre))), 8,
+                        minis.Where(f => f is not null).Select(f => f!).ToArray());
+                }
             }
             catch (Exception ex) { Console.WriteLine("EXCEPCIÓN: " + ex.Message); }
             return 0;
@@ -439,7 +455,7 @@ internal static class Program
             // visible aunque Arena no esté delante.
             var d = JsonSerializer.Deserialize<RespuestaResumen>(File.ReadAllText(args[1]), JsonOpciones)!;
             PanelCartas.SiempreVisible = true;
-            EnsenarResumen(d);
+            await EnsenarResumen(d);
             await Task.Delay(TimeSpan.FromSeconds(10));
             PanelCartas.Cerrar();
             return 0;
@@ -1303,7 +1319,7 @@ internal static class Program
     /// <summary>El resumen ya pedido de ESA partida: al reabrir el panel se enseña sin otra consulta (pedido del usuario el 2026-09-26).</summary>
     private static (Contexto.Partida Partida, RespuestaResumen Resumen)? resumenListo;
 
-    private static void EnsenarResumen(RespuestaResumen d)
+    private static async Task EnsenarResumen(RespuestaResumen d)
     {
         var secciones = (d.Secciones ?? [])
             .Where(s => s.Parrafos is { Length: > 0 })
@@ -1322,15 +1338,24 @@ internal static class Program
         var plano = string.Join("\r\n\r\n", secciones.Select(s => s.Titulo + "\r\n" + string.Join("\r\n", s.Parrafos.Select(p => s.Lista ? "• " + p : p))));
         if (enlaces.Length > 0)
             plano += "\r\n\r\n" + Textos.T("res_mazo_rival") + "\r\n" + string.Join("\r\n", enlaces.Select(e => "• " + e.Texto + " — " + Sitio + e.Ruta));
+        // Dónde comprar: las miniaturas se bajan antes de abrir el panel.
+        var candidatas = (d.Compras ?? []).Where(c => c.Nombre is { Length: > 0 } && c.Ruta is { Length: > 0 }).Take(3).ToArray();
+        var bajadas = await Task.WhenAll(candidatas.Select(async c => (Compra: c, Fichero: await BajarImagen(c.Imagen))));
+        var compras = bajadas.Where(b => b.Fichero is not null)
+            .Select(b => new PanelCartas.Compra(b.Compra.Nombre!, b.Fichero!, b.Compra.Ruta,
+                b.Compra.Precio is { Length: > 0 } precio ? (b.Compra.Tienda is { Length: > 0 } tienda ? $"{precio} · {tienda}" : precio) : Textos.T("res_compras_ver")))
+            .ToArray();
+        if (compras.Length > 0)
+            plano += "\r\n\r\n" + Textos.T("res_compras") + "\r\n" + string.Join("\r\n", compras.Select(c => "• " + c.Nombre + " — " + c.Etiqueta + " — " + Sitio + c.Ruta));
         PanelCartas.AlAbrir = AbrirDelPanel;
-        PanelCartas.MostrarTexto(Textos.T("col_resumen"), secciones, plano, enlaces, Textos.T("res_mazo_rival"));
+        PanelCartas.MostrarTexto(Textos.T("col_resumen"), secciones, plano, enlaces, Textos.T("res_mazo_rival"), compras, Textos.T("res_compras"));
     }
 
     private static async Task<bool> PanelResumen(HttpClient http)
     {
         var partida = partidaPendiente;
         if (partida is null) return false;
-        if (resumenListo is { } ya && ReferenceEquals(ya.Partida, partida)) { EnsenarResumen(ya.Resumen); return true; }
+        if (resumenListo is { } ya && ReferenceEquals(ya.Partida, partida)) { await EnsenarResumen(ya.Resumen); return true; }
         try
         {
             var envio = new PartidaEnvio(partida.Manos.Select(m => new ManoEnvio(m.Cartas, m.Aceptada)).ToArray(), partida.Formato, partida.Mazo, partida.Gane, partida.Razon,
@@ -1340,7 +1365,7 @@ internal static class Program
             var d = await r.Content.ReadFromJsonAsync<RespuestaResumen>(JsonOpciones);
             if (d is null || (d.Texto is not { Length: > 0 } && d.Secciones is not { Length: > 0 })) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_resumen_fallo")); return true; }
             resumenListo = (partida, d);
-            EnsenarResumen(d);
+            await EnsenarResumen(d);
             return true;
         }
         catch
@@ -2633,7 +2658,17 @@ internal sealed record GrupoSinergiaPuente(
 internal sealed record RespuestaResumen(
     [property: JsonPropertyName("texto")] string? Texto,
     [property: JsonPropertyName("secciones")] SeccionResumen[]? Secciones,
-    [property: JsonPropertyName("mazosRival")] MazoRivalPuente[]? MazosRival);
+    [property: JsonPropertyName("mazosRival")] MazoRivalPuente[]? MazosRival,
+    [property: JsonPropertyName("compras")] CompraPuente[]? Compras);
+
+/// <summary>Algo que comprar tras la partida (sellado de la edición o carta cara del rival), con su mejor precio y tienda.</summary>
+internal sealed record CompraPuente(
+    [property: JsonPropertyName("tipo")] string? Tipo,
+    [property: JsonPropertyName("nombre")] string? Nombre,
+    [property: JsonPropertyName("imagen")] string? Imagen,
+    [property: JsonPropertyName("precio")] string? Precio,
+    [property: JsonPropertyName("tienda")] string? Tienda,
+    [property: JsonPropertyName("ruta")] string? Ruta);
 
 /// <summary>Un mazo nuestro (del meta o de la gente) que se parece a lo que jugó el rival.</summary>
 internal sealed record MazoRivalPuente(

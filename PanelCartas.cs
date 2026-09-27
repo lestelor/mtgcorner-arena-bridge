@@ -195,7 +195,19 @@ internal static class PanelCartas
     /// <summary>Un enlace al final del texto: los mazos que pudo llevar el rival, que abren la web.</summary>
     public sealed record Enlace(string Texto, string Ruta);
 
-    private sealed record Bloque(string Texto, bool Titulo, bool Vineta, int Alto, int Enlace = -1);
+    /// <summary>
+    /// Algo que comprar tras la partida: miniatura, nombre y una etiqueta con
+    /// el mejor precio y su tienda. El clic abre el detalle en la web (el
+    /// comparador), nunca una tienda: decidido con el usuario el 2026-09-27.
+    /// </summary>
+    public sealed record Compra(string Nombre, string Fichero, string? Ruta, string Etiqueta);
+
+    private sealed record Bloque(string Texto, bool Titulo, bool Vineta, int Alto, int Enlace = -1, bool Compras = false);
+
+    private static Compra[] compras = [];
+    private static RECT[] rectCompras = [];
+    private const int BAJO_COMPRA = -100;   // la compra i está bajo el ratón: BAJO_COMPRA - i
+    private const int ANCHO_MINI_COMPRA = 60, ALTO_MINI_COMPRA = 84, ANCHO_FICHA_COMPRA = 236, AIRE_COMPRA = 12;
 
     private static Enlace[] enlaces = [];
     /// <summary>Dónde se pintó cada enlace en el último repintado (coordenadas de la ventana), para el ratón.</summary>
@@ -211,13 +223,15 @@ internal static class PanelCartas
     private const int BAJO_COPIAR = -3;
 
     /// <summary>Enseña el resumen por secciones. <paramref name="textoPlano"/> es lo que copia el botón.</summary>
-    public static void MostrarTexto(string tituloPanel, IReadOnlyList<SeccionTexto> secciones, string textoPlano, IReadOnlyList<Enlace>? conEnlaces = null, string? tituloEnlaces = null)
+    public static void MostrarTexto(string tituloPanel, IReadOnlyList<SeccionTexto> secciones, string textoPlano, IReadOnlyList<Enlace>? conEnlaces = null, string? tituloEnlaces = null, IReadOnlyList<Compra>? conCompras = null, string? tituloCompras = null)
     {
         Cerrar();
         titulo = tituloPanel;
         copia = textoPlano;
         enlaces = conEnlaces?.ToArray() ?? [];
         rectEnlaces = new RECT[enlaces.Length];
+        compras = (conCompras ?? []).Take(3).ToArray();
+        rectCompras = new RECT[compras.Length];
         copiado = false;
         desplazamiento = 0;
         huecos = [];
@@ -260,6 +274,16 @@ internal static class PanelCartas
                 DrawText(hdc, enlaces[i].Texto, -1, ref re, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
                 lista.Add(new Bloque(enlaces[i].Texto, false, true, re.Bottom - re.Top, i));
             }
+        }
+        // Las compras: su título y una fila de fichas con miniatura.
+        if (compras.Length > 0)
+        {
+            SelectObject(hdc, fTitulo);
+            var rt = new RECT { Left = 0, Top = 0, Right = ANCHO_PANEL - MARGEN * 2, Bottom = 0 };
+            var rotulo = tituloCompras ?? "";
+            DrawText(hdc, rotulo, -1, ref rt, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
+            lista.Add(new Bloque(rotulo, true, false, rt.Bottom - rt.Top));
+            lista.Add(new Bloque("", false, false, ALTO_MINI_COMPRA + 6, -1, true));
         }
         SelectObject(hdc, anterior); DeleteObject(fTitulo); DeleteObject(fTexto); ReleaseDC(IntPtr.Zero, hdc);
         bloques = lista.ToArray();
@@ -490,6 +514,9 @@ internal static class PanelCartas
             var rects = rectEnlaces;
             for (var i = 0; i < rects.Length; i++)
                 if (xr >= rects[i].Left && xr < rects[i].Right && yr >= rects[i].Top && yr < rects[i].Bottom) return BAJO_ENLACE - i;
+            var rc = rectCompras;
+            for (var i = 0; i < rc.Length; i++)
+                if (xr >= rc[i].Left && xr < rc[i].Right && yr >= rc[i].Top && yr < rc[i].Bottom) return BAJO_COMPRA - i;
         }
         var x = (short)(lParam.ToInt64() & 0xFFFF);
         var y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
@@ -544,6 +571,12 @@ internal static class PanelCartas
                 var i = QueHayEn(lParam);
                 if (i == -2) { PostMessage(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero); return IntPtr.Zero; }
                 if (i == BAJO_COPIAR) { copiado = Copiar(copia); InvalidateRect(hWnd, IntPtr.Zero, false); return IntPtr.Zero; }
+                if (i <= BAJO_COMPRA && BAJO_COMPRA - i < compras.Length && AlAbrir is { } abrirCompra)
+                {
+                    var rutaCompra = compras[BAJO_COMPRA - i].Ruta;
+                    if (rutaCompra is not null) _ = Task.Run(() => { try { abrirCompra(rutaCompra); } catch { /* lo cuenta quien lo montó */ } });
+                    return IntPtr.Zero;
+                }
                 if (i <= BAJO_ENLACE && BAJO_ENLACE - i < enlaces.Length && AlAbrir is { } abrirEnlace)
                 {
                     var rutaEnlace = enlaces[BAJO_ENLACE - i].Ruta;
@@ -635,6 +668,36 @@ internal static class PanelCartas
                 {
                     var b = bloques[i];
                     if (b.Titulo && i > 0) y += AIRE_ANTES_TITULO;
+                    if (b.Compras)
+                    {
+                        // Cada compra: miniatura a la izquierda y dos líneas al lado
+                        // (nombre, y precio con tienda). Se apunta su rectángulo en la
+                        // ventana para el ratón, y se pinta si asoma en la zona.
+                        IniciarGdiPlus();
+                        if (GdipCreateFromHDC(zona, out var gz) == 0 && gz != IntPtr.Zero)
+                        {
+                            GdipSetInterpolationMode(gz, 7);
+                            for (var c = 0; c < compras.Length; c++)
+                            {
+                                var x = MARGEN + c * (ANCHO_FICHA_COMPRA + AIRE_COMPRA);
+                                rectCompras[c] = new RECT { Left = x, Top = arriba + y, Right = x + ANCHO_FICHA_COMPRA, Bottom = arriba + y + ALTO_MINI_COMPRA };
+                                if (y + b.Alto < 0 || y >= altoZona) continue;
+                                var sobre = bajoRaton == BAJO_COMPRA - c;
+                                var img = Imagen(compras[c].Fichero);
+                                if (img != IntPtr.Zero) GdipDrawImageRectI(gz, img, x, y, ANCHO_MINI_COMPRA, ALTO_MINI_COMPRA);
+                                SelectObject(zona, fTexto);
+                                SetTextColor(zona, sobre ? Rgb(255, 255, 255) : Rgb(56, 189, 248));
+                                var rn = new RECT { Left = x + ANCHO_MINI_COMPRA + 8, Top = y + 4, Right = x + ANCHO_FICHA_COMPRA, Bottom = y + 4 + 44 };
+                                DrawText(zona, compras[c].Nombre, -1, ref rn, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
+                                SetTextColor(zona, Rgb(252, 211, 77));
+                                var rp = new RECT { Left = x + ANCHO_MINI_COMPRA + 8, Top = y + 54, Right = x + ANCHO_FICHA_COMPRA, Bottom = y + ALTO_MINI_COMPRA };
+                                DrawText(zona, compras[c].Etiqueta, -1, ref rp, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+                            }
+                            GdipDeleteGraphics(gz);
+                        }
+                        y += b.Alto + AIRE_PARRAFO;
+                        continue;
+                    }
                     if (b.Enlace >= 0 && b.Enlace < rectEnlaces.Length)
                     {
                         // Dónde queda en la ventana (la zona empieza en `arriba`), para el ratón.
