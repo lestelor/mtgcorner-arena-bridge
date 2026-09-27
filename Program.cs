@@ -1329,21 +1329,22 @@ internal static class Program
             .ToArray();
         if (secciones.Length == 0) secciones = [new PanelCartas.SeccionTexto(Textos.T("col_resumen"), [d.Texto ?? ""], false)];
         // Los mazos que pudo llevar el rival: enlaces a la página de cartas con ese mazo.
-        var enlaces = (d.MazosRival ?? [])
-            .Where(m => m.Nombre is { Length: > 0 } && m.Ruta is { Length: > 0 })
-            .Select(m => new PanelCartas.Enlace(
-                $"{m.Nombre} · {Textos.T("res_mazo_coinciden", m.Coincidencias)} · {Textos.T(m.Tipo == "meta" ? "res_mazo_meta" : "res_mazo_gente")}",
-                m.Ruta!)).ToArray();
+        var mazos = (d.MazosRival ?? []).Where(m => m.Nombre is { Length: > 0 } && m.Ruta is { Length: > 0 }).ToArray();
+        var logosMazos = await Task.WhenAll(mazos.Select(m => BajarImagen(m.Logo)));
+        var enlaces = mazos.Select((m, i) => new PanelCartas.Enlace(
+                $"{m.Nombre} · {Textos.T("res_mazo_coinciden", m.Coincidencias)} · {Textos.T(m.Tipo == "meta" ? "res_mazo_meta" : m.Tipo == "moxfield" ? "res_mazo_moxfield" : "res_mazo_gente")}",
+                m.Ruta!, logosMazos[i])).ToArray();
         // Lo que se copia: los títulos y sus párrafos, en plano; y los mazos, con su enlace.
         var plano = string.Join("\r\n\r\n", secciones.Select(s => s.Titulo + "\r\n" + string.Join("\r\n", s.Parrafos.Select(p => s.Lista ? "• " + p : p))));
         if (enlaces.Length > 0)
             plano += "\r\n\r\n" + Textos.T("res_mazo_rival") + "\r\n" + string.Join("\r\n", enlaces.Select(e => "• " + e.Texto + " — " + Sitio + e.Ruta));
         // Dónde comprar: las miniaturas se bajan antes de abrir el panel.
         var candidatas = (d.Compras ?? []).Where(c => c.Nombre is { Length: > 0 } && c.Ruta is { Length: > 0 }).Take(3).ToArray();
-        var bajadas = await Task.WhenAll(candidatas.Select(async c => (Compra: c, Fichero: await BajarImagen(c.Imagen))));
+        var bajadas = await Task.WhenAll(candidatas.Select(async c => (Compra: c, Fichero: await BajarImagen(c.Imagen), Logo: await BajarImagen(c.Logo))));
         var compras = bajadas.Where(b => b.Fichero is not null)
             .Select(b => new PanelCartas.Compra(b.Compra.Nombre!, b.Fichero!, b.Compra.Ruta,
-                b.Compra.Precio is { Length: > 0 } precio ? (b.Compra.Tienda is { Length: > 0 } tienda ? $"{precio} · {tienda}" : precio) : Textos.T("res_compras_ver")))
+                b.Compra.Precio is { Length: > 0 } precio ? (b.Compra.Tienda is { Length: > 0 } tienda ? $"{precio} · {tienda}" : precio) : Textos.T("res_compras_ver"),
+                b.Logo))
             .ToArray();
         if (compras.Length > 0)
             plano += "\r\n\r\n" + Textos.T("res_compras") + "\r\n" + string.Join("\r\n", compras.Select(c => "• " + c.Nombre + " — " + c.Etiqueta + " — " + Sitio + c.Ruta));
@@ -2668,6 +2669,7 @@ internal sealed record CompraPuente(
     [property: JsonPropertyName("imagen")] string? Imagen,
     [property: JsonPropertyName("precio")] string? Precio,
     [property: JsonPropertyName("tienda")] string? Tienda,
+    [property: JsonPropertyName("logo")] string? Logo,
     [property: JsonPropertyName("ruta")] string? Ruta);
 
 /// <summary>Un mazo nuestro (del meta o de la gente) que se parece a lo que jugó el rival.</summary>
@@ -2676,7 +2678,8 @@ internal sealed record MazoRivalPuente(
     [property: JsonPropertyName("tipo")] string? Tipo,
     [property: JsonPropertyName("coincidencias")] int Coincidencias,
     [property: JsonPropertyName("cartas")] string[]? Cartas,
-    [property: JsonPropertyName("ruta")] string? Ruta);
+    [property: JsonPropertyName("ruta")] string? Ruta,
+    [property: JsonPropertyName("logo")] string? Logo);
 
 internal sealed record SeccionResumen(
     [property: JsonPropertyName("clave")] string? Clave,

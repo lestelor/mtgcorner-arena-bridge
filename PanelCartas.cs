@@ -119,6 +119,7 @@ internal static class PanelCartas
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern IntPtr LoadCursor(IntPtr instancia, int cursor);
+    [DllImport("user32.dll")] private static extern IntPtr SetCursor(IntPtr cursor);
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr contexto);
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool OpenClipboard(IntPtr hWnd);
@@ -159,7 +160,8 @@ internal static class PanelCartas
     private const uint WS_POPUP = 0x80000000;
     private const uint WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000;
     private const uint WM_DESTROY = 0x2, WM_CLOSE = 0x10, WM_PAINT = 0xF, WM_TIMER = 0x113;
-    private const uint WM_MOUSEMOVE = 0x200, WM_LBUTTONUP = 0x202, WM_MOUSELEAVE = 0x2A3, WM_MOUSEACTIVATE = 0x21, WM_MOUSEWHEEL = 0x20A;
+    private const uint WM_MOUSEMOVE = 0x200, WM_LBUTTONUP = 0x202, WM_MOUSELEAVE = 0x2A3, WM_MOUSEACTIVATE = 0x21, WM_MOUSEWHEEL = 0x20A, WM_SETCURSOR = 0x20;
+    private const int IDC_HAND = 32649, IDC_ARROW = 32512;
     private const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_HIDEWINDOW = 0x80;
     private const uint LWA_ALPHA = 0x2, TME_LEAVE = 0x2;
     private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_WORDBREAK = 0x10, DT_SINGLELINE = 0x20, DT_CALCRECT = 0x400, DT_END_ELLIPSIS = 0x8000;
@@ -193,14 +195,15 @@ internal static class PanelCartas
     public sealed record SeccionTexto(string Titulo, IReadOnlyList<string> Parrafos, bool Lista);
 
     /// <summary>Un enlace al final del texto: los mazos que pudo llevar el rival, que abren la web.</summary>
-    public sealed record Enlace(string Texto, string Ruta);
+    public sealed record Enlace(string Texto, string Ruta, string? Logo = null);
 
     /// <summary>
     /// Algo que comprar tras la partida: miniatura, nombre y una etiqueta con
     /// el mejor precio y su tienda. El clic abre el detalle en la web (el
     /// comparador), nunca una tienda: decidido con el usuario el 2026-09-27.
     /// </summary>
-    public sealed record Compra(string Nombre, string Fichero, string? Ruta, string Etiqueta);
+    public sealed record Compra(string Nombre, string Fichero, string? Ruta, string Etiqueta, string? Logo = null);
+    private const int LADO_LOGO = 16, ANCHO_VISTA = 210, ALTO_VISTA = 294;
 
     private sealed record Bloque(string Texto, bool Titulo, bool Vineta, int Alto, int Enlace = -1, bool Compras = false);
 
@@ -542,6 +545,18 @@ internal static class PanelCartas
             case WM_MOUSEACTIVATE:
                 return new IntPtr(MA_NOACTIVATE);
 
+            // La mano sobre lo que se puede pulsar (cartas con ficha, rótulos con
+            // enlace, la X, «Copiar», los mazos y las compras); la flecha en el resto.
+            case WM_SETCURSOR:
+            {
+                var i = bajoRaton;
+                var lista = huecos;
+                var pulsable = i == -2 || i == BAJO_COPIAR || i <= BAJO_ENLACE
+                    || (i >= 0 && i < lista.Length && (lista[i].Carta?.Ruta ?? lista[i].Seccion.Ruta) is not null);
+                SetCursor(LoadCursor(IntPtr.Zero, pulsable ? IDC_HAND : IDC_ARROW));
+                return new IntPtr(1);
+            }
+
             case WM_MOUSEMOVE:
             {
                 var i = QueHayEn(lParam);
@@ -690,7 +705,9 @@ internal static class PanelCartas
                                 var rn = new RECT { Left = x + ANCHO_MINI_COMPRA + 8, Top = y + 4, Right = x + ANCHO_FICHA_COMPRA, Bottom = y + 4 + 44 };
                                 DrawText(zona, compras[c].Nombre, -1, ref rn, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
                                 SetTextColor(zona, Rgb(252, 211, 77));
-                                var rp = new RECT { Left = x + ANCHO_MINI_COMPRA + 8, Top = y + 54, Right = x + ANCHO_FICHA_COMPRA, Bottom = y + ALTO_MINI_COMPRA };
+                                var conLogo = compras[c].Logo is not null && Imagen(compras[c].Logo!) != IntPtr.Zero;
+                                if (conLogo) GdipDrawImageRectI(gz, Imagen(compras[c].Logo!), x + ANCHO_MINI_COMPRA + 8, y + 56, LADO_LOGO, LADO_LOGO);
+                                var rp = new RECT { Left = x + ANCHO_MINI_COMPRA + 8 + (conLogo ? LADO_LOGO + 5 : 0), Top = y + 54, Right = x + ANCHO_FICHA_COMPRA, Bottom = y + ALTO_MINI_COMPRA };
                                 DrawText(zona, compras[c].Etiqueta, -1, ref rp, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
                             }
                             GdipDeleteGraphics(gz);
@@ -710,8 +727,23 @@ internal static class PanelCartas
                         SetTextColor(zona, b.Titulo ? Rgb(252, 211, 77) : b.Enlace >= 0 ? (sobreEnlace ? Rgb(255, 255, 255) : Rgb(56, 189, 248)) : Rgb(226, 232, 240));
                         if (b.Vineta)
                         {
-                            var rv = new RECT { Left = MARGEN, Top = y, Right = MARGEN + SANGRIA_VINETA, Bottom = y + b.Alto };
-                            DrawText(zona, b.Enlace >= 0 ? "›" : "•", -1, ref rv, DT_LEFT);
+                            var logoEnlace = b.Enlace >= 0 && b.Enlace < enlaces.Length ? enlaces[b.Enlace].Logo : null;
+                            var imgLogo = logoEnlace is not null ? Imagen(logoEnlace) : IntPtr.Zero;
+                            if (imgLogo != IntPtr.Zero)
+                            {
+                                IniciarGdiPlus();
+                                if (GdipCreateFromHDC(zona, out var gl) == 0 && gl != IntPtr.Zero)
+                                {
+                                    GdipSetInterpolationMode(gl, 7);
+                                    GdipDrawImageRectI(gl, imgLogo, MARGEN, y + 3, LADO_LOGO, LADO_LOGO);
+                                    GdipDeleteGraphics(gl);
+                                }
+                            }
+                            else
+                            {
+                                var rv = new RECT { Left = MARGEN, Top = y, Right = MARGEN + SANGRIA_VINETA, Bottom = y + b.Alto };
+                                DrawText(zona, b.Enlace >= 0 ? "›" : "•", -1, ref rv, DT_LEFT);
+                            }
                         }
                         var rb = new RECT { Left = MARGEN + (b.Vineta ? SANGRIA_VINETA : 0), Top = y, Right = ANCHO_PANEL - MARGEN, Bottom = y + b.Alto };
                         DrawText(zona, b.Texto, -1, ref rb, DT_LEFT | DT_WORDBREAK);
@@ -721,6 +753,22 @@ internal static class PanelCartas
                 BitBlt(hdc, 0, arriba, ANCHO_PANEL, altoZona, zona, 0, 0, SRCCOPY);
                 SelectObject(zona, zonaAnterior); DeleteObject(lienzoZona); DeleteDC(zona);
                 DeleteObject(fTituloSec); DeleteObject(fTexto);
+
+                // LA CARTA GRANDE al pasar el ratón por una compra: encima de
+                // todo, al lado de su ficha (a la derecha si cabe, si no a la
+                // izquierda), sin salirse del panel.
+                if (bajoRaton <= BAJO_COMPRA && BAJO_COMPRA - bajoRaton < compras.Length && BAJO_COMPRA - bajoRaton < rectCompras.Length)
+                {
+                    var c = BAJO_COMPRA - bajoRaton;
+                    var img = Imagen(compras[c].Fichero);
+                    if (img != IntPtr.Zero && grafico != IntPtr.Zero)
+                    {
+                        var rc = rectCompras[c];
+                        var vx = rc.Right + 8 + ANCHO_VISTA <= ANCHO_PANEL - MARGEN ? rc.Right + 8 : Math.Max(MARGEN, rc.Left - 8 - ANCHO_VISTA);
+                        var vy = Math.Clamp(rc.Top + (rc.Bottom - rc.Top) / 2 - ALTO_VISTA / 2, ALTO_CABECERA, Math.Max(ALTO_CABECERA, alto - ALTO_PIE - MARGEN - ALTO_VISTA));
+                        GdipDrawImageRectI(grafico, img, vx, vy, ANCHO_VISTA, ALTO_VISTA);
+                    }
+                }
 
                 // El botón «Copiar» / «Copiado» en el pie, a la derecha.
                 var rBoton = RectBotonCopiar();

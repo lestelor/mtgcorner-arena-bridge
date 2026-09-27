@@ -1101,6 +1101,11 @@ internal static class Textos
             "see prices", "ver precios", "Preise ansehen", "voir les prix",
             "ver preços", "vedi prezzi", "価格を見る", "查看价格",
         ],
+        ["res_mazo_moxfield"] =
+        [
+            "Moxfield deck", "mazo de Moxfield", "Moxfield-Deck", "deck Moxfield",
+            "baralho do Moxfield", "mazzo di Moxfield", "Moxfield のデッキ", "Moxfield 套牌",
+        ],
         ["col_esta_carta"] =
         [
             "this card", "esta carta", "diese Karte", "cette carte",

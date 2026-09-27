@@ -102,6 +102,10 @@ internal static class Columna
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr contexto);
 
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int ancho, int alto);
+    [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] private static extern bool BitBlt(IntPtr destino, int x, int y, int ancho, int alto, IntPtr origen, int x1, int y1, uint op);
     [DllImport("gdi32.dll")] private static extern int IntersectClipRect(IntPtr hdc, int izq, int arriba, int der, int abajo);
     [DllImport("gdi32.dll")] private static extern int SelectClipRgn(IntPtr hdc, IntPtr region);
     [DllImport("gdi32.dll")] private static extern bool Ellipse(IntPtr hdc, int izq, int arriba, int der, int abajo);
@@ -123,7 +127,7 @@ internal static class Columna
 
     private const uint WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000;
     private const uint WS_POPUP = 0x80000000;
-    private const uint WM_DESTROY = 0x2, WM_PAINT = 0xF, WM_CLOSE = 0x10, WM_MOUSEACTIVATE = 0x21, WM_TIMER = 0x113;
+    private const uint WM_DESTROY = 0x2, WM_PAINT = 0xF, WM_ERASEBKGND = 0x14, WM_CLOSE = 0x10, WM_MOUSEACTIVATE = 0x21, WM_TIMER = 0x113;
     private const uint WM_MOUSEMOVE = 0x200, WM_LBUTTONUP = 0x202, WM_MOUSELEAVE = 0x2A3;
     private const int MA_NOACTIVATE = 3;
     private const int SW_HIDE = 0, SW_SHOWNOACTIVATE = 4;
@@ -514,6 +518,11 @@ internal static class Columna
                 Pintar(hWnd);
                 return IntPtr.Zero;
 
+            // Sin borrado de fondo: el doble búfer de Pintar cubre la ventana
+            // entera, y borrar antes es justo el fogonazo que se veía.
+            case WM_ERASEBKGND:
+                return new IntPtr(1);
+
             case WM_TIMER:
                 if (wParam.ToInt64() == 2)
                 {
@@ -601,8 +610,16 @@ internal static class Columna
     /// </summary>
     private static void Pintar(IntPtr hWnd)
     {
-        var hdc = BeginPaint(hWnd, out var ps);
+        var pantalla = BeginPaint(hWnd, out var ps);
         var ancho = abierta ? anchoAbierta : ANCHO_CERRADA;
+        // DOBLE BÚFER: todo se pinta en un mapa de bits y se vuelca de una vez.
+        // Pintando directo, al abrirse la columna (cambia de ancho y se repinta
+        // entera) y con el visor repintando cada 40 ms se veía el fondo un
+        // instante antes que los iconos: «un parpadeo del menú» (el usuario,
+        // 2026-09-27). Y WM_ERASEBKGND no borra nada (ver Procedimiento).
+        var hdc = CreateCompatibleDC(pantalla);
+        var lienzo = CreateCompatibleBitmap(pantalla, Math.Max(1, ancho), Math.Max(1, Alto));
+        var lienzoAnterior = SelectObject(hdc, lienzo);
         var fondo = CreateSolidBrush(Rgb(9, 13, 24));
         var resalte = CreateSolidBrush(Rgb(26, 34, 54));
         var separador = CreateSolidBrush(Rgb(148, 163, 184));
@@ -706,6 +723,10 @@ internal static class Columna
         }
         finally
         {
+            BitBlt(pantalla, 0, 0, ancho, Alto, hdc, 0, 0, 0x00CC0020 /* SRCCOPY */);
+            SelectObject(hdc, lienzoAnterior);
+            DeleteObject(lienzo);
+            DeleteDC(hdc);
             EndPaint(hWnd, ref ps);
             DeleteObject(fondo);
             DeleteObject(resalte);
