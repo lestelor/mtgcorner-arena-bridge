@@ -549,6 +549,20 @@ internal static class Program
             PanelCartas.Cerrar();
             return 0;
         }
+        if (args.Length > 0 && args[0] == "--probar-consejo")
+        {
+            // Una mesa de ejemplo con cartas de Mono-White Auras: turno 3, dos
+            // Llanuras sin girar y un rival con una criatura.
+            var vinculoC = Vinculo.Leer();
+            using var httpC = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(2) };
+            if (vinculoC is not null) httpC.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoC.Token);
+            var mesaC = new Contexto.Mesa(3, [58437, 92081, 51307, 91549, 92073],
+                [new(58437, false, true), new(58437, false, true), new(92089, false, false)], [new(93838, false, false)], 20, 18);
+            Console.WriteLine($"competitivo «Qualifier_Weekend»: {EventoCompetitivo("Qualifier_Weekend")} · «Ladder»: {EventoCompetitivo("Ladder")}");
+            await ConsejoTurno(httpC, mesaC);
+            await Task.Delay(TimeSpan.FromSeconds(args.Contains("--sin-ventana") ? 1 : 26));
+            return 0;
+        }
         if (args.Length > 0 && (args[0] == "--probar-rastreador" || args[0] == "--probar-mulligan"))
         {
             // El mazo del último registro, como en el residente, y luego el
@@ -581,7 +595,7 @@ internal static class Program
                     Console.WriteLine($"{t} tierras, {m} mulligans: {TextoMulligan(Mano(t), t, m, mazoP, "prueba")}");
                 // --sin-ventana: sólo la consola (para probar con una partida en marcha).
                 if (args.Contains("--sin-ventana")) return 0;
-                Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), TextoMulligan(Mano(2), 2, 0, mazoP, "prueba"), 15);
+                Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), TextoMulligan(Mano(2), 2, 0, mazoP, "prueba"), 15, importante: true);
                 await Task.Delay(TimeSpan.FromSeconds(16));
                 return 0;
             }
@@ -590,12 +604,16 @@ internal static class Program
             foreach (var c in listaP.Where(c => !c.Tierra).Take(5)) fueraP[c.Grp] = Math.Min(c.N, c.Grp % 2 == 0 ? 1 : c.N);
             foreach (var c in listaP.Where(c => c.Tierra).Take(1)) fueraP[c.Grp] = 2;
             var tamP = mazoP.Sum(c => c.N) - fueraP.Values.Sum();
-            Rastreador.SiempreVisible = true;
-            Rastreador.Actualizar(listaP.Select(c => new Rastreador.Fila(c.Grp, c.Nombre, c.N - fueraP.GetValueOrDefault(c.Grp), c.N, c.Cmc, c.Tierra, c.Arte)).ToArray(), tamP);
-            Rastreador.Activo(true);
-            Console.WriteLine($"rastreador de prueba: biblioteca {tamP}, 25 s");
+            Columna.SiempreVisible = true;
+            Columna.ForzarAbierta = true;
+            Columna.Iniciar((a, d) => { Console.WriteLine($"pulsado: {a} {d}"); return Task.CompletedTask; }, ArrancaSolo);
+            await Task.Delay(500);
+            Columna.FilasDeContexto((Columna.Accion.Mano, "mano", Textos.T("col_mano", "Quédatela")));
+            Columna.Destacar("mano");
+            Columna.Rastreo(listaP.Select(c => c with { N = c.N - fueraP.GetValueOrDefault(c.Grp) }).ToArray(), tamP);
+            Console.WriteLine($"rastreador de prueba en la columna: biblioteca {tamP}, 25 s");
             await Task.Delay(TimeSpan.FromSeconds(25));
-            Rastreador.Cerrar();
+            Columna.Cerrar();
             return 0;
         }
         if (args.Length > 0 && args[0] == "--probar-resumen")
@@ -622,7 +640,9 @@ internal static class Program
             PanelCartas.SiempreVisible = true;
             var cual = args.Length > 1 ? args[1] : "91550";
             Console.WriteLine($"Panel de similares de {cual}...");
-            Console.WriteLine(await PanelRelacionadas(httpPanel, cual, args.Length > 2 ? args[2] : "similares") ? "ensenado" : "no se pudo");
+            // --zoom: la carta de la cabecera, grande, sin tener que poner el ratón encima.
+            PanelCartas.ZoomDePrueba = args.Contains("--zoom");
+            Console.WriteLine(await PanelRelacionadas(httpPanel, cual, args.Length > 2 && !args[2].StartsWith("--") ? args[2] : "similares") ? "ensenado" : "no se pudo");
             await Task.Delay(TimeSpan.FromSeconds(40));
             PanelCartas.Cerrar();
             return 0;
@@ -643,6 +663,7 @@ internal static class Program
             // La biblioteca (rastreador) y las manos ofrecidas (consejo de mulligan).
             Contexto.BibliotecaCambio += () => Console.WriteLine($"BIBLIOTECA {Contexto.BibliotecaTam}  fuera=[{string.Join(",", Contexto.FueraDeBiblioteca.Select(kv => $"{kv.Key}x{kv.Value}"))}]");
             Contexto.ManoNueva += (cartas, tierras, mulligans) => Console.WriteLine($"MANO OFRECIDA [{string.Join(",", cartas)}] tierras={tierras} mulligans={mulligans}");
+            Contexto.MiFasePrincipal += m => Console.WriteLine($"FASE PRINCIPAL T{m.Turno} mano=[{string.Join(",", m.Mano)}] mía=[{string.Join(",", m.Mia.Select(c => c.Grp + (c.Girada ? "g" : "")))}] rival=[{string.Join(",", m.DelRival.Select(c => c.Grp + (c.Girada ? "g" : "")))}] vidas {m.VidaYo}/{m.VidaRival}");
             // Con un segundo argumento se vigila otro fichero (un Player-prev.log
             // con partidas acabadas, para probar la cronología sin jugar una).
             Contexto.Iniciar(args.Length > 1 ? args[1] : Path.Combine(LogArena.Carpeta(), "Player.log"));
@@ -1031,6 +1052,18 @@ internal static class Program
                         }
                     }
                     break;
+                case Columna.Accion.Mano:
+                    if (manoAviso is { } maPulsada) Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), maPulsada.Texto, 20, importante: true);
+                    break;
+                case Columna.Accion.Consejo:
+                    // Encender o apagar el consejo de cada turno (experimental).
+                    consejoActivo = !consejoActivo;
+                    GuardarAjustes();
+                    // La fila de partida lleva el rótulo dentro: se rehace.
+                    refrescarColumna?.Invoke();
+                    Columna.Refrescar();
+                    Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T(consejoActivo ? "consejo_activado" : "consejo_desactivado"), 10);
+                    break;
                 case Columna.Accion.Estadisticas:
                     Columna.EnCurso("estadisticas");
                     try { await PanelEstadisticas(http); }
@@ -1098,6 +1131,8 @@ internal static class Program
         void ActualizarColumna()
         {
             var filas = new List<(Columna.Accion, string, string)>();
+            // La mano ofrecida, mientras decides (ver ConsejoMulligan).
+            if (manoAviso is { } ma && Contexto.EnPartida && DateTime.UtcNow < ma.Hasta) filas.Add((Columna.Accion.Mano, "mano", ma.Corto));
             if (Contexto.Mazo is { } mazo) filas.Add((Columna.Accion.Mejorar, mazo, Textos.T("col_mejorar", mazo)));
             if (Contexto.Carta is { } grp)
             {
@@ -1166,6 +1201,9 @@ internal static class Program
             // empieza la siguiente.
             if (partidaPendiente is not null && !Contexto.EnPartida) filas.Add((Columna.Accion.Resumen, "resumen", Textos.T("col_resumen")));
             // MODO COMPACTO: en partida, sólo lo del momento; al acabar vuelven las de siempre.
+            // EL INTERRUPTOR DEL CONSEJO, TAMBIÉN EN PARTIDA: con partida la columna sólo
+            // enseña las filas del momento, y es justo cuando se quiere encender o apagar.
+            if (Contexto.EnPartida) filas.Add((Columna.Accion.Consejo, "consejo", Textos.T(consejoActivo ? "col_consejo_si" : "col_consejo_no")));
             Columna.SoloContexto(Contexto.EnPartida && filas.Count > 0);
             Columna.FilasDeContexto(filas.ToArray());
         }
@@ -1231,6 +1269,7 @@ internal static class Program
             }
         }
         httpResidente = http;
+        refrescarColumna = ActualizarColumna;
         Contexto.Cambio += ActualizarColumna;
         // Las cartas del mazo de ahora, para el desplegable «Mejorar» (ver CargarCartasMazo).
         Contexto.Cambio += () => _ = CargarCartasMazo(http);
@@ -1242,6 +1281,12 @@ internal static class Program
         Contexto.BibliotecaCambio += ActualizarRastreador;
         Contexto.Cambio += ActualizarRastreador;
         Contexto.ManoNueva += ConsejoMulligan;
+        // El consejo de cada turno, si está encendido (ver ConsejoTurno).
+        consejoActivo = LeerAjustes().Consejo;
+        Columna.ConsejoActivo = () => consejoActivo;
+        Contexto.MiFasePrincipal += mesa => { if (consejoActivo) _ = ConsejoTurno(http, mesa); };
+        // Empieza tu primer turno: la fila de la mano ya no hace falta.
+        Contexto.MiFasePrincipal += _ => { if (manoAviso is not null) { manoAviso = null; Columna.Olvidar("mano"); refrescarColumna?.Invoke(); } };
         Contexto.PartidaAcabada += ApuntarMano;
         Contexto.Cambio += () => VigilarAmenazas(http, ActualizarColumna);
         _ = Task.Run(async () => { try { if (await BuscarVersionNueva() is not null) Columna.Destacar("version"); } catch { /* sin red */ } });
@@ -1600,24 +1645,92 @@ internal static class Program
     private static List<Columna.CartaMazo> cartasDelMazoActual = [];
 
     /// <summary>
-    /// EL RASTREADOR EN PARTIDA (ver Rastreador.cs): cada carta del mazo con
-    /// las que quedan —las del mazo menos las tuyas que ya han salido de la
-    /// biblioteca— y el tamaño de la biblioteca. Fuera de partida, se esconde.
+    /// EL RASTREADOR EN PARTIDA, DENTRO DE LA COLUMNA (ver Columna.Rastreo):
+    /// cada carta del mazo con las que quedan —las del mazo menos las tuyas que
+    /// ya han salido de la biblioteca— y el tamaño de la biblioteca. Fuera de
+    /// partida, nada.
     /// </summary>
     private static void ActualizarRastreador()
     {
         var mazo = Contexto.CartasMazo;
         var datos = cartasDelMazoActual;
-        if (!Contexto.EnPartida || mazo.Length == 0 || datos.Count == 0) { Rastreador.Activo(false); return; }
+        if (!Contexto.EnPartida || mazo.Length == 0 || datos.Count == 0) { Columna.Rastreo([], 0); return; }
         var porGrp = datos.GroupBy(c => c.Grp).ToDictionary(g => g.Key, g => g.First());
         var fuera = Contexto.FueraDeBiblioteca;
-        var filas = mazo.Where(c => porGrp.ContainsKey(c.Grp)).Select(c =>
+        Columna.Rastreo(mazo.Where(c => porGrp.ContainsKey(c.Grp))
+            .Select(c => porGrp[c.Grp] with { N = c.N - fuera.GetValueOrDefault(c.Grp) }).ToArray(), Contexto.BibliotecaTam);
+    }
+
+    // ── EL CONSEJO DE CADA TURNO, EXPERIMENTAL (pedido el 2026-10-03) ────
+    //
+    // «Recomendar en cada tirada lo que hay que hacer… como experimental».
+    // Apagado de salida; se enciende desde la columna y se recuerda en
+    // ajustes.json. Al empezar tu primera fase principal se manda la mesa a la
+    // web (/api/mtga-device/consejo), que calcula qué cabe con tu maná y pide a
+    // la IA la jugada; sale en un aviso. NUNCA pulsa nada por ti, y NO se pide
+    // en eventos competitivos (Arena Open, clasificatorios, campeonatos), donde
+    // la ayuda externa durante la partida está prohibida.
+
+    private static volatile bool consejoActivo;
+
+    internal sealed record Ajustes(bool Consejo);
+    private static string FicheroAjustes => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MtgCornerArenaBridge", "ajustes.json");
+
+    private static Ajustes LeerAjustes()
+    {
+        try { return JsonSerializer.Deserialize<Ajustes>(File.ReadAllText(FicheroAjustes), JsonOpciones) ?? new Ajustes(false); }
+        catch { return new Ajustes(false); }
+    }
+
+    private static void GuardarAjustes()
+    {
+        try
         {
-            var d = porGrp[c.Grp];
-            return new Rastreador.Fila(c.Grp, d.Nombre, c.N - fuera.GetValueOrDefault(c.Grp), c.N, d.Cmc, d.Tierra, d.Arte);
-        }).ToArray();
-        Rastreador.Actualizar(filas, Contexto.BibliotecaTam);
-        Rastreador.Activo(true);
+            Directory.CreateDirectory(Path.GetDirectoryName(FicheroAjustes)!);
+            File.WriteAllText(FicheroAjustes, JsonSerializer.Serialize(new Ajustes(consejoActivo), JsonOpciones));
+        }
+        catch { /* sin guardar, vale para esta sesión */ }
+    }
+
+    /// <summary>¿Es un evento competitivo? Ahí no se aconseja: lo prohíben sus reglas.</summary>
+    internal static bool EventoCompetitivo(string? evento) =>
+        evento is { Length: > 0 } e && new[] { "qualifier", "championship", "arenaopen", "arena_open", "playin" }.Any(x => e.Contains(x, StringComparison.OrdinalIgnoreCase));
+
+    internal sealed record RespuestaConsejo(
+        [property: System.Text.Json.Serialization.JsonPropertyName("jugables")] string[]? Jugables,
+        [property: System.Text.Json.Serialization.JsonPropertyName("mana")] int Mana,
+        [property: System.Text.Json.Serialization.JsonPropertyName("jugada")] string? Jugada,
+        [property: System.Text.Json.Serialization.JsonPropertyName("ataque")] string? Ataque,
+        [property: System.Text.Json.Serialization.JsonPropertyName("por_que")] string? PorQue);
+
+    /// <summary>Pide el consejo de este turno y lo enseña encima del juego.</summary>
+    private static async Task ConsejoTurno(HttpClient http, Contexto.Mesa mesa)
+    {
+        if (EventoCompetitivo(Contexto.Evento) || mesa.Mano.Length == 0) return;
+        try
+        {
+            var cuerpo = new
+            {
+                idioma = Textos.Idioma,
+                formato = Contexto.Formato,
+                turno = mesa.Turno,
+                vidaYo = mesa.VidaYo,
+                vidaRival = mesa.VidaRival,
+                mano = mesa.Mano,
+                mia = mesa.Mia.Select(c => new { grp = c.Grp, girada = c.Girada, tierra = c.Tierra }),
+                rival = mesa.DelRival.Select(c => new { grp = c.Grp, girada = c.Girada }),
+            };
+            var r = await http.PostAsJsonAsync($"{PuertaDevice}/consejo", cuerpo, JsonOpciones);
+            if (!r.IsSuccessStatusCode) return;
+            var d = await r.Content.ReadFromJsonAsync<RespuestaConsejo>(JsonOpciones);
+            if (d is null) return;
+            var texto = string.Join(" ", new[] { d.Jugada, d.Ataque, d.PorQue is { Length: > 0 } pq ? "— " + pq : null }.Where(t => t is { Length: > 0 }));
+            // Sin IA, al menos lo que se puede jugar con el maná de este turno.
+            if (texto.Length == 0 && d.Jugables is { Length: > 0 } j) texto = Textos.T("consejo_jugables", string.Join(", ", j), d.Mana);
+            if (texto.Length == 0) return;
+            Superposicion.MostrarSinEsperar(Textos.T("consejo_titulo", mesa.Turno), texto, 25, importante: true);
+        }
+        catch { /* sin consejo este turno */ }
     }
 
     // ── EL CONSEJO DE MULLIGAN (pedido del usuario el 2026-10-03) ─────────
@@ -1655,11 +1768,27 @@ internal static class Program
         catch { /* sin historial, el consejo sigue con la probabilidad */ }
     }
 
-    /// <summary>Arena te ofrece una mano: el consejo, encima del juego.</summary>
+    /// <summary>
+    /// EL CONSEJO DE LA MANO, TAMBIÉN EN LA COLUMNA: una fila «Mano: Quédatela»
+    /// en ámbar mientras decides (hasta tu primer turno o noventa segundos), que
+    /// al pulsarla vuelve a enseñar el consejo entero. El aviso solo podía
+    /// perderse (ver Superposicion: lo tapaba otro); la fila no.
+    /// </summary>
+    private static (string Corto, string Texto, DateTime Hasta)? manoAviso;
+    /// <summary>Rehace las filas de la columna; la pone el residente (es su función local).</summary>
+    private static Action? refrescarColumna;
+
+    /// <summary>Arena te ofrece una mano: el consejo, encima del juego (importante: no lo tapa otro aviso) y en la columna.</summary>
     private static void ConsejoMulligan(int[] cartas, int tierras, int mulligans)
     {
         ultimaMano = (tierras, mulligans);
-        Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), TextoMulligan(cartas, tierras, mulligans, Contexto.CartasMazo, Contexto.Mazo), 20);
+        var texto = TextoMulligan(cartas, tierras, mulligans, Contexto.CartasMazo, Contexto.Mazo);
+        // El veredicto es la primera frase («Quédatela.», «Mulligan.»).
+        var veredicto = texto.Split(". ", 2)[0].TrimEnd('.');
+        manoAviso = (Textos.T("col_mano", veredicto), texto, DateTime.UtcNow.AddSeconds(90));
+        Columna.Destacar("mano");
+        refrescarColumna?.Invoke();
+        Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), texto, 20, importante: true);
     }
 
     /// <summary>

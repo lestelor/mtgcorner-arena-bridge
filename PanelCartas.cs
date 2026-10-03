@@ -51,9 +51,7 @@ internal static partial class PanelCartas
     private const int AIRE = 14, MARGEN = 18, ALTO_CABECERA = 44, ALTO_PIE = 22, ALTO_ROTULO = 26, AIRE_SECCION = 16;
     private const int POR_FILA = 4;
     /// <summary>El ancho del panel sale del de la carta: cuatro por fila y sus aires.</summary>
-    private static int ANCHO_PANEL => MARGEN * 2 + POR_FILA * anchoCarta + (POR_FILA - 1) * AIRE
-        // Similares/combos/sinergias: la carta a la izquierda y su raya (ver PanelRelacionadas).
-        + (rel is null ? 0 : anchoCarta + AIRE * 2);
+    private static int ANCHO_PANEL => MARGEN * 2 + POR_FILA * anchoCarta + (POR_FILA - 1) * AIRE;
 
     /// <summary>
     /// TAMAÑOS DE CARTA QUE SE PRUEBAN, de mayor a menor. «Que se puedan leer»
@@ -171,7 +169,7 @@ internal static partial class PanelCartas
     private const uint WM_DESTROY = 0x2, WM_CLOSE = 0x10, WM_PAINT = 0xF, WM_TIMER = 0x113;
     private const uint WM_MOUSEMOVE = 0x200, WM_LBUTTONUP = 0x202, WM_MOUSELEAVE = 0x2A3, WM_MOUSEACTIVATE = 0x21, WM_MOUSEWHEEL = 0x20A, WM_SETCURSOR = 0x20;
     private const int IDC_HAND = 32649, IDC_ARROW = 32512;
-    private const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_HIDEWINDOW = 0x80;
+    private const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_HIDEWINDOW = 0x80, SWP_NOZORDER = 0x4;
     private const uint LWA_ALPHA = 0x2, TME_LEAVE = 0x2;
     private const uint DT_LEFT = 0x0, DT_RIGHT = 0x2, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_WORDBREAK = 0x10, DT_SINGLELINE = 0x20, DT_CALCRECT = 0x400, DT_END_ELLIPSIS = 0x8000;
     private const uint SRCCOPY = 0x00CC0020;
@@ -898,13 +896,24 @@ internal static partial class PanelCartas
         }
         var delante = GetForegroundWindow();
         var ver = SiempreVisible || delante == arena || delante == ventana;
+        // SIMILARES/COMBOS/SINERGIAS, A LA DERECHA DE LA COLUMNA ABIERTA, a la
+        // altura de su arriba y sin salirse de Arena: centrada tapaba la lista
+        // de cartas desde la que se abre (el usuario, 2026-10-03).
+        if (rel is not null && Columna.EsquinaAbierta() is { } esquina)
+        {
+            var y = Math.Clamp(esquina.Y, r.Top + 12, Math.Max(r.Top + 12, r.Bottom - 12 - alto));
+            return (esquina.X + 14, y, ver);
+        }
         return (r.Left + (r.Right - r.Left - ANCHO_PANEL) / 2, r.Top + Math.Max(12, (r.Bottom - r.Top - alto) / 2), ver);
     }
 
     private static void Recolocar()
     {
         var (x, y, ver) = Donde();
-        SetWindowPos(ventana, HWND_TOPMOST, x, y, ANCHO_PANEL, alto, SWP_NOACTIVATE | (ver ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+        // Sin tocar el orden: ya nace encima de todo (WS_EX_TOPMOST). Subirse cada
+        // medio segundo le disputaba el sitio a la columna, y con el ratón por las
+        // cartas del mazo la columna parpadeaba (el usuario, 2026-10-03).
+        SetWindowPos(ventana, HWND_TOPMOST, x, y, ANCHO_PANEL, alto, SWP_NOACTIVATE | SWP_NOZORDER | (ver ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
         if (altoRegion != alto || anchoRegion != ANCHO_PANEL)
         {
             altoRegion = alto;
@@ -1107,7 +1116,7 @@ internal static partial class PanelCartas
             // Cabecera: de qué carta se parte y la X.
             SelectObject(hdc, fTitulo);
             SetTextColor(hdc, Rgb(252, 211, 77));
-            var rTitulo = new RECT { Left = MARGEN, Top = 0, Right = ANCHO_PANEL - 50, Bottom = ALTO_CABECERA };
+            var rTitulo = new RECT { Left = MARGEN + (rel is null ? 0 : ANCHO_MINI_REL + 14), Top = 0, Right = ANCHO_PANEL - 50, Bottom = ALTO_CABECERA };
             DrawText(hdc, titulo, -1, ref rTitulo, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
             var rX = new RECT { Left = ANCHO_PANEL - 44, Top = 0, Right = ANCHO_PANEL, Bottom = ALTO_CABECERA };
@@ -1472,6 +1481,9 @@ internal static partial class PanelCartas
                     DrawText(hdc, h.Carta.Nombre, -1, ref rn, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 }
             }
+
+            // La carta de la que se parte, grande, si el ratón está en su miniatura: encima de la rejilla.
+            if (rel is { } relGrande) PintarCartaGrande(hdc, relGrande);
 
             // El pie: qué pasa al pulsar; con el ratón sobre una carta, su nombre y precio.
             SelectObject(hdc, fPie);

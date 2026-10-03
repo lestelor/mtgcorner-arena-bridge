@@ -10,8 +10,10 @@ namespace MtgCornerArenaBridge;
 /// similar/combos/sinergias, y que en la ventana salga la imagen de la carta;
 /// si no hay combos o similares, que salga en la propia ventana».
 ///
-/// Así que la ventana sale EN SEGUIDA: a la izquierda la carta de la que se
-/// parte, arriba las tres pestañas y a la derecha lo de la pestaña elegida. Lo
+/// Así que la ventana sale EN SEGUIDA, a la derecha de la columna: arriba, la
+/// carta de la que se parte en miniatura (grande al pasar el ratón), su nombre
+/// y las tres pestañas; debajo, lo de la pestaña elegida. Era una columna
+/// entera de la ventana y la hacía muy ancha (el usuario, 2026-10-03). Lo
 /// que aún no ha bajado se carga dentro, diciéndolo; y en cuanto llega la
 /// primera pestaña se piden las otras dos, para que cambiar sea inmediato y
 /// las pestañas digan cuántas hay. Si no hay nada, lo dice ahí mismo; si falla
@@ -48,11 +50,13 @@ internal static partial class PanelCartas
     private static readonly RECT[] rectPestanas = new RECT[3];
     private static RECT rectOrigen, rectMensaje;
     private const int ALTO_PESTANAS = 46, BAJO_PESTANA = -8000, BAJO_ORIGEN = -8100, BAJO_MENSAJE = -8200;
+    /// <summary>La miniatura de la carta en la cabecera: del alto de la cabecera y las pestañas.</summary>
+    private const int ANCHO_MINI_REL = 56, ALTO_MINI_REL = 78;
     /// <summary>Mensaje propio para «rehaz y recoloca»: lo manda el hilo que trae una pestaña.</summary>
     private const uint WM_REHACER = 0x8001;
 
-    /// <summary>Dónde empieza la rejilla: a la derecha de la carta y por debajo de las pestañas.</summary>
-    private static int IzquierdaContenido => rel is null ? MARGEN : MARGEN + anchoCarta + AIRE * 2;
+    /// <summary>Dónde empieza la rejilla: por debajo de las pestañas.</summary>
+    private static int IzquierdaContenido => MARGEN;
     private static int ArribaContenido => ALTO_CABECERA + (rel is null ? 0 : ALTO_PESTANAS) + MARGEN;
 
     /// <summary>
@@ -83,14 +87,18 @@ internal static partial class PanelCartas
         IReadOnlyList<Seccion> secciones;
         lock (contenidoRel) secciones = contenidoRel.TryGetValue(pestanaRel, out var s) && s is not null ? s : [];
         var (anchoArena, altoArena) = MedidasDeArena();
+        // El ancho que queda a la derecha de la columna abierta, que es donde va.
+        var libre = anchoArena - 40;
+        var arenaV = Columna.VentanaDeArena();
+        if (Columna.EsquinaAbierta() is { } esquina && arenaV != IntPtr.Zero && GetWindowRect(arenaV, out var ra)) libre = ra.Right - 20 - (esquina.X + 14);
         foreach (var ancho in ANCHOS)
         {
             (anchoCarta, altoCarta) = (ancho, ancho * 680 / 488);
             var (h, a) = Disponer(secciones);
-            // Nunca más bajo que la carta de la izquierda con su nombre debajo.
-            var minimo = ArribaContenido + altoCarta + ALTO_ROTULO + MARGEN + ALTO_PIE + MARGEN / 2;
+            // Con sitio para el mensaje si la pestaña no tiene cartas.
+            var minimo = ArribaContenido + 110 + ALTO_PIE + MARGEN;
             (huecos, alto) = (h, Math.Max(a, minimo));
-            if (alto <= altoArena - 60 && ANCHO_PANEL <= anchoArena - 40) break;
+            if (alto <= altoArena - 60 && ANCHO_PANEL <= libre) break;
         }
         alto = altoRel = Math.Min(Math.Max(alto, altoRel), Math.Max(alto, altoArena - 60));
     }
@@ -166,9 +174,10 @@ internal static partial class PanelCartas
         // de la elegida (el usuario, 2026-10-03: «no redondos, cuadrados y con
         // una raya debajo para lo seleccionado»), sobre una línea fina que
         // recorre la fila; con cuántas hay en cuanto se sabe.
-        var x = MARGEN;
+        var x0 = MARGEN + ANCHO_MINI_REL + 14;
+        var x = x0;
         var y = ALTO_CABECERA + 6;
-        if (g != IntPtr.Zero) Rectangulo(g, MARGEN, y + ALTO_PESTANAS - 13, ANCHO_PANEL - MARGEN * 2, 1, 1, BORDE);
+        if (g != IntPtr.Zero) Rectangulo(g, x0, y + ALTO_PESTANAS - 13, ANCHO_PANEL - MARGEN - x0, 1, 1, BORDE);
         for (var k = 0; k < PESTANAS.Length; k++)
         {
             var p = PESTANAS[k];
@@ -193,16 +202,12 @@ internal static partial class PanelCartas
             x += w + 2;
         }
 
-        // LA CARTA DE LA QUE SE PARTE, a la izquierda, con su nombre debajo.
+        // LA CARTA DE LA QUE SE PARTE, en miniatura a la izquierda de la cabecera.
         var arriba = ArribaContenido;
-        rectOrigen = new RECT { Left = MARGEN, Top = arriba, Right = MARGEN + anchoCarta, Bottom = arriba + altoCarta };
+        rectOrigen = new RECT { Left = MARGEN, Top = 8, Right = MARGEN + ANCHO_MINI_REL, Bottom = 8 + ALTO_MINI_REL };
         var img = r.Imagen is not null ? Imagen(r.Imagen) : IntPtr.Zero;
-        if (img != IntPtr.Zero && g != IntPtr.Zero) GdipDrawImageRectI(g, img, MARGEN, arriba, anchoCarta, altoCarta);
-        else if (g != IntPtr.Zero) Rectangulo(g, MARGEN, arriba, anchoCarta, altoCarta, 10, TARJETA, BORDE);
-        Escribir(hdc, r.Nombre, MARGEN, arriba + altoCarta + 4, anchoCarta, ALTO_ROTULO, 15, 600, bajoRaton == BAJO_ORIGEN ? BLANCO : APAGADO, DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
-        // La raya que separa la carta de lo suyo.
-        var xRaya = MARGEN + anchoCarta + AIRE;
-        if (g != IntPtr.Zero) Rectangulo(g, xRaya, arriba, 1, alto - arriba - ALTO_PIE - MARGEN, 1, BORDE);
+        if (img != IntPtr.Zero && g != IntPtr.Zero) GdipDrawImageRectI(g, img, MARGEN, 8, ANCHO_MINI_REL, ALTO_MINI_REL);
+        else if (g != IntPtr.Zero) Rectangulo(g, MARGEN, 8, ANCHO_MINI_REL, ALTO_MINI_REL, 6, TARJETA, BORDE);
         if (g != IntPtr.Zero) GdipDeleteGraphics(g);
 
         // SIN CARTAS EN LA PESTAÑA: cargando, no hay, o falló (y entonces lleva a la web).
@@ -218,5 +223,25 @@ internal static partial class PanelCartas
         if (hay && esta is null && r.AbrirWeb is not null) rectMensaje = rm;
         Escribir(hdc, mensaje, izq, arriba + 20, der - izq, 60, 18, 500,
             hay && esta is null ? (bajoRaton == BAJO_MENSAJE ? BLANCO : Rgb(125, 211, 252)) : APAGADO, DT_LEFT | DT_WORDBREAK);
+    }
+
+    /// <summary>Modo de taller: la carta grande sin el ratón encima (para fotografiarla).</summary>
+    internal static bool ZoomDePrueba;
+
+    /// <summary>
+    /// Con el ratón en la miniatura, la carta grande debajo de ella. Se pinta
+    /// AL FINAL de todo (ver Pintar): pintada con la cabecera, las cartas de la
+    /// rejilla la tapaban.
+    /// </summary>
+    private static void PintarCartaGrande(IntPtr hdc, Relacionadas r)
+    {
+        if ((bajoRaton != BAJO_ORIGEN && !ZoomDePrueba) || r.Imagen is null) return;
+        var img = Imagen(r.Imagen);
+        var g = Lienzo(hdc);
+        if (img == IntPtr.Zero || g == IntPtr.Zero) { if (g != IntPtr.Zero) GdipDeleteGraphics(g); return; }
+        var alto2 = Math.Min(ALTO_VISTA, Math.Max(120, alto - (8 + ALTO_MINI_REL + 6) - ALTO_PIE - MARGEN));
+        var ancho2 = alto2 * 488 / 680;
+        GdipDrawImageRectI(g, img, MARGEN, 8 + ALTO_MINI_REL + 6, ancho2, alto2);
+        GdipDeleteGraphics(g);
     }
 }

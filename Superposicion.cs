@@ -162,18 +162,26 @@ internal static class Superposicion
     private const int SW_SHOWNOACTIVATE = 4;
     private const uint LWA_ALPHA = 0x2;
     private const int TRANSPARENT_BK = 1;
-    private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_SINGLELINE = 0x20, DT_WORDBREAK = 0x10, DT_END_ELLIPSIS = 0x8000;
+    private const uint DT_LEFT = 0x0, DT_CENTER = 0x1, DT_VCENTER = 0x4, DT_SINGLELINE = 0x20, DT_WORDBREAK = 0x10, DT_END_ELLIPSIS = 0x8000, DT_CALCRECT = 0x400;
+    [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
     private const uint SPI_GETWORKAREA = 0x30;
 
     /// <summary>Un color de GDI: 0x00BBGGRR, al revés que en la web.</summary>
     private static uint Rgb(int r, int g, int b) => (uint)(r | (g << 8) | (b << 16));
 
     /// <summary>Ancho y alto del aviso, y el aire que deja contra el borde del juego.</summary>
-    private const int ANCHO = 380, ALTO_TEXTO = 104, MARGEN = 28;
+    private const int ANCHO = 380, ALTO_TEXTO_MIN = 104, MARGEN = 28;
+    /// <summary>
+    /// LO QUE MIDE LA PARTE DE TEXTO: lo que pida el cuerpo, entre las dos
+    /// líneas de siempre y unas ocho. Era fijo y el consejo de cada turno, que
+    /// dice jugada, ataque y por qué, se cortaba a media frase (2026-10-03).
+    /// </summary>
+    private static int ALTO_TEXTO = ALTO_TEXTO_MIN;
     /// <summary>Las miniaturas: cartas pequeñas en fila bajo el texto (pedido del usuario el 2026-09-26: «no hace falta que sean muy grandes»).</summary>
     private const int ANCHO_MINI = 70, ALTO_MINI = 98, AIRE_MINI = 8, MAX_MINIS = 4;
     /// <summary>El alto del aviso que hay en pantalla: el del texto, y las miniaturas si las lleva.</summary>
-    private static int ALTO = ALTO_TEXTO;
+    private static int ALTO = ALTO_TEXTO_MIN;
     private static string[] ficherosMini = [];
     private static readonly List<IntPtr> minis = new();
     private static IntPtr gdiplus;
@@ -238,8 +246,17 @@ internal static class Superposicion
     /// esto, un «subiendo» de veinte segundos y un «hecho» de seis se apilarían
     /// en el mismo sitio y el de encima taparía al otro.
     /// </summary>
-    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false)
+    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false, bool importante = false)
     {
+        /**
+         * UN AVISO IMPORTANTE NO LO PISA OTRO CUALQUIERA mientras dura. Cada
+         * aviso cierra el anterior, y el consejo de mulligan —que sólo sirve en
+         * los segundos en que decides— lo tapaba la subida de fondo que hace el
+         * programa al arrancar («no he visto que se me aconseje», el usuario,
+         * 2026-10-03). Los importantes sí se sustituyen entre ellos.
+         */
+        if (!importante && DateTime.UtcNow < importanteHasta) return null;
+        if (importante) importanteHasta = DateTime.UtcNow.AddSeconds(segundos);
         try
         {
             Ocultar();
@@ -259,6 +276,9 @@ internal static class Superposicion
         if (v != IntPtr.Zero) PostMessage(v, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
     }
 
+    /// <summary>Hasta cuándo dura el último aviso importante (ver MostrarSinEsperar).</summary>
+    private static DateTime importanteHasta;
+
     /// <summary>La ventana del aviso que está en pantalla, o cero.</summary>
     private static volatile IntPtr ventanaActual;
 
@@ -277,6 +297,7 @@ internal static class Superposicion
         esFijo = fijo;
         bajoRaton = -1;
         miniZoom = -1;
+        ALTO_TEXTO = AltoDelCuerpo(texto);
         ALTO = ALTO_TEXTO + (ficheros.Length > 0 ? ALTO_MINI + AIRE_MINI : 0);
         procedimiento = Procedimiento;
 
@@ -384,6 +405,22 @@ internal static class Superposicion
     private static RECT RectX() => new() { Left = ANCHO - LADO_X - 8, Top = 8, Right = ANCHO - 8, Bottom = 8 + LADO_X };
 
     /// <summary>Dónde está la miniatura i, en la ventana.</summary>
+    /// <summary>El alto de la parte de texto para este cuerpo, medido con la letra con que se pinta.</summary>
+    private static int AltoDelCuerpo(string cuerpo)
+    {
+        var hdc = GetDC(IntPtr.Zero);
+        if (hdc == IntPtr.Zero) return ALTO_TEXTO_MIN;
+        var fuente = CreateFont(17, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        var anterior = SelectObject(hdc, fuente);
+        try
+        {
+            var r = new RECT { Left = 0, Top = 0, Right = ANCHO - 36, Bottom = 0 };
+            DrawText(hdc, cuerpo, -1, ref r, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
+            return Math.Clamp(58 + (r.Bottom - r.Top) + 12, ALTO_TEXTO_MIN, 58 + 8 * 23 + 12);
+        }
+        finally { SelectObject(hdc, anterior); DeleteObject(fuente); ReleaseDC(IntPtr.Zero, hdc); }
+    }
+
     private static RECT RectMini(int i) => new() { Left = 18 + i * (ANCHO_MINI + AIRE_MINI), Top = ALTO_TEXTO - 4, Right = 18 + i * (ANCHO_MINI + AIRE_MINI) + ANCHO_MINI, Bottom = ALTO_TEXTO - 4 + ALTO_MINI };
 
     /// <summary>Qué hay bajo un punto de la ventana: la X, una miniatura o nada. Sólo en las fijas: las otras no ven el ratón.</summary>

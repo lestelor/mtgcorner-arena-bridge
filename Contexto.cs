@@ -160,6 +160,21 @@ internal static class Contexto
     /// consejo de mulligan. Salta en el hilo del vigía, una vez por mano.
     /// </summary>
     public static event Action<int[], int, int>? ManoNueva;
+
+    /// <summary>Una carta en la mesa: cuál es, si está girada y si es tierra.</summary>
+    public sealed record EnMesa(int Grp, bool Girada, bool Tierra);
+
+    /// <summary>
+    /// LA MESA AL EMPEZAR TU PRIMERA FASE PRINCIPAL, para el consejo de cada
+    /// turno (experimental, pedido del usuario el 2026-10-03): tu mano con
+    /// repeticiones, lo tuyo y lo del rival en el campo (girado o no), las
+    /// vidas y el turno. Sólo lo que se ve en la pantalla: el registro no trae
+    /// la mano del rival, y aunque la trajera no se usaría.
+    /// </summary>
+    public sealed record Mesa(int Turno, int[] Mano, EnMesa[] Mia, EnMesa[] DelRival, int? VidaYo, int? VidaRival);
+
+    /// <summary>Empieza tu primera fase principal (una vez por turno). Salta en el hilo del vigía.</summary>
+    public static event Action<Mesa>? MiFasePrincipal;
     /// <summary>Arena ha vuelto a empezar el registro (lo rota al arrancar): sesión nueva, marcador a cero.</summary>
     public static event Action? RegistroReiniciado;
 
@@ -186,6 +201,13 @@ internal static class Contexto
     private static readonly Regex Zona = new(@"""zoneId"":\s*(\d+),\s*""type"":\s*""ZoneType_(\w+)""", RegexOptions.Compiled);
     // La zona entera: su dueño (las de cada jugador) y lo que tiene ahora. Sin
     // «objectInstanceIds» es que está vacía.
+    // La fase y de quién es el turno: «"phase": "Phase_Main1", "turnNumber": 18, "activePlayer": 1».
+    private static readonly Regex Fase = new(@"""phase"":\s*""Phase_(\w+)"",\s*""turnNumber"":\s*(\d+),\s*""activePlayer"":\s*(\d)", RegexOptions.Compiled);
+    // Una carta con lo que la describe, hasta la siguiente o hasta lo que viene
+    // detrás de la lista de cartas (anotaciones, zonas, turno…): dentro,
+    // «"isTapped": true» si está girada. Sin esos finales, la ÚLTIMA carta de
+    // la lista no encontraba dónde acabar y se quedaba girada para siempre.
+    private static readonly Regex CartaGirada = new(@"""instanceId"":\s*(\d+),\s*""grpId"":\s*\d+,\s*""type"":\s*""GameObjectType_Card""(.{0,3000}?)(?=""instanceId""|""annotations""|""persistentAnnotations""|""diffDeleted|""turnInfo""|""zones""|""players""|""timers""|""actions""|""gameInfo""|$)", RegexOptions.Compiled);
     private static readonly Regex ZonaCompleta = new(@"""zoneId"":\s*(\d+),\s*""type"":\s*""ZoneType_\w+"",\s*""visibility"":\s*""\w+""(?:,\s*""ownerSeatId"":\s*(\d+))?(?:,\s*""objectInstanceIds"":\s*\[([\d,\s]*)\])?", RegexOptions.Compiled);
     // Un traslado: qué instancia y a qué zona llega. Los detalles son una lista de
     // pares y `zone_dest` no es el primero, así que se salta con `.{0,400}?`.
@@ -231,6 +253,14 @@ internal static class Contexto
     private static readonly Dictionary<int, int[]> idsZona = new();
     private static readonly Dictionary<int, int> duenoZona = new();
     private static string firmaBiblioteca = "", firmaMano = "";
+    /// <summary>Las vidas de ahora, de cualquier mensaje: las del turno sólo se apuntan cuando cambian en ese turno.</summary>
+    private static int? vidaYoAhora, vidaRivalAhora;
+    /// <summary>Instancia → si está girada (la última vez que el juego la describió).</summary>
+    private static readonly Dictionary<int, bool> girada = new();
+    /// <summary>El turno de tu última fase principal avisada, y el que está por avisar al acabar la tanda.</summary>
+    private static int turnoAvisado, turnoPorAvisar;
+    /// <summary>La mesa tal como estaba en la línea en que empezó la fase: al acabar la tanda ya puede haber tierras giradas.</summary>
+    private static Mesa? mesaPorAvisar;
     /// <summary>Los mulligans de la mano en curso: suma con cada «mulligan» tuyo y vuelve a cero al quedártela.</summary>
     private static int mulligansHechos;
     /// <summary>
@@ -458,7 +488,7 @@ internal static class Contexto
                 foreach (Match v in Vida.Matches(linea))
                 {
                     var vida = int.Parse(v.Groups[1].Value);
-                    if (int.Parse(v.Groups[2].Value) == miAsiento) actual.VidaYo = vida; else actual.VidaRival = vida;
+                    if (int.Parse(v.Groups[2].Value) == miAsiento) actual.VidaYo = vidaYoAhora = vida; else actual.VidaRival = vidaRivalAhora = vida;
                 }
                 foreach (Match d in Dano.Matches(linea))
                 {
@@ -550,6 +580,19 @@ internal static class Contexto
             // Tus respuestas: lo que cuenta los mulligans de la mano que llega.
             if (linea.Contains("MulliganOption_Mulligan", StringComparison.Ordinal)) mulligansHechos++;
             else if (linea.Contains("MulliganOption_AcceptHand", StringComparison.Ordinal)) mulligansHechos = 0;
+            if (linea.Contains("GameObjectType_Card", StringComparison.Ordinal))
+                foreach (Match cg in CartaGirada.Matches(linea))
+                    girada[int.Parse(cg.Groups[1].Value)] = cg.Groups[2].Value.Contains("\"isTapped\": true", StringComparison.Ordinal);
+            foreach (Match f in Fase.Matches(linea))
+            {
+                var n = int.Parse(f.Groups[2].Value);
+                if (miAsiento != 0 && f.Groups[1].Value == "Main1" && int.Parse(f.Groups[3].Value) == miAsiento && n != turnoAvisado && n != turnoPorAvisar)
+                {
+                    turnoPorAvisar = n;
+                    // La foto AHORA, con esta línea ya leída (zonas y cartas van antes).
+                    mesaPorAvisar = MesaAhora(n);
+                }
+            }
             if (linea.Contains("GREMessageType_MulliganReq", StringComparison.Ordinal) && miAsiento != 0)
             {
                 var (cartasMano, tierrasMano, firma) = ManoCompleta();
@@ -606,6 +649,9 @@ internal static class Contexto
                 zonas.Clear();
                 idsZona.Clear();
                 duenoZona.Clear();
+                girada.Clear();
+                turnoAvisado = turnoPorAvisar = 0;
+                vidaYoAhora = vidaRivalAhora = null;
                 firmaMano = "";
                 miAsiento = 0;
             }
@@ -633,6 +679,15 @@ internal static class Contexto
         }
         Cambiar(mazo, carta, otraCara, rival, rivalOtra, enPartida, colores, [.. mesa], [.. vistas]);
         ContarBiblioteca();
+        if (turnoPorAvisar != 0 && turnoPorAvisar != turnoAvisado)
+        {
+            turnoAvisado = turnoPorAvisar;
+            turnoPorAvisar = 0;
+            var mesaAviso = mesaPorAvisar ?? MesaAhora(turnoAvisado);
+            mesaPorAvisar = null;
+            if (!leyendoLoViejo && miAsiento != 0)
+                try { MiFasePrincipal?.Invoke(mesaAviso); } catch { /* cosa de quien escucha */ }
+        }
         leyendoLoViejo = false;
     }
 
@@ -666,6 +721,25 @@ internal static class Contexto
         BibliotecaTam = tam;
         FueraDeBiblioteca = fuera;
         try { BibliotecaCambio?.Invoke(); } catch { /* cosa de quien escucha */ }
+    }
+
+    /// <summary>La mesa de ahora, de las zonas: tu mano, el campo de cada uno con lo girado, y las vidas del turno.</summary>
+    private static Mesa MesaAhora(int turno)
+    {
+        var (mano, _, _) = ManoCompleta();
+        var mia = new List<EnMesa>();
+        var suya = new List<EnMesa>();
+        foreach (var (idz, ids) in idsZona)
+        {
+            if (!zonas.TryGetValue(idz, out var tipo) || tipo != "Battlefield") continue;
+            foreach (var id in ids)
+            {
+                if (!objetos.TryGetValue(id, out var o) || !o.EsCarta || o.Grp <= 0) continue;
+                var c = new EnMesa(o.Grp, girada.GetValueOrDefault(id), o.EsTierra);
+                if (o.Dueno == miAsiento) mia.Add(c); else suya.Add(c);
+            }
+        }
+        return new Mesa(turno, mano, [.. mia], [.. suya], vidaYoAhora, vidaRivalAhora);
     }
 
     /// <summary>

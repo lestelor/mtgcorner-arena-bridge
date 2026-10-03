@@ -1700,5 +1700,50 @@ internal static class Textos
             "Hands like this in this deck: {1}–{2} ({3}%).", "Manos así en este mazo: {1}–{2} ({3}%).", "Solche Hände mit diesem Deck: {1}–{2} ({3} %).", "Mains comme celle-ci avec ce deck : {1}–{2} ({3} %).",
             "Mãos assim neste baralho: {1}–{2} ({3}%).", "Mani così con questo mazzo: {1}–{2} ({3}%).", "このデッキでの同様の手札：{1}勝{2}敗（{3}%）。", "这副套牌的类似起手：{1}–{2}（{3}%）。",
         ],
+        ["col_consejo_no"] =
+        [
+            "Advice each turn (experimental): off", "Consejo por turno (experimental): no", "Tipp pro Zug (experimentell): aus", "Conseil à chaque tour (expérimental) : non",
+            "Conselho por turno (experimental): não", "Consiglio a ogni turno (sperimentale): no", "毎ターンのアドバイス（実験的）：オフ", "每回合建议（实验性）：关",
+        ],
+        ["col_consejo_si"] =
+        [
+            "Advice each turn (experimental): on", "Consejo por turno (experimental): sí", "Tipp pro Zug (experimentell): an", "Conseil à chaque tour (expérimental) : oui",
+            "Conselho por turno (experimental): sim", "Consiglio a ogni turno (sperimentale): sì", "毎ターンのアドバイス（実験的）：オン", "每回合建议（实验性）：开",
+        ],
+        ["ayuda_consejo"] =
+        [
+            "At the start of your main phase, a suggestion of what to play and whether to attack. Experimental: the AI can get it wrong, it never clicks for you, and it is off in competitive events.", "Al empezar tu fase principal, una sugerencia de qué jugar y si atacar. Experimental: la IA puede equivocarse, nunca pulsa por ti y no funciona en eventos competitivos.", "Zu Beginn deiner Hauptphase ein Vorschlag, was du spielen und ob du angreifen solltest. Experimentell: Die KI kann sich irren, klickt nie für dich und ist in kompetitiven Events aus.", "Au début de ta phase principale, une suggestion de quoi jouer et s'il faut attaquer. Expérimental : l'IA peut se tromper, ne clique jamais à ta place et est désactivée en événement compétitif.",
+            "No início da tua fase principal, uma sugestão do que jogar e se deves atacar. Experimental: a IA pode enganar-se, nunca clica por ti e não funciona em eventos competitivos.", "All'inizio della tua fase principale, un suggerimento su cosa giocare e se attaccare. Sperimentale: l'IA può sbagliare, non clicca mai al posto tuo ed è spenta negli eventi competitivi.", "メインフェイズの開始時に、何をプレイし攻撃するかの提案を表示します。実験的：AIは間違えることがあり、代わりにクリックすることはなく、競技イベントでは動作しません。", "在你的主阶段开始时，建议出什么牌以及是否攻击。实验性：AI 可能出错，绝不会替你点击，在竞技赛事中不启用。",
+        ],
+        ["consejo_titulo"] =
+        [
+            "Advice · turn {0} (experimental)", "Consejo · turno {0} (experimental)", "Tipp · Zug {0} (experimentell)", "Conseil · tour {0} (expérimental)",
+            "Conselho · turno {0} (experimental)", "Consiglio · turno {0} (sperimentale)", "アドバイス・{0}ターン目（実験的）", "建议・第 {0} 回合（实验性）",
+        ],
+        ["consejo_jugables"] =
+        [
+            "You can cast: {0} (mana: {1}).", "Puedes jugar: {0} (maná: {1}).", "Du kannst spielen: {0} (Mana: {1}).", "Tu peux jouer : {0} (mana : {1}).",
+            "Podes jogar: {0} (mana: {1}).", "Puoi giocare: {0} (mana: {1}).", "プレイ可能：{0}（マナ：{1}）。", "可施放：{0}（法术力：{1}）。",
+        ],
+        ["consejo_activado"] =
+        [
+            "Advice each turn is on (experimental). At the start of your main phase you'll see a suggestion; it never plays for you and stays off in competitive events.", "Consejo por turno encendido (experimental). Al empezar tu fase principal verás una sugerencia; nunca juega por ti y en eventos competitivos no sale.", "Tipp pro Zug ist an (experimentell). Zu Beginn deiner Hauptphase siehst du einen Vorschlag; er spielt nie für dich und bleibt in kompetitiven Events aus.", "Conseil à chaque tour activé (expérimental). Au début de ta phase principale tu verras une suggestion ; il ne joue jamais à ta place et reste désactivé en compétition.",
+            "Conselho por turno ligado (experimental). No início da tua fase principal verás uma sugestão; nunca joga por ti e não aparece em eventos competitivos.", "Consiglio a ogni turno attivo (sperimentale). All'inizio della tua fase principale vedrai un suggerimento; non gioca mai al posto tuo e negli eventi competitivi non compare.", "毎ターンのアドバイスをオンにしました（実験的）。メインフェイズ開始時に提案が表示されます。代わりにプレイすることはなく、競技イベントでは表示されません。", "已开启每回合建议（实验性）。主阶段开始时会显示建议；它绝不会替你出牌，竞技赛事中不显示。",
+        ],
+        ["consejo_desactivado"] =
+        [
+            "Advice each turn is off.", "Consejo por turno apagado.", "Tipp pro Zug ist aus.", "Conseil à chaque tour désactivé.",
+            "Conselho por turno desligado.", "Consiglio a ogni turno disattivato.", "毎ターンのアドバイスをオフにしました。", "已关闭每回合建议。",
+        ],
+        ["col_biblioteca"] =
+        [
+            "Library · {0} · land {1}", "Biblioteca · {0} · tierra {1}", "Bibliothek · {0} · Land {1}", "Bibliothèque · {0} · terrain {1}",
+            "Grimório · {0} · terreno {1}", "Grimorio · {0} · terra {1}", "ライブラリー・{0}・土地 {1}", "牌库・{0}・地 {1}",
+        ],
+        ["col_mano"] =
+        [
+            "Hand: {0}", "Mano: {0}", "Hand: {0}", "Main : {0}",
+            "Mão: {0}", "Mano: {0}", "手札：{0}", "起手：{0}",
+        ],
     };
 }
