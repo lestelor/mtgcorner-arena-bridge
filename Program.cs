@@ -549,6 +549,55 @@ internal static class Program
             PanelCartas.Cerrar();
             return 0;
         }
+        if (args.Length > 0 && (args[0] == "--probar-rastreador" || args[0] == "--probar-mulligan"))
+        {
+            // El mazo del último registro, como en el residente, y luego el
+            // rastreador (con unas cuantas cartas «ya vistas») o los consejos de
+            // tres manos de ejemplo.
+            var vinculoP = Vinculo.Leer();
+            using var httpP = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(2) };
+            if (vinculoP is not null) httpP.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoP.Token);
+            var registroP = LogArena.FicherosPorDefecto(LogArena.Carpeta()).LastOrDefault(File.Exists);
+            string? lineaP = null;
+            if (registroP is not null)
+            {
+                using var fs = new FileStream(registroP, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var sr = new StreamReader(fs);
+                for (var l = sr.ReadLine(); l is not null; l = sr.ReadLine())
+                    if ((l.Contains("EventSetDeckV3", StringComparison.Ordinal) || l.Contains("DeckUpsertDeckV3", StringComparison.Ordinal)) && l.Contains("MainDeck", StringComparison.Ordinal)) lineaP = l;
+            }
+            var mazoP = lineaP is null ? [] : Contexto.CartasDe(lineaP);
+            var dp = await (await httpP.GetAsync($"{PuertaDevice}/cartas?ids={string.Join(",", mazoP.Select(c => c.Grp))}")).Content.ReadFromJsonAsync<RespuestaCartasMazo>(JsonOpciones);
+            var listaP = new List<Columna.CartaMazo>();
+            foreach (var c in dp?.Cartas ?? []) listaP.Add(new Columna.CartaMazo(c.Arena, mazoP.First(x => x.Grp == c.Arena).N, c.Nombre ?? "?", c.Coste ?? "", c.Cmc, c.Tierra, await BajarImagen(c.Arte)));
+            cartasDelMazoActual = listaP;
+            Console.WriteLine($"mazo de prueba: {listaP.Count} cartas distintas, {mazoP.Sum(c => c.N)} en total");
+            if (args[0] == "--probar-mulligan")
+            {
+                var tierraP = listaP.Where(c => c.Tierra).Select(c => c.Grp).FirstOrDefault();
+                var hechizos = listaP.Where(c => !c.Tierra).OrderBy(c => c.Cmc).Select(c => c.Grp).ToArray();
+                int[] Mano(int t) => [.. Enumerable.Repeat(tierraP, t), .. Enumerable.Range(0, 7 - t).Select(i => hechizos[i % hechizos.Length])];
+                foreach (var (t, m) in new[] { (2, 0), (1, 0), (3, 0), (5, 0), (2, 1) })
+                    Console.WriteLine($"{t} tierras, {m} mulligans: {TextoMulligan(Mano(t), t, m, mazoP, "prueba")}");
+                // --sin-ventana: sólo la consola (para probar con una partida en marcha).
+                if (args.Contains("--sin-ventana")) return 0;
+                Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), TextoMulligan(Mano(2), 2, 0, mazoP, "prueba"), 15);
+                await Task.Delay(TimeSpan.FromSeconds(16));
+                return 0;
+            }
+            // Unas cuantas ya fuera de la biblioteca: una de cada una de las cinco primeras y dos tierras.
+            var fueraP = new Dictionary<int, int>();
+            foreach (var c in listaP.Where(c => !c.Tierra).Take(5)) fueraP[c.Grp] = Math.Min(c.N, c.Grp % 2 == 0 ? 1 : c.N);
+            foreach (var c in listaP.Where(c => c.Tierra).Take(1)) fueraP[c.Grp] = 2;
+            var tamP = mazoP.Sum(c => c.N) - fueraP.Values.Sum();
+            Rastreador.SiempreVisible = true;
+            Rastreador.Actualizar(listaP.Select(c => new Rastreador.Fila(c.Grp, c.Nombre, c.N - fueraP.GetValueOrDefault(c.Grp), c.N, c.Cmc, c.Tierra, c.Arte)).ToArray(), tamP);
+            Rastreador.Activo(true);
+            Console.WriteLine($"rastreador de prueba: biblioteca {tamP}, 25 s");
+            await Task.Delay(TimeSpan.FromSeconds(25));
+            Rastreador.Cerrar();
+            return 0;
+        }
         if (args.Length > 0 && args[0] == "--probar-resumen")
         {
             // El panel de texto con un resumen guardado (JSON de /resumen), 10 s,
@@ -573,7 +622,7 @@ internal static class Program
             PanelCartas.SiempreVisible = true;
             var cual = args.Length > 1 ? args[1] : "91550";
             Console.WriteLine($"Panel de similares de {cual}...");
-            Console.WriteLine(await PanelSimilares(httpPanel, cual) ? "ensenado" : "no se pudo");
+            Console.WriteLine(await PanelRelacionadas(httpPanel, cual, args.Length > 2 ? args[2] : "similares") ? "ensenado" : "no se pudo");
             await Task.Delay(TimeSpan.FromSeconds(40));
             PanelCartas.Cerrar();
             return 0;
@@ -591,6 +640,9 @@ internal static class Program
                 foreach (var t in Contexto.UltimaPartida?.Turnos ?? [])
                     Console.WriteLine($"  T{t.N} {t.Activo}  vida {t.VidaYo?.ToString() ?? "?"}/{t.VidaRival?.ToString() ?? "?"}  mano=[{string.Join(",", t.ManoYo)}]  yo=[{string.Join(",", t.JugadasYo)}] rival=[{string.Join(",", t.JugadasRival)}]  daño a mí {t.DanoAYo} al rival {t.DanoARival}");
             };
+            // La biblioteca (rastreador) y las manos ofrecidas (consejo de mulligan).
+            Contexto.BibliotecaCambio += () => Console.WriteLine($"BIBLIOTECA {Contexto.BibliotecaTam}  fuera=[{string.Join(",", Contexto.FueraDeBiblioteca.Select(kv => $"{kv.Key}x{kv.Value}"))}]");
+            Contexto.ManoNueva += (cartas, tierras, mulligans) => Console.WriteLine($"MANO OFRECIDA [{string.Join(",", cartas)}] tierras={tierras} mulligans={mulligans}");
             // Con un segundo argumento se vigila otro fichero (un Player-prev.log
             // con partidas acabadas, para probar la cronología sin jugar una).
             Contexto.Iniciar(args.Length > 1 ? args[1] : Path.Combine(LogArena.Carpeta(), "Player.log"));
@@ -959,52 +1011,23 @@ internal static class Program
                 case Columna.Accion.Creador:
                     if (dato is not null) Abrir($"{Sitio}/api/puente/mazo?nombre={Uri.EscapeDataString(dato)}&idioma={Textos.Idioma}");
                     break;
+                // SIMILARES, COMBOS Y SINERGIAS: la misma ventana, cada fila en su
+                // pestaña (ver PanelRelacionadas.cs). Sale en seguida y lo que
+                // falte se carga dentro; si ni la ventana puede salir, la web.
                 case Columna.Accion.Similares:
-                    // EN EL JUEGO, no en el navegador: el panel con las cartas
-                    // grandes encima de Arena (ver PanelCartas.cs). Si algo
-                    // falla -sin red, sin parecidas- se abre la web, que es lo
-                    // que hacia antes y sigue valiendo.
-                    if (dato is not null)
-                    {
-                        // La fila pulsada enseña que está en ello (ver Columna.EnCurso);
-                        // el panel sólo sale cuando están las ocho cartas, para no
-                        // tapar la partida mientras bajan.
-                        Columna.EnCurso(dato);
-                        bool hecho;
-                        try { hecho = await PanelSimilares(http, dato); }
-                        finally { Columna.EnCurso(null); }
-                        if (!hecho)
-                        {
-                            var (cara, otraCara) = Caras(dato);
-                            Abrir($"{Sitio}/api/puente/carta/{cara}?abrir=similares&idioma={Textos.Idioma}{otraCara}");
-                        }
-                    }
-                    break;
                 case Columna.Accion.Combos:
-                    if (dato is not null)
-                    {
-                        Columna.EnCurso(dato);
-                        bool hecho;
-                        try { hecho = await PanelCombos(http, dato); }
-                        finally { Columna.EnCurso(null); }
-                        if (!hecho)
-                        {
-                            var (cara, otraCara) = Caras(dato);
-                            Abrir($"{Sitio}/api/puente/carta/{cara}?abrir=combos&idioma={Textos.Idioma}{otraCara}");
-                        }
-                    }
-                    break;
                 case Columna.Accion.Sinergias:
                     if (dato is not null)
                     {
+                        var pestana = accion == Columna.Accion.Similares ? "similares" : accion == Columna.Accion.Combos ? "combos" : "sinergias";
                         Columna.EnCurso(dato);
-                        bool hechoSin;
-                        try { hechoSin = await PanelSinergias(http, dato); }
+                        bool hecho;
+                        try { hecho = await PanelRelacionadas(http, dato, pestana); }
                         finally { Columna.EnCurso(null); }
-                        if (!hechoSin)
+                        if (!hecho)
                         {
                             var (cara, otraCara) = Caras(dato);
-                            Abrir($"{Sitio}/api/puente/carta/{cara}?abrir=sinergias&idioma={Textos.Idioma}{otraCara}");
+                            Abrir($"{Sitio}/api/puente/carta/{cara}?abrir={pestana}&idioma={Textos.Idioma}{otraCara}");
                         }
                     }
                     break;
@@ -1211,6 +1234,15 @@ internal static class Program
         Contexto.Cambio += ActualizarColumna;
         // Las cartas del mazo de ahora, para el desplegable «Mejorar» (ver CargarCartasMazo).
         Contexto.Cambio += () => _ = CargarCartasMazo(http);
+        // Y con el ratón encima de una de ellas, sus similares, combos y sinergias,
+        // para que al pulsarla la ventana salga ya llena.
+        Columna.AlSenalarCarta = grp => _ = Precalentar(http, grp);
+        // El rastreador sigue a la biblioteca y aparece y desaparece con la partida;
+        // el consejo de mulligan, con cada mano ofrecida; y al acabar, la mano al historial.
+        Contexto.BibliotecaCambio += ActualizarRastreador;
+        Contexto.Cambio += ActualizarRastreador;
+        Contexto.ManoNueva += ConsejoMulligan;
+        Contexto.PartidaAcabada += ApuntarMano;
         Contexto.Cambio += () => VigilarAmenazas(http, ActualizarColumna);
         _ = Task.Run(async () => { try { if (await BuscarVersionNueva() is not null) Columna.Destacar("version"); } catch { /* sin red */ } });
         Contexto.Cambio += () => { if (Contexto.EnPartida && partidaPendiente is not null) { partidaPendiente = null; Columna.Olvidar("resumen"); } };
@@ -1446,35 +1478,6 @@ internal static class Program
     }
 
     /// <summary>
-    /// EL PANEL DE SINERGIAS: una sección por regla («las que aprovechan la vida
-    /// que da», «las que le dan auras»), con sus cartas. En Estándar de Arena es
-    /// lo que más hay: pocos combos de libro, muchas cartas que se pagan entre sí.
-    /// </summary>
-    private static async Task<bool> PanelSinergias(HttpClient http, string arena)
-    {
-        try
-        {
-            var datos = await Sinergias(http, arena);
-            var grupos = datos?.Grupos ?? [];
-            if (grupos.Length == 0) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("panel_sin_sinergias")); return true; }
-            var secciones = new List<PanelCartas.Seccion>();
-            foreach (var g in grupos)
-            {
-                var bajadas = await Task.WhenAll((g.Cartas ?? []).Select(async c => (Carta: c, Fichero: await BajarImagen(c.Imagen))));
-                var cartas = bajadas.Where(b => b.Fichero is not null)
-                    .Select(b => new PanelCartas.Carta(b.Carta.Nombre ?? "", b.Fichero!, b.Carta.Ruta, b.Carta.PrecioUsd)).ToArray();
-                if (cartas.Length == 0) continue;
-                secciones.Add(new PanelCartas.Seccion(Textos.T(g.Sentido == "dan" ? "panel_sin_dan" : "panel_sin_pagan", NombreRegla(g.Regla)), null, cartas));
-            }
-            if (secciones.Count == 0) return false;
-            PanelCartas.AlAbrir = AbrirDelPanel;
-            PanelCartas.Mostrar(Textos.T("col_sinergias", datos?.Fuente?.Nombre ?? Textos.T("col_esta_carta")), secciones);
-            return true;
-        }
-        catch { return false; }
-    }
-
-    /// <summary>
     /// EL RESUMEN DE LA PARTIDA, POR IA. Al acabar una partida, el vigía deja su
     /// cronología en Contexto.UltimaPartida; se manda a la web con el token del
     /// programa y lo que vuelve —por qué se ganó o perdió, qué no había que
@@ -1593,6 +1596,136 @@ internal static class Program
     /// </summary>
     /// <summary>La lista de cartas que ya tiene la columna, para no volver a pedirla con cada cambio del juego.</summary>
     private static string firmaCartasMazo = "";
+    /// <summary>Las cartas del mazo de ahora con nombre, coste e ilustración: las usan el rastreador y el consejo de mulligan.</summary>
+    private static List<Columna.CartaMazo> cartasDelMazoActual = [];
+
+    /// <summary>
+    /// EL RASTREADOR EN PARTIDA (ver Rastreador.cs): cada carta del mazo con
+    /// las que quedan —las del mazo menos las tuyas que ya han salido de la
+    /// biblioteca— y el tamaño de la biblioteca. Fuera de partida, se esconde.
+    /// </summary>
+    private static void ActualizarRastreador()
+    {
+        var mazo = Contexto.CartasMazo;
+        var datos = cartasDelMazoActual;
+        if (!Contexto.EnPartida || mazo.Length == 0 || datos.Count == 0) { Rastreador.Activo(false); return; }
+        var porGrp = datos.GroupBy(c => c.Grp).ToDictionary(g => g.Key, g => g.First());
+        var fuera = Contexto.FueraDeBiblioteca;
+        var filas = mazo.Where(c => porGrp.ContainsKey(c.Grp)).Select(c =>
+        {
+            var d = porGrp[c.Grp];
+            return new Rastreador.Fila(c.Grp, d.Nombre, c.N - fuera.GetValueOrDefault(c.Grp), c.N, d.Cmc, d.Tierra, d.Arte);
+        }).ToArray();
+        Rastreador.Actualizar(filas, Contexto.BibliotecaTam);
+        Rastreador.Activo(true);
+    }
+
+    // ── EL CONSEJO DE MULLIGAN (pedido del usuario el 2026-10-03) ─────────
+
+    /// <summary>La última mano ofrecida (tierras y mulligans): al acabar la partida se apunta con el resultado.</summary>
+    private static (int Tierras, int Mulligans)? ultimaMano;
+
+    private static string FicheroManos => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MtgCornerArenaBridge", "manos.json");
+
+    /// <summary>Una mano jugada: con qué mazo, cuántas tierras, tras cuántos mulligans y si se ganó.</summary>
+    internal sealed record ManoJugada(string Mazo, int Tierras, int Mulligans, bool Gane, DateTime Cuando);
+
+    private static List<ManoJugada> LeerManos()
+    {
+        try { return JsonSerializer.Deserialize<List<ManoJugada>>(File.ReadAllText(FicheroManos), JsonOpciones) ?? []; }
+        catch { return []; }
+    }
+
+    /// <summary>
+    /// AL ACABAR LA PARTIDA, la mano con que se jugó y el resultado, a un
+    /// fichero de este ordenador. Es lo que deja decir «con 2 tierras en este
+    /// mazo vas 5–2»: la web no guarda las manos, y esto no necesita red.
+    /// </summary>
+    private static void ApuntarMano()
+    {
+        if (ultimaMano is not { } m || Contexto.UltimaPartida?.Gane is not bool gane || Contexto.Mazo is not { Length: > 0 } mazo) return;
+        ultimaMano = null;
+        try
+        {
+            var lista = LeerManos();
+            lista.Add(new ManoJugada(mazo, m.Tierras, m.Mulligans, gane, DateTime.UtcNow));
+            Directory.CreateDirectory(Path.GetDirectoryName(FicheroManos)!);
+            File.WriteAllText(FicheroManos, JsonSerializer.Serialize(lista.TakeLast(2000), JsonOpciones));
+        }
+        catch { /* sin historial, el consejo sigue con la probabilidad */ }
+    }
+
+    /// <summary>Arena te ofrece una mano: el consejo, encima del juego.</summary>
+    private static void ConsejoMulligan(int[] cartas, int tierras, int mulligans)
+    {
+        ultimaMano = (tierras, mulligans);
+        Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), TextoMulligan(cartas, tierras, mulligans, Contexto.CartasMazo, Contexto.Mazo), 20);
+    }
+
+    /// <summary>
+    /// EL CONSEJO EN UNAS LÍNEAS: quedártela, arriesgada o mulligan; con
+    /// cuántas tierras y jugadas baratas; la probabilidad de llegar a 3 tierras
+    /// en el turno 3 (o a 4 en el 4, si ya tienes 3) empezando tú; y, si hay
+    /// historial suficiente, cómo te ha ido con manos así en este mazo.
+    ///
+    /// Las reglas son las de siempre en Construido de 60: con 0–1 o 6–7 tierras,
+    /// mulligan; con 2, sólo si hay con qué jugar pronto y la tercera llega a
+    /// tiempo la mitad de las veces; 3–4, quedártela; 5, floja. Con 5 cartas o
+    /// menos casi todo se queda: otra más es peor.
+    /// </summary>
+    internal static string TextoMulligan(int[] cartas, int tierras, int mulligans, (int Grp, int N)[] mazo, string? nombreMazo)
+    {
+        var datos = cartasDelMazoActual.GroupBy(c => c.Grp).ToDictionary(g => g.Key, g => g.First());
+        var tamMazo = mazo.Length > 0 ? mazo.Sum(c => c.N) : 60;
+        var tierrasMazo = datos.Count > 0 ? mazo.Where(c => datos.TryGetValue(c.Grp, out var d) && d.Tierra).Sum(c => c.N) : (int)Math.Round(tamMazo * 0.4);
+        var baratas = cartas.Count(g => datos.TryGetValue(g, out var d) && !d.Tierra && d.Cmc <= 2);
+        var conservas = 7 - mulligans;
+
+        var objetivo = tierras < 3 ? 3 : 4;
+        var p = AlMenos(Math.Max(0, objetivo - tierras), objetivo - 1, Math.Max(0, tierrasMazo - tierras), Math.Max(1, tamMazo - cartas.Length));
+
+        var veredicto = conservas <= 5 ? (tierras is >= 1 and <= 5 ? "mul_quedate" : "mul_arriesgada")
+            : tierras <= 1 || tierras >= 6 ? "mul_mulligan"
+            : tierras == 2 ? (baratas >= 2 && p >= 0.5 ? "mul_quedate" : "mul_arriesgada")
+            : tierras == 5 ? (conservas <= 6 ? "mul_quedate" : "mul_arriesgada")
+            : "mul_quedate";
+
+        var lineas = new List<string>
+        {
+            Textos.T(veredicto) + (mulligans > 0 && veredicto != "mul_mulligan" ? " " + Textos.T("mul_al_fondo", mulligans) : ""),
+            Textos.T("mul_resumen", tierras, baratas),
+        };
+        // La probabilidad, sólo si dice algo: con 4 tierras o más ya está hecha.
+        if (tierras < objetivo) lineas.Add(Textos.T("mul_prob", Math.Round(p * 100), objetivo));
+        // Tu historial con manos así (mismo mazo, mismas tierras, mismos mulligans), si hay bastante.
+        if (nombreMazo is { Length: > 0 })
+        {
+            var parecidas = LeerManos().Where(m => m.Mazo == nombreMazo && m.Tierras == tierras && m.Mulligans == mulligans).ToList();
+            if (parecidas.Count >= 3)
+            {
+                var g = parecidas.Count(m => m.Gane);
+                lineas.Add(Textos.T("mul_historial", tierras, g, parecidas.Count - g, Math.Round(100.0 * g / parecidas.Count)));
+            }
+        }
+        return string.Join(" ", lineas);
+    }
+
+    /// <summary>Probabilidad de sacar al menos <paramref name="k"/> éxitos en <paramref name="n"/> robos (hipergeométrica).</summary>
+    private static double AlMenos(int k, int n, int exitos, int total)
+    {
+        if (k <= 0) return 1;
+        if (n <= 0 || total <= 0) return 0;
+        static double C(int a, int b)
+        {
+            if (b < 0 || b > a) return 0;
+            double r = 1;
+            for (var i = 1; i <= b; i++) r = r * (a - b + i) / i;
+            return r;
+        }
+        var p = 0.0;
+        for (var x = k; x <= Math.Min(n, exitos); x++) p += C(exitos, x) * C(total - exitos, n - x) / C(total, n);
+        return Math.Clamp(p, 0, 1);
+    }
 
     /// <summary>
     /// LAS CARTAS DEL MAZO DE AHORA, PARA EL DESPLEGABLE «MEJORAR» de la
@@ -1621,7 +1754,12 @@ internal static class Program
                 lista.Add(new Columna.CartaMazo(c.Arena, n, nombre, c.Coste ?? "", c.Cmc, c.Tierra, await BajarImagen(c.Arte)));
             }
             // Si mientras bajaba se cambió de mazo, esto ya no es lo de ahora.
-            if (firma == firmaCartasMazo) Columna.CartasDelMazo(lista);
+            if (firma == firmaCartasMazo)
+            {
+                cartasDelMazoActual = lista;
+                Columna.CartasDelMazo(lista);
+                ActualizarRastreador();
+            }
         }
         catch { firmaCartasMazo = ""; }
     }
@@ -1867,75 +2005,83 @@ internal static class Program
         Abrir(ruta.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? ruta : Sitio + ruta);
 
     /// <summary>
-    /// EL PANEL DE CARTAS PARECIDAS, ENCIMA DE ARENA.
-    ///
-    /// La web hace el trabajo —qué se parece a qué, con qué imagen y a dónde
-    /// lleva cada carta— en `/api/puente/similares`, y aquí sólo se bajan las
-    /// ilustraciones y se pintan. Sin aviso emergente: quien avisa de que se está
-    /// buscando es la fila de la columna (Columna.EnCurso), que no tapa nada. El
-    /// panel se abre sólo con las cartas ya bajadas, de golpe. Devuelve si se
-    /// llegó a enseñar; quien llama decide qué hacer si no.
+    /// LO DE UNA PESTAÑA de la ventana de similares/combos/sinergias, con las
+    /// imágenes ya en disco: similares en una rejilla; cada combo con lo que
+    /// produce de rótulo (pulsable: abre el combo en Commander Spellbook) y sus
+    /// otras piezas; cada sinergia con su regla de rótulo. Vacía si no hay
+    /// nada; null si falló, y entonces la ventana ofrece la web.
     /// </summary>
-    private static async Task<bool> PanelSimilares(HttpClient http, string arena)
+    private static async Task<IReadOnlyList<PanelCartas.Seccion>?> SeccionesDe(HttpClient http, string arena, string pestana)
     {
         try
         {
-            var datos = await Similares(http, arena);
-            var lista = datos?.Cartas ?? [];
-            if (lista.Length == 0) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("panel_nada")); return true; }
-
-            var bajadas = await Task.WhenAll(lista.Select(async c => (Carta: c, Fichero: await BajarImagen(c.Imagen))));
-            var cartas = bajadas
-                .Where(b => b.Fichero is not null)
-                .Select(b => new PanelCartas.Carta(b.Carta.Nombre ?? "", b.Fichero!, b.Carta.Ruta, b.Carta.PrecioUsd))
-                .ToArray();
-            if (cartas.Length == 0) return false;
-
-            PanelCartas.AlAbrir = AbrirDelPanel;
-            PanelCartas.Mostrar(Textos.T("col_similares", datos?.Fuente?.Nombre ?? Textos.T("col_esta_carta")), cartas);
-            return true;
+            async Task<PanelCartas.Carta[]> Bajar(IEnumerable<(string? Nombre, string? Imagen, string? Ruta, double? Precio)> cartas)
+            {
+                var bajadas = await Task.WhenAll(cartas.Select(async c => (c, Fichero: await BajarImagen(c.Imagen))));
+                return bajadas.Where(b => b.Fichero is not null)
+                    .Select(b => new PanelCartas.Carta(b.c.Nombre ?? "", b.Fichero!, b.c.Ruta, b.c.Precio)).ToArray();
+            }
+            var secciones = new List<PanelCartas.Seccion>();
+            switch (pestana)
+            {
+                case "similares":
+                {
+                    var d = await Similares(http, arena);
+                    var cartas = await Bajar((d?.Cartas ?? []).Select(c => (c.Nombre, c.Imagen, c.Ruta, c.PrecioUsd)));
+                    if (cartas.Length > 0) secciones.Add(new PanelCartas.Seccion(null, null, cartas));
+                    break;
+                }
+                case "combos":
+                {
+                    var d = await Combos(http, arena);
+                    foreach (var combo in d?.Combos ?? [])
+                    {
+                        var cartas = await Bajar((combo.Piezas ?? []).Select(p => (p.Nombre, p.Imagen, p.Ruta, p.PrecioUsd)));
+                        if (cartas.Length > 0) secciones.Add(new PanelCartas.Seccion(combo.Resultado ?? "", combo.Url, cartas));
+                    }
+                    break;
+                }
+                default:
+                {
+                    var d = await Sinergias(http, arena);
+                    foreach (var g in d?.Grupos ?? [])
+                    {
+                        var cartas = await Bajar((g.Cartas ?? []).Select(c => (c.Nombre, c.Imagen, c.Ruta, c.PrecioUsd)));
+                        if (cartas.Length > 0) secciones.Add(new PanelCartas.Seccion(Textos.T(g.Sentido == "dan" ? "panel_sin_dan" : "panel_sin_pagan", NombreRegla(g.Regla)), null, cartas));
+                    }
+                    break;
+                }
+            }
+            return secciones;
         }
-        catch
-        {
-            return false;
-        }
+        catch { return null; }
     }
 
     /// <summary>
-    /// EL PANEL DE COMBOS: una sección por combo, con lo que produce de rótulo
-    /// (pulsable: abre el combo en Commander Spellbook) y sus otras piezas
-    /// debajo, compactas para que tres combos quepan en una pantalla de 1080.
+    /// ABRE LA VENTANA DE SIMILARES/COMBOS/SINERGIAS de una carta («grp» o
+    /// «grp:otra») en la pestaña pedida. Antes de abrir sólo se pide la carta
+    /// misma —nombre, imagen y su ficha—, que es una consulta pequeña; lo de
+    /// las pestañas lo carga la ventana (y si se precalentó, ya está).
     /// </summary>
-    private static async Task<bool> PanelCombos(HttpClient http, string arena)
+    private static async Task<bool> PanelRelacionadas(HttpClient http, string arena, string pestana)
     {
         try
         {
-            var datos = await Combos(http, arena);
-            var combos = datos?.Combos ?? [];
-            if (combos.Length == 0) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("panel_sin_combos")); return true; }
-
-            var secciones = new List<PanelCartas.Seccion>();
-            foreach (var combo in combos)
-            {
-                var piezas = combo.Piezas ?? [];
-                var bajadas = await Task.WhenAll(piezas.Select(async p => (Pieza: p, Fichero: await BajarImagen(p.Imagen))));
-                var cartas = bajadas
-                    .Where(b => b.Fichero is not null)
-                    .Select(b => new PanelCartas.Carta(b.Pieza.Nombre ?? "", b.Fichero!, b.Pieza.Ruta, b.Pieza.PrecioUsd))
-                    .ToArray();
-                if (cartas.Length == 0) continue;
-                secciones.Add(new PanelCartas.Seccion(combo.Resultado ?? "", combo.Url, cartas));
-            }
-            if (secciones.Count == 0) return false;
-
+            var (cara, otra) = Caras(arena);
+            CartaPuente? carta = null;
+            try { carta = await http.GetFromJsonAsync<CartaPuente>($"{PuertaDevice}/carta/{cara}?idioma={Textos.Idioma}{otra}", JsonOpciones); }
+            catch { /* sin la carta, la ventana igual: con su nombre genérico */ }
+            // La imagen GRANDE: la web da la pequeña (146 px), que a este tamaño se ve borrosa.
+            var imagen = await BajarImagen(carta?.Imagen?.Replace("/small/", "/normal/"));
             PanelCartas.AlAbrir = AbrirDelPanel;
-            PanelCartas.Mostrar(Textos.T("col_combos", datos?.Fuente?.Nombre ?? Textos.T("col_esta_carta")), secciones);
+            PanelCartas.MostrarRelacionadas(new PanelCartas.Relacionadas(
+                carta?.Nombre ?? Textos.T("col_esta_carta"), imagen, carta?.Ruta, pestana,
+                p => SeccionesDe(http, arena, p),
+                p => Textos.T(p == "similares" ? "panel_nada" : p == "combos" ? "panel_sin_combos" : "panel_sin_sinergias"),
+                p => Abrir($"{Sitio}/api/puente/carta/{cara}?abrir={p}&idioma={Textos.Idioma}{otra}")));
             return true;
         }
-        catch
-        {
-            return false;
-        }
+        catch { return false; }
     }
 
     /// <summary>
@@ -3254,7 +3400,7 @@ internal sealed record CartaSimilar(
     [property: JsonPropertyName("ruta")] string? Ruta);
 
 /// <summary>Lo que devuelve /api/puente/carta/&lt;arena_id&gt;: el nombre para la columna.</summary>
-internal sealed record CartaPuente([property: JsonPropertyName("nombre")] string? Nombre, [property: JsonPropertyName("imagen")] string? Imagen);
+internal sealed record CartaPuente([property: JsonPropertyName("nombre")] string? Nombre, [property: JsonPropertyName("imagen")] string? Imagen, [property: JsonPropertyName("ruta")] string? Ruta = null);
 
 internal sealed record RespuestaImportar(
     [property: JsonPropertyName("pendiente")] string? Pendiente,

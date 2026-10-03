@@ -51,7 +51,9 @@ internal static partial class PanelCartas
     private const int AIRE = 14, MARGEN = 18, ALTO_CABECERA = 44, ALTO_PIE = 22, ALTO_ROTULO = 26, AIRE_SECCION = 16;
     private const int POR_FILA = 4;
     /// <summary>El ancho del panel sale del de la carta: cuatro por fila y sus aires.</summary>
-    private static int ANCHO_PANEL => MARGEN * 2 + POR_FILA * anchoCarta + (POR_FILA - 1) * AIRE;
+    private static int ANCHO_PANEL => MARGEN * 2 + POR_FILA * anchoCarta + (POR_FILA - 1) * AIRE
+        // Similares/combos/sinergias: la carta a la izquierda y su raya (ver PanelRelacionadas).
+        + (rel is null ? 0 : anchoCarta + AIRE * 2);
 
     /// <summary>
     /// TAMAÑOS DE CARTA QUE SE PRUEBAN, de mayor a menor. «Que se puedan leer»
@@ -189,7 +191,7 @@ internal static partial class PanelCartas
     private static int alto = ALTO_CABECERA + MARGEN + ALTO_PIE + MARGEN;
     private static int anchoCarta = 170, altoCarta = 237;
     private static int bajoRaton = -1;   // índice en `huecos`; -2 = la X; -1 = nada
-    private static int altoRegion;
+    private static int altoRegion, anchoRegion;
 
     /// <summary>
     /// UN PANEL SÓLO DE TEXTO: el resumen de la partida. Va por secciones —cada
@@ -277,6 +279,7 @@ internal static partial class PanelCartas
     public static void MostrarTexto(string tituloPanel, IReadOnlyList<SeccionTexto> secciones, string textoPlano, IReadOnlyList<Enlace>? conEnlaces = null, string? tituloEnlaces = null, IReadOnlyList<Compra>? conCompras = null, string? tituloCompras = null, ResumenExtras? conExtras = null, Estadisticas? conEstadisticas = null, Importacion? conImportacion = null)
     {
         Cerrar();
+        rel = null;
         titulo = tituloPanel;
         copia = textoPlano;
         extras = conExtras;
@@ -751,6 +754,7 @@ internal static partial class PanelCartas
     public static void Mostrar(string tituloPanel, IReadOnlyList<Seccion> secciones)
     {
         Cerrar();
+        rel = null;
         titulo = tituloPanel;
         texto = null;
         var (anchoArena, altoArena) = MedidasDeArena();
@@ -787,18 +791,19 @@ internal static partial class PanelCartas
     private static (Hueco[] Huecos, int Alto) Disponer(IReadOnlyList<Seccion> secciones)
     {
         var lista = new List<Hueco>();
-        var y = ALTO_CABECERA + MARGEN;
+        var y = ArribaContenido;
+        var izquierda = IzquierdaContenido;
         foreach (var s in secciones)
         {
             if (s.Cartas.Count == 0) continue;
             if (s.Rotulo is not null)
             {
-                lista.Add(new Hueco(MARGEN, y, ANCHO_PANEL - MARGEN * 2, ALTO_ROTULO, null, s));
+                lista.Add(new Hueco(izquierda, y, ANCHO_PANEL - izquierda - MARGEN, ALTO_ROTULO, null, s));
                 y += ALTO_ROTULO;
             }
             for (var i = 0; i < s.Cartas.Count; i++)
             {
-                var x = MARGEN + (i % POR_FILA) * (anchoCarta + AIRE);
+                var x = izquierda + (i % POR_FILA) * (anchoCarta + AIRE);
                 var fila = i / POR_FILA;
                 lista.Add(new Hueco(x, y + fila * (altoCarta + AIRE), anchoCarta, altoCarta, s.Cartas[i], s));
             }
@@ -835,6 +840,7 @@ internal static partial class PanelCartas
             if (ventana == IntPtr.Zero) return;
 
             altoRegion = alto;
+            anchoRegion = ANCHO_PANEL;
             SetWindowRgn(ventana, CreateRoundRectRgn(0, 0, ANCHO_PANEL + 1, alto + 1, 16, 16), true);
             // Stats casi opaco: sus gráficas no se leen con el juego asomando por detrás.
             SetLayeredWindowAttributes(ventana, 0, (byte)(est is not null || imp is not null ? 252 : 244), LWA_ALPHA);
@@ -899,9 +905,10 @@ internal static partial class PanelCartas
     {
         var (x, y, ver) = Donde();
         SetWindowPos(ventana, HWND_TOPMOST, x, y, ANCHO_PANEL, alto, SWP_NOACTIVATE | (ver ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
-        if (altoRegion != alto)
+        if (altoRegion != alto || anchoRegion != ANCHO_PANEL)
         {
             altoRegion = alto;
+            anchoRegion = ANCHO_PANEL;
             SetWindowRgn(ventana, CreateRoundRectRgn(0, 0, ANCHO_PANEL + 1, alto + 1, 16, 16), true);
         }
     }
@@ -943,6 +950,8 @@ internal static partial class PanelCartas
         }
         var x = (short)(lParam.ToInt64() & 0xFFFF);
         var y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
+        var cr = QueHayEnRelacionadas(x, y);
+        if (cr != 0) return cr;
         if (y < ALTO_CABECERA) return x >= ANCHO_PANEL - 44 ? -2 : -1;
         var lista = huecos;
         for (var i = 0; i < lista.Length; i++)
@@ -972,7 +981,7 @@ internal static partial class PanelCartas
                 var i = bajoRaton;
                 var lista = huecos;
                 var pulsable = i == -2 || i == BAJO_COPIAR || (i <= BAJO_ENLACE && i > BAJO_TONO) || (i <= BAJO_TONO && i > BAJO_TURNO) || (i <= BAJO_AVATAR && i > BAJO_JUGADA) || (i <= BAJO_COINCIDEN && i > BAJO_PUNTO_EST)
-                    || PulsableEstadisticas(i) || PulsableImportacion(i)
+                    || PulsableEstadisticas(i) || PulsableImportacion(i) || PulsableRelacionadas(i)
                     || (i >= 0 && i < lista.Length && (lista[i].Carta?.Ruta ?? lista[i].Seccion.Ruta) is not null);
                 SetCursor(LoadCursor(IntPtr.Zero, pulsable ? IDC_HAND : IDC_ARROW));
                 return new IntPtr(1);
@@ -1009,6 +1018,7 @@ internal static partial class PanelCartas
                 if (i == BAJO_COPIAR) { copiado = Copiar(copia); InvalidateRect(hWnd, IntPtr.Zero, false); return IntPtr.Zero; }
                 if (PulsarEstadisticas(i, hWnd)) return IntPtr.Zero;
                 if (PulsarImportacion(i, hWnd)) return IntPtr.Zero;
+                if (PulsarRelacionadas(i, hWnd)) return IntPtr.Zero;
                 if (i <= BAJO_COINCIDEN && BAJO_COINCIDEN - i < enlaces.Length && AlAbrir is { } abrirMazo)
                 {
                     var rutaMazo = enlaces[BAJO_COINCIDEN - i].Ruta;
@@ -1051,6 +1061,12 @@ internal static partial class PanelCartas
 
             case WM_TIMER:
                 Recolocar();
+                return IntPtr.Zero;
+
+            // Ha llegado una pestaña (ver PanelRelacionadas.CargarPestana): a su tamaño y a pintar.
+            case WM_REHACER:
+                Recolocar();
+                InvalidateRect(hWnd, IntPtr.Zero, false);
                 return IntPtr.Zero;
 
             case WM_CLOSE:
@@ -1412,6 +1428,9 @@ internal static partial class PanelCartas
                     }
                 }
             }
+
+            // Similares/combos/sinergias: pestañas, la carta de la que se parte y, si no hay cartas, por qué.
+            if (rel is not null) PintarRelacionadas(hdc);
 
             var lista = huecos;
             for (var i = 0; i < lista.Length; i++)

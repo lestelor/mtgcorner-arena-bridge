@@ -136,6 +136,30 @@ internal static class Contexto
 
     /// <summary>Algo de lo de arriba ha cambiado. Salta en el hilo del vigía.</summary>
     public static event Action? Cambio;
+
+    /// <summary>
+    /// TU BIBLIOTECA EN PARTIDA, para el rastreador (pedido del usuario el
+    /// 2026-10-03): cuántas cartas quedan en ella y, por carta, cuántas tuyas
+    /// se han visto FUERA —mano, mesa, cementerio, exilio, pila, mando—. Lo
+    /// que queda de cada una es lo del mazo menos eso.
+    ///
+    /// Sale de las ZONAS, no de la última zona de cada instancia: Arena le da
+    /// a una carta un número nuevo cada vez que cambia de zona y el viejo se
+    /// queda en el limbo, así que contar instancias por su última zona contaba
+    /// dos veces lo que se jugaba desde la mano. Cada zona llega entera con la
+    /// lista de lo que tiene, y eso sí es el estado de verdad.
+    /// </summary>
+    public static int BibliotecaTam { get; private set; }
+    public static IReadOnlyDictionary<int, int> FueraDeBiblioteca { get; private set; } = new Dictionary<int, int>();
+    /// <summary>La biblioteca ha cambiado (has robado, jugado, buscado…). Salta en el hilo del vigía.</summary>
+    public static event Action? BibliotecaCambio;
+
+    /// <summary>
+    /// ARENA TE OFRECE UNA MANO (la inicial o la de un mulligan): sus cartas
+    /// con repeticiones, cuántas son tierra y cuántos mulligans llevas. Para el
+    /// consejo de mulligan. Salta en el hilo del vigía, una vez por mano.
+    /// </summary>
+    public static event Action<int[], int, int>? ManoNueva;
     /// <summary>Arena ha vuelto a empezar el registro (lo rota al arrancar): sesión nueva, marcador a cero.</summary>
     public static event Action? RegistroReiniciado;
 
@@ -160,6 +184,9 @@ internal static class Contexto
         @"(?:[^{]{0,200}?""color"":\s*\[([^\]]{0,120}?)\])?" +
         @"(?:[^{]{0,400}?""othersideGrpId"":\s*(\d+))?", RegexOptions.Compiled);
     private static readonly Regex Zona = new(@"""zoneId"":\s*(\d+),\s*""type"":\s*""ZoneType_(\w+)""", RegexOptions.Compiled);
+    // La zona entera: su dueño (las de cada jugador) y lo que tiene ahora. Sin
+    // «objectInstanceIds» es que está vacía.
+    private static readonly Regex ZonaCompleta = new(@"""zoneId"":\s*(\d+),\s*""type"":\s*""ZoneType_\w+"",\s*""visibility"":\s*""\w+""(?:,\s*""ownerSeatId"":\s*(\d+))?(?:,\s*""objectInstanceIds"":\s*\[([\d,\s]*)\])?", RegexOptions.Compiled);
     // Un traslado: qué instancia y a qué zona llega. Los detalles son una lista de
     // pares y `zone_dest` no es el primero, así que se salta con `.{0,400}?`.
     private static readonly Regex Traslado = new(
@@ -200,6 +227,18 @@ internal static class Contexto
     }
     /// <summary>Zona → su tipo («Battlefield», «Stack», «Hand»…). Los números cambian en cada partida.</summary>
     private static readonly Dictionary<int, string> zonas = new();
+    /// <summary>Zona → lo que tiene ahora (instancias) y, si es de un jugador, de quién.</summary>
+    private static readonly Dictionary<int, int[]> idsZona = new();
+    private static readonly Dictionary<int, int> duenoZona = new();
+    private static string firmaBiblioteca = "", firmaMano = "";
+    /// <summary>Los mulligans de la mano en curso: suma con cada «mulligan» tuyo y vuelve a cero al quedártela.</summary>
+    private static int mulligansHechos;
+    /// <summary>
+    /// En la primera lectura (la cola del registro al arrancar) no se avisa de
+    /// manos: serían las de partidas ya jugadas, y el consejo saldría tarde y
+    /// sobre una mano que ya no está.
+    /// </summary>
+    private static bool leyendoLoViejo;
     /// <summary>Tu asiento en la partida en curso (1 o 2), o 0 si aún no se sabe.</summary>
     private static int miAsiento;
     /// <summary>La cronología de la partida en curso y lo que hace falta para cerrarla.</summary>
@@ -303,6 +342,8 @@ internal static class Contexto
             posicion = 0;
             objetos.Clear();
             zonas.Clear();
+            idsZona.Clear();
+            duenoZona.Clear();
             miAsiento = 0;
             turnos.Clear();
             manos.Clear();
@@ -318,6 +359,7 @@ internal static class Contexto
         {
             // Sólo la cola: ver COLA_AL_EMPEZAR.
             estrenando = false;
+            leyendoLoViejo = true;
             posicion = Math.Max(0, fs.Length - COLA_AL_EMPEZAR);
         }
         if (fs.Length == posicion) return;
@@ -428,6 +470,14 @@ internal static class Contexto
             }
 
             foreach (Match z in Zona.Matches(linea)) zonas[int.Parse(z.Groups[1].Value)] = z.Groups[2].Value;
+            foreach (Match z in ZonaCompleta.Matches(linea))
+            {
+                var idz = int.Parse(z.Groups[1].Value);
+                if (z.Groups[2].Success) duenoZona[idz] = int.Parse(z.Groups[2].Value);
+                idsZona[idz] = z.Groups[3].Success
+                    ? z.Groups[3].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(int.Parse).ToArray()
+                    : [];
+            }
 
             if (linea.Contains("\"grpId\"", StringComparison.Ordinal))
             {
@@ -497,6 +547,19 @@ internal static class Contexto
                     else if (obj.Dueno == 3 - miAsiento) { rival = obj.Grp; rivalOtra = obj.Otra; }
                 }
             }
+            // Tus respuestas: lo que cuenta los mulligans de la mano que llega.
+            if (linea.Contains("MulliganOption_Mulligan", StringComparison.Ordinal)) mulligansHechos++;
+            else if (linea.Contains("MulliganOption_AcceptHand", StringComparison.Ordinal)) mulligansHechos = 0;
+            if (linea.Contains("GREMessageType_MulliganReq", StringComparison.Ordinal) && miAsiento != 0)
+            {
+                var (cartasMano, tierrasMano, firma) = ManoCompleta();
+                if (cartasMano.Length > 0 && firma != firmaMano)
+                {
+                    firmaMano = firma;
+                    if (!leyendoLoViejo)
+                        try { ManoNueva?.Invoke(cartasMano, tierrasMano, mulligansHechos); } catch { /* cosa de quien escucha */ }
+                }
+            }
             if (linea.Contains("onHover", StringComparison.Ordinal))
             {
                 var m = BajoRaton.Match(linea);
@@ -541,6 +604,9 @@ internal static class Contexto
                 rivalOtra = null;
                 objetos.Clear();
                 zonas.Clear();
+                idsZona.Clear();
+                duenoZona.Clear();
+                firmaMano = "";
                 miAsiento = 0;
             }
         }
@@ -566,6 +632,64 @@ internal static class Contexto
             colores = sb.ToString();
         }
         Cambiar(mazo, carta, otraCara, rival, rivalOtra, enPartida, colores, [.. mesa], [.. vistas]);
+        ContarBiblioteca();
+        leyendoLoViejo = false;
+    }
+
+    /// <summary>Las zonas en las que una carta tuya ha salido de la biblioteca (el limbo no: ahí van los números viejos).</summary>
+    private static readonly HashSet<string> FueraDeLaBiblioteca = ["Hand", "Battlefield", "Graveyard", "Exile", "Stack", "Command"];
+
+    /// <summary>Recuenta tu biblioteca y avisa si ha cambiado. Ver BibliotecaTam.</summary>
+    private static void ContarBiblioteca()
+    {
+        var tam = 0;
+        var fuera = new Dictionary<int, int>();
+        if (miAsiento != 0)
+        {
+            foreach (var (idz, ids) in idsZona)
+            {
+                if (!zonas.TryGetValue(idz, out var tipo)) continue;
+                if (tipo == "Library")
+                {
+                    if (duenoZona.TryGetValue(idz, out var d) && d == miAsiento) tam = ids.Length;
+                    continue;
+                }
+                if (!FueraDeLaBiblioteca.Contains(tipo)) continue;
+                foreach (var id in ids)
+                    if (objetos.TryGetValue(id, out var o) && o.EsCarta && o.Grp > 0 && o.Dueno == miAsiento)
+                        fuera[o.Grp] = fuera.GetValueOrDefault(o.Grp) + 1;
+            }
+        }
+        var firma = tam + "|" + string.Join(",", fuera.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}x{kv.Value}"));
+        if (firma == firmaBiblioteca) return;
+        firmaBiblioteca = firma;
+        BibliotecaTam = tam;
+        FueraDeBiblioteca = fuera;
+        try { BibliotecaCambio?.Invoke(); } catch { /* cosa de quien escucha */ }
+    }
+
+    /// <summary>
+    /// Tu mano ahora, CON REPETICIONES (dos Llanuras son dos), cuántas son
+    /// tierra y una firma para no avisar dos veces de la misma: de la zona de
+    /// la mano, que es la lista de verdad.
+    /// </summary>
+    private static (int[] Cartas, int Tierras, string Firma) ManoCompleta()
+    {
+        foreach (var (idz, ids) in idsZona)
+        {
+            if (!zonas.TryGetValue(idz, out var tipo) || tipo != "Hand") continue;
+            if (!duenoZona.TryGetValue(idz, out var d) || d != miAsiento) continue;
+            var cartas = new List<int>();
+            var tierras = 0;
+            foreach (var id in ids)
+            {
+                if (!objetos.TryGetValue(id, out var o) || o.Grp <= 0) continue;
+                cartas.Add(o.Grp);
+                if (o.EsTierra) tierras++;
+            }
+            return (cartas.ToArray(), tierras, string.Join(",", ids));
+        }
+        return ([], 0, "");
     }
 
     /// <summary>Tus cartas cuya zona es una mano ahora mismo (las del rival no tienen grpId): distintas, en orden de instancia.</summary>

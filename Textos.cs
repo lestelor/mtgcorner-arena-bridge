@@ -1640,5 +1640,65 @@ internal static class Textos
             "Click a card to see its similar cards, combos and synergies, right here over the game.", "Pulsa una carta para ver sus similares, combos y sinergias, aquí mismo encima del juego.", "Klicke auf eine Karte, um ähnliche Karten, Kombos und Synergien direkt über dem Spiel zu sehen.", "Clique sur une carte pour voir ses cartes similaires, combos et synergies, ici même au-dessus du jeu.",
             "Clica numa carta para ver as semelhantes, combos e sinergias, aqui mesmo por cima do jogo.", "Clicca una carta per vedere simili, combo e sinergie, qui sopra il gioco.", "カードをクリックすると、類似カード・コンボ・シナジーをゲームの上に表示します。", "点击一张牌，即可在游戏上方查看相似牌、组合技和协同。",
         ],
+        ["panel_cargando"] =
+        [
+            "Loading…", "Cargando…", "Wird geladen…", "Chargement…",
+            "A carregar…", "Caricamento…", "読み込み中…", "加载中…",
+        ],
+        ["panel_fallo_web"] =
+        [
+            "Couldn't load this. Click here to see it on the website.", "No se ha podido cargar. Pulsa aquí para verlo en la web.", "Konnte nicht geladen werden. Klicke hier, um es auf der Website zu sehen.", "Impossible de charger. Clique ici pour le voir sur le site.",
+            "Não foi possível carregar. Clica aqui para ver no site.", "Impossibile caricare. Clicca qui per vederlo sul sito.", "読み込めませんでした。ここをクリックしてサイトで表示します。", "无法加载。点击此处在网站上查看。",
+        ],
+        ["rast_biblioteca"] =
+        [
+            "Library · {0}", "Biblioteca · {0}", "Bibliothek · {0}", "Bibliothèque · {0}",
+            "Grimório · {0}", "Grimorio · {0}", "ライブラリー・{0}", "牌库・{0}",
+        ],
+        ["rast_tierra"] =
+        [
+            "Land on the next draw: {0}", "Tierra en el próximo robo: {0}", "Land beim nächsten Ziehen: {0}", "Terrain à la prochaine pioche : {0}",
+            "Terreno no próximo saque: {0}", "Terra alla prossima pescata: {0}", "次のドローで土地：{0}", "下次抓到地：{0}",
+        ],
+        ["mul_titulo"] =
+        [
+            "Your opening hand", "Tu mano inicial", "Deine Starthand", "Ta main de départ",
+            "A tua mão inicial", "La tua mano iniziale", "初手", "你的起手",
+        ],
+        ["mul_quedate"] =
+        [
+            "Keep it.", "Quédatela.", "Behalten.", "Garde-la.",
+            "Fica com ela.", "Tienila.", "キープ。", "留下。",
+        ],
+        ["mul_arriesgada"] =
+        [
+            "Risky.", "Arriesgada.", "Riskant.", "Risquée.",
+            "Arriscada.", "Rischiosa.", "リスクあり。", "有风险。",
+        ],
+        ["mul_mulligan"] =
+        [
+            "Mulligan.", "Mulligan.", "Mulligan.", "Mulligan.",
+            "Mulligan.", "Mulligan.", "マリガン。", "调度。",
+        ],
+        ["mul_al_fondo"] =
+        [
+            "(put {0} on the bottom)", "(pon {0} al fondo)", "({0} unter die Bibliothek)", "(mets-en {0} en dessous)",
+            "(põe {0} no fundo)", "(mettine {0} in fondo)", "（{0} 枚をボトムに）", "（将 {0} 张置底）",
+        ],
+        ["mul_resumen"] =
+        [
+            "Lands: {0} · 1–2 mana plays: {1}.", "Tierras: {0} · jugadas de 1–2 maná: {1}.", "Länder: {0} · Karten für 1–2 Mana: {1}.", "Terrains : {0} · sorts à 1–2 mana : {1}.",
+            "Terrenos: {0} · jogadas de 1–2 mana: {1}.", "Terre: {0} · giocate da 1–2 mana: {1}.", "土地：{0}・1–2マナのカード：{1}。", "地：{0}・1–2 法术力的牌：{1}。",
+        ],
+        ["mul_prob"] =
+        [
+            "{0}% chance of having {1} lands on turn {1} on the play.", "{0}% de tener {1} tierras en el turno {1} si empiezas.", "{0} % Chance auf {1} Länder in Zug {1}, wenn du beginnst.", "{0} % de chances d'avoir {1} terrains au tour {1} si tu commences.",
+            "{0}% de ter {1} terrenos no turno {1} se começares.", "{0}% di avere {1} terre al turno {1} se inizi tu.", "先手なら {1} ターン目に土地 {1} 枚の確率 {0}%。", "先手时第 {1} 回合有 {1} 张地的几率为 {0}%。",
+        ],
+        ["mul_historial"] =
+        [
+            "Hands like this in this deck: {1}–{2} ({3}%).", "Manos así en este mazo: {1}–{2} ({3}%).", "Solche Hände mit diesem Deck: {1}–{2} ({3} %).", "Mains comme celle-ci avec ce deck : {1}–{2} ({3} %).",
+            "Mãos assim neste baralho: {1}–{2} ({3}%).", "Mani così con questo mazzo: {1}–{2} ({3}%).", "このデッキでの同様の手札：{1}勝{2}敗（{3}%）。", "这副套牌的类似起手：{1}–{2}（{3}%）。",
+        ],
     };
 }

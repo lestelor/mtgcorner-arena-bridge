@@ -36,13 +36,13 @@ namespace MtgCornerArenaBridge;
 /// </summary>
 internal static class Columna
 {
-    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival, Inicio, Estadisticas, Creador, CartaMazo, AccionesCarta, MasCartas }
+    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival, Inicio, Estadisticas, Creador, CartaMazo, MasCartas }
 
     /// <summary>
     /// Una fila. Las de contexto traen su etiqueta hecha y un dato (nombre del
     /// mazo, id de la carta). <paramref name="Nivel"/>: 0 las de siempre; 1 lo
-    /// que cuelga del desplegable del mazo (el creador y cada carta); 2 la fila
-    /// de botones de la carta abierta. <paramref name="Carta"/>, en las cartas.
+    /// que cuelga del desplegable del mazo (el creador y cada carta).
+    /// <paramref name="Carta"/>, en las cartas.
     /// </summary>
     private sealed record Fila(Accion Accion, string Glifo, string Clave, string? Dato = null, string? Etiqueta = null, int Nivel = 0, CartaMazo? Carta = null);
 
@@ -269,18 +269,23 @@ internal static class Columna
     // columna, con la misma forma —no otra ventana—, la primera fila lleva al
     // creador y debajo va cada carta del mazo como una barra con su
     // ilustración, a la manera del rastreador de mazo de Untapped. Pulsar una
-    // carta abre debajo sus tres botones: similares, combos y sinergias, los
-    // mismos paneles que las filas de la carta que señalas en la mesa.
+    // carta abre ya la ventana de sus similares, con pestañas para combos y
+    // sinergias (ver PanelRelacionadas.cs; antes eran tres botones en medio, y
+    // el usuario prefirió ir directo, 2026-10-03). Con el ratón encima se
+    // precalienta, para que al pulsar salga llena.
     //
     // Mientras está abierto, las filas de siempre se esconden (la lista ya es
     // larga y la columna no puede salirse de Arena) y, si el mazo no cabe, se
     // recorre con la rueda. Al quitar el ratón de la columna se pliega.
     private static volatile CartaMazo[] cartasMazo = [];
     private static volatile bool desplegado;
+    /// <summary>La carta cuya ventana se abrió la última: lleva la raya azul.</summary>
     private static int? cartaAbierta;
     private static int desdeCarta;
-    private static int xRaton = -1;
-    private const int ALTO_CARTA = 30, ALTO_BOTONES = 36, ANCHO_ARTE = 104;
+    private const int ALTO_CARTA = 30, ANCHO_ARTE = 104;
+
+    /// <summary>Con el ratón encima de una carta del desplegable: su dato («grp»), para precalentarla. Lo pone Program.</summary>
+    public static Action<string>? AlSenalarCarta { get; set; }
 
     /// <summary>Las cartas del mazo de ahora, ya con su ilustración en disco. Las pone Program.</summary>
     public static void CartasDelMazo(IReadOnlyList<CartaMazo> cartas)
@@ -329,8 +334,6 @@ internal static class Columna
             var ancho = ANCHO_ABIERTA;
             foreach (var f in Filas)
             {
-                // La fila de botones se mide al pintarla; las cartas, con su ilustración.
-                if (f.Accion == Accion.AccionesCarta) continue;
                 var r = new RECT();
                 DrawText(hdc, Etiqueta(f), -1, ref r, DT_CALCRECT | DT_SINGLELINE);
                 // El hueco del icono, el texto, y el aire de la derecha (y la
@@ -377,15 +380,12 @@ internal static class Columna
             arriba.Add(new Fila(Accion.Creador, "", "col_creador", c.Dato, Nivel: 1));
             var cartas = cartasMazo;
             // Lo que ocupa lo demás, para saber cuántas cartas caben.
-            var resto = ALTO_CABECERA + AIRE_ABAJO + contexto.Length * ALTO_FILA + ALTO_CARTA * 3 + (cartaAbierta is null ? 0 : ALTO_BOTONES);
+            var resto = ALTO_CABECERA + AIRE_ABAJO + contexto.Length * ALTO_FILA + ALTO_CARTA * 3;
             var caben = CartasQueCaben(resto);
             desdeCarta = Math.Clamp(desdeCarta, 0, Math.Max(0, cartas.Length - caben));
             if (desdeCarta > 0) arriba.Add(new Fila(Accion.MasCartas, "", "", "arriba", Textos.T("col_cartas_antes", desdeCarta), Nivel: 1));
             foreach (var carta in cartas.Skip(desdeCarta).Take(caben))
-            {
                 arriba.Add(new Fila(Accion.CartaMazo, "", "", carta.Grp.ToString(), carta.Nombre, 1, carta));
-                if (cartaAbierta == carta.Grp) arriba.Add(new Fila(Accion.AccionesCarta, "", "", carta.Grp.ToString(), Nivel: 2, Carta: carta));
-            }
             var despues = cartas.Length - desdeCarta - caben;
             if (despues > 0) arriba.Add(new Fila(Accion.MasCartas, "", "", "abajo", Textos.T("col_cartas_despues", despues), Nivel: 1));
         }
@@ -424,8 +424,8 @@ internal static class Columna
         }
     }
 
-    /// <summary>Lo que mide una fila: las de siempre 44; las cartas del desplegable, más finas; su fila de botones, entre medias.</summary>
-    private static int AltoDe(Fila f) => f.Nivel == 0 ? ALTO_FILA : f.Nivel == 2 ? ALTO_BOTONES : ALTO_CARTA;
+    /// <summary>Lo que mide una fila: las de siempre 44; las del desplegable, más finas.</summary>
+    private static int AltoDe(Fila f) => f.Nivel == 0 ? ALTO_FILA : ALTO_CARTA;
 
     /// <summary>Dónde empieza la fila i: las de siempre bajan el hueco del grupo cuando hay filas del momento.</summary>
     private static int ArribaDe(int i)
@@ -712,12 +712,12 @@ internal static class Columna
                 var fila = FilaEn(lParam);
                 var cambia = !abierta || fila != filaBajoRaton;
                 if (!abierta) { abierta = true; Recolocar(); }
-                filaBajoRaton = fila;
-                // La x sólo importa en la fila de botones (cuál se resalta).
-                var x = (short)(lParam.ToInt64() & 0xFFFF);
+                // Una carta del desplegable recién señalada: a precalentar (ver AlSenalarCarta).
                 var filasM = Filas;
-                if (fila >= 0 && fila < filasM.Length && filasM[fila].Accion == Accion.AccionesCarta && BotonEn(x) != BotonEn(xRaton)) cambia = true;
-                xRaton = x;
+                if (fila != filaBajoRaton && fila >= 0 && fila < filasM.Length && filasM[fila].Accion == Accion.CartaMazo
+                    && filasM[fila].Dato is { } datoSenalado && AlSenalarCarta is { } senalar)
+                    _ = Task.Run(() => { try { senalar(datoSenalado); } catch { /* sin precalentar, se pide al pulsar */ } });
+                filaBajoRaton = fila;
                 if (cambia) InvalidateRect(hWnd, IntPtr.Zero, true);
                 return IntPtr.Zero;
             }
@@ -727,7 +727,6 @@ internal static class Columna
                 if (ForzarAbierta) return IntPtr.Zero;
                 abierta = false;
                 filaBajoRaton = -1;
-                xRaton = -1;
                 // Al cerrarse la columna, el desplegable se pliega.
                 if (desplegado) { desplegado = false; cartaAbierta = null; desdeCarta = 0; Rehacer(); }
                 Recolocar();
@@ -767,23 +766,19 @@ internal static class Columna
                             desplegado = !desplegado; cartaAbierta = null; desdeCarta = 0;
                             Rehacer(); Recolocar();
                             return IntPtr.Zero;
-                        case Accion.CartaMazo when f.Carta is { } carta:
-                            cartaAbierta = cartaAbierta == carta.Grp ? null : carta.Grp;
-                            Rehacer(); Recolocar();
+                        case Accion.CartaMazo when f.Carta is { } carta && alPulsar is { } pulsarCarta:
+                        {
+                            // Directo a la ventana de sus similares (con pestañas para lo demás).
+                            cartaAbierta = carta.Grp;
+                            InvalidateRect(hWnd, IntPtr.Zero, false);
+                            var datoC = carta.Grp.ToString();
+                            _ = Task.Run(async () => { try { await pulsarCarta(Accion.Similares, datoC); } catch { /* lo cuenta quien la lanzó */ } });
                             return IntPtr.Zero;
+                        }
                         case Accion.MasCartas:
                             desdeCarta = Math.Max(0, desdeCarta + (f.Dato == "arriba" ? -8 : 8));
                             Rehacer(); Recolocar();
                             return IntPtr.Zero;
-                        case Accion.AccionesCarta when f.Carta is { } cartaB && alPulsar is { } pulsarB:
-                        {
-                            var boton = BotonEn((short)(lParam.ToInt64() & 0xFFFF));
-                            if (boton < 0) return IntPtr.Zero;
-                            var accionB = Botones[boton].Accion;
-                            var datoB = cartaB.Grp.ToString();
-                            _ = Task.Run(async () => { try { await pulsarB(accionB, datoB); } catch { /* lo cuenta quien la lanzó */ } });
-                            return IntPtr.Zero;
-                        }
                     }
                 }
                 if (fila >= 0 && fila < filas.Length && alPulsar is { } pulsar)
@@ -977,23 +972,6 @@ internal static class Columna
         }
     }
 
-    /// <summary>Los botones de la carta abierta: lo mismo que las filas de la carta señalada en la mesa.</summary>
-    private static readonly (Accion Accion, string Glifo, string Clave)[] Botones =
-    [
-        (Accion.Similares, "\uE8C8", "col_boton_similares"),
-        (Accion.Combos, "\uE71B", "col_boton_combos"),
-        (Accion.Sinergias, "\uE945", "col_boton_sinergias"),
-    ];
-    /// <summary>Dónde va cada botón (x de la ventana), calculado al pintar la fila de botones.</summary>
-    private static (int Desde, int Hasta)[] rectBotones = [];
-
-    private static int BotonEn(int x)
-    {
-        var r = rectBotones;
-        for (var k = 0; k < r.Length; k++) if (x >= r[k].Desde && x < r[k].Hasta) return k;
-        return -1;
-    }
-
     // GDI+ para la ilustración que se funde en la barra de la carta.
     [StructLayout(LayoutKind.Sequential)] private struct PuntoG { public int X, Y; }
     [DllImport("gdiplus.dll")] private static extern int GdipDrawImageRectRectI(IntPtr g, IntPtr imagen, int dx, int dy, int dw, int dh, int sx, int sy, int sw, int sh, int unidad, IntPtr atributos, IntPtr llamada, IntPtr datos);
@@ -1018,7 +996,7 @@ internal static class Columna
     /// Las filas del desplegable del mazo. El creador, en azul; cada carta como
     /// una barra: cuántas a la izquierda, el nombre, y a la derecha la
     /// ilustración fundiéndose con el fondo y el coste encima, como el
-    /// rastreador de Untapped; la fila de botones, tres fichas con su icono.
+    /// rastreador de Untapped.
     /// </summary>
     private static void PintarDelMazo(IntPtr hdc, Fila f, int i, int arriba, int ancho, IntPtr texto, IntPtr glifos)
     {
@@ -1091,35 +1069,6 @@ internal static class Columna
                     SetTextColor(hdc, sobre || abierta2 ? Rgb(255, 255, 255) : Rgb(226, 232, 240));
                     var rT = new RECT { Left = ANCHO_CERRADA + 2, Top = rB.Top, Right = rB.Right - 34, Bottom = rB.Bottom };
                     DrawText(hdc, c.Nombre, -1, ref rT, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-                    break;
-                }
-                case Accion.AccionesCarta:
-                {
-                    // Tres fichas: icono y nombre; la que está bajo el ratón, en azul.
-                    var x = ANCHO_CERRADA + 2;
-                    var nuevos = new (int, int)[Botones.Length];
-                    for (var k = 0; k < Botones.Length; k++)
-                    {
-                        var rotulo = Textos.T(Botones[k].Clave);
-                        SelectObject(hdc, fChica);
-                        var rm = new RECT();
-                        DrawText(hdc, rotulo, -1, ref rm, DT_CALCRECT | DT_SINGLELINE);
-                        var w = 12 + 18 + (rm.Right - rm.Left) + 12;
-                        nuevos[k] = (x, x + w);
-                        var activo = sobre && BotonEn(xRaton) == k;
-                        var rF = new RECT { Left = x, Top = arriba + 5, Right = x + w, Bottom = arriba + alto - 5 };
-                        var pincelF = CreateSolidBrush(activo ? Rgb(56, 189, 248) : Rgb(26, 34, 54)); FillRect(hdc, ref rF, pincelF); DeleteObject(pincelF);
-                        SelectObject(hdc, fGlifoChico);
-                        SetTextColor(hdc, activo ? Rgb(9, 13, 24) : Rgb(125, 211, 252));
-                        var rGl = new RECT { Left = x + 10, Top = rF.Top, Right = x + 28, Bottom = rF.Bottom };
-                        DrawText(hdc, Botones[k].Glifo, -1, ref rGl, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                        SelectObject(hdc, fChica);
-                        SetTextColor(hdc, activo ? Rgb(9, 13, 24) : Rgb(226, 232, 240));
-                        var rTx = new RECT { Left = x + 30, Top = rF.Top, Right = x + w - 6, Bottom = rF.Bottom };
-                        DrawText(hdc, rotulo, -1, ref rTx, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-                        x += w + 6;
-                    }
-                    rectBotones = nuevos;
                     break;
                 }
             }
