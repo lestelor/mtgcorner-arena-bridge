@@ -558,7 +558,7 @@ internal static class Program
             if (vinculoC is not null) httpC.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoC.Token);
             var mesaC = new Contexto.Mesa(3, [58437, 92081, 51307, 91549, 92073],
                 [new(58437, false, true), new(58437, false, true), new(92089, false, false)], [new(93838, false, false)], 20, 18);
-            Console.WriteLine($"competitivo «Qualifier_Weekend»: {EventoCompetitivo("Qualifier_Weekend")} · «Ladder»: {EventoCompetitivo("Ladder")}");
+            Console.WriteLine($"competitivo «Qualifier_Weekend»: {EventoCompetitivo("Qualifier_Weekend")} · «Ladder»: {EventoCompetitivo("Ladder")} · «ArenaDirect_MSH_Play»: {EventoCompetitivo("ArenaDirect_MSH_Play")} · «DirectGameLimited»: {EventoCompetitivo("DirectGameLimited")}");
             // --tono=sargento (o amable, directo): la figura y la voz de ese entrenador.
             if (args.FirstOrDefault(a => a.StartsWith("--tono=")) is { } tonoArg && TONOS.Contains(tonoArg[7..])) tonoActual = tonoArg[7..];
             await PrecargarEntrenadores();
@@ -1305,7 +1305,7 @@ internal static class Program
         // Y al empezar el del rival, lo que puedas jugar a destiempo (instantáneos, destello).
         Contexto.TurnoDelRival += mesa => { if (consejoActivo) _ = ConsejoTurno(http, mesa, rival: true); };
         // Empieza tu primer turno: la fila de la mano ya no hace falta.
-        Contexto.MiFasePrincipal += _ => { if (manoAviso is not null) { manoAviso = null; Columna.Olvidar("mano"); refrescarColumna?.Invoke(); } };
+        Contexto.MiFasePrincipal += _ => { Interlocked.Increment(ref manoEnCurso); if (manoAviso is not null) { manoAviso = null; Columna.Olvidar("mano"); refrescarColumna?.Invoke(); } };
         Contexto.PartidaAcabada += ApuntarMano;
         Contexto.Cambio += () => VigilarAmenazas(http, ActualizarColumna);
         _ = Task.Run(async () => { try { if (await BuscarVersionNueva() is not null) Columna.Destacar("version"); } catch { /* sin red */ } });
@@ -1714,9 +1714,15 @@ internal static class Program
         catch { /* sin guardar, vale para esta sesión */ }
     }
 
-    /// <summary>¿Es un evento competitivo? Ahí no se aconseja: lo prohíben sus reglas.</summary>
+    /// <summary>
+    /// ¿Es un evento competitivo? Ahí no se aconseja: lo prohíben sus reglas.
+    /// Las Arena Direct (sellado con cajas de sobres físicas de premio) se
+    /// llaman «ArenaDirect_MSH_Play» y similares (visto en el Player.log el
+    /// 2026-10-03); ojo, «arenadirect» y no «direct» a secas: «DirectGame…»
+    /// es el desafío directo contra un amigo, y ahí sí se aconseja.
+    /// </summary>
     internal static bool EventoCompetitivo(string? evento) =>
-        evento is { Length: > 0 } e && new[] { "qualifier", "championship", "arenaopen", "arena_open", "playin" }.Any(x => e.Contains(x, StringComparison.OrdinalIgnoreCase));
+        evento is { Length: > 0 } e && new[] { "qualifier", "championship", "arenaopen", "arena_open", "playin", "arenadirect" }.Any(x => e.Contains(x, StringComparison.OrdinalIgnoreCase));
 
     internal sealed record RespuestaConsejo(
         [property: System.Text.Json.Serialization.JsonPropertyName("jugables")] string[]? Jugables,
@@ -1830,21 +1836,32 @@ internal static class Program
 
     /// <summary>
     /// Arena te ofrece una mano: el consejo, encima del juego (importante: no
-    /// lo tapa otro aviso) y en la columna. PRIMERO el de las cuentas, al
-    /// instante; DESPUÉS, si llega en unos segundos, el de la IA mirando la mano
-    /// entera —qué cartas se apoyan entre sí, si hay plan para los primeros
-    /// turnos— (el usuario, 2026-10-03: «que no sólo se base en el número de
-    /// tierras»), que lo sustituye con su veredicto y conserva las cuentas.
-    /// En eventos competitivos, nada.
+    /// lo tapa otro aviso) y en la columna. UN SOLO AVISO: el de la IA mirando
+    /// la mano entera —qué cartas se apoyan entre sí, si hay plan para los
+    /// primeros turnos— (el usuario, 2026-10-03: «que no sólo se base en el
+    /// número de tierras»), con las cuentas detrás; si la IA no contesta en
+    /// <see cref="ESPERA_IA_MANO"/> segundos, el de las cuentas solo. Antes
+    /// salía primero el de las cuentas y encima el de la IA, y se pisaban
+    /// (el usuario, 2026-10-03). En eventos competitivos, nada.
     /// </summary>
     private static void ConsejoMulligan(int[] cartas, int tierras, int mulligans)
     {
         ultimaMano = (tierras, mulligans);
         if (EventoCompetitivo(Contexto.Evento)) return;
         var texto = TextoMulligan(cartas, tierras, mulligans, Contexto.CartasMazo, Contexto.Mazo);
-        MostrarMano(texto);
-        if (httpResidente is { } http) _ = MulliganConIa(http, cartas, tierras, mulligans, texto);
+        var esta = Interlocked.Increment(ref manoEnCurso);
+        if (httpResidente is { } http) _ = MulliganConIa(http, cartas, tierras, mulligans, texto, esta);
+        else MostrarMano(texto);
     }
+
+    /// <summary>La IA tarda 2-4 s (medido en producción el 2026-10-03); con más de esto, el de las cuentas.</summary>
+    private const int ESPERA_IA_MANO = 8;
+
+    /// <summary>
+    /// La mano que se está aconsejando: sube con cada mano nueva y al empezar la
+    /// partida. Un consejo que llega cuando ya hay otra mano (o ya se juega) se tira.
+    /// </summary>
+    private static int manoEnCurso;
 
     /// <summary>El consejo de la mano en el aviso y en la fila «Mano: …» de la columna; el veredicto es la primera frase.</summary>
     private static void MostrarMano(string texto)
@@ -1856,10 +1873,12 @@ internal static class Program
         Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), texto, 20, importante: true, avatar: FiguraEntrenador());
     }
 
-    private static async Task MulliganConIa(HttpClient http, int[] cartas, int tierras, int mulligans, string deLasCuentas)
+    private static async Task MulliganConIa(HttpClient http, int[] cartas, int tierras, int mulligans, string deLasCuentas, int esta)
     {
+        string? conIa = null;
         try
         {
+            using var tope = new CancellationTokenSource(TimeSpan.FromSeconds(ESPERA_IA_MANO));
             var mazo = Contexto.CartasMazo;
             var tamMazo = mazo.Length > 0 ? mazo.Sum(c => c.N) : 60;
             var datos = cartasDelMazoActual.GroupBy(c => c.Grp).ToDictionary(g => g.Key, g => g.First());
@@ -1877,21 +1896,23 @@ internal static class Program
                 tierras,
                 probabilidad = Math.Round(p * 100),
                 objetivo,
-            }, JsonOpciones);
-            if (!r.IsSuccessStatusCode) return;
-            var d = await r.Content.ReadFromJsonAsync<RespuestaMulligan>(JsonOpciones);
-            if (d?.Veredicto is not { } v || d.Razon is not { Length: > 0 } razon) return;
-            // Si mientras pensaba ya ha empezado la partida, ya no sirve.
-            if (manoAviso is null) return;
-            var clave = v == "keep" ? "mul_quedate" : v == "mulligan" ? "mul_mulligan" : "mul_arriesgada";
-            // El veredicto de la IA delante, su razón, y las cuentas de antes sin su veredicto.
-            var cuentas = deLasCuentas.Split(". ", 2) is { Length: 2 } partes ? partes[1] : "";
-            // Qué poner debajo: lo que diga la IA; si no lo dice, lo de las cuentas (ya va en `cuentas`).
-            var fondo = mulligans > 0 && clave != "mul_mulligan" && d.AlFondo is { Length: > 0 } af ? " " + Textos.T("mul_fondo_cuales", string.Join(", ", af)) : "";
-            if (fondo.Length > 0) cuentas = QuitarFondo(cuentas);
-            MostrarMano($"{Textos.T(clave)}{fondo} {razon} {cuentas}".Trim());
+            }, JsonOpciones, tope.Token);
+            var d = r.IsSuccessStatusCode ? await r.Content.ReadFromJsonAsync<RespuestaMulligan>(JsonOpciones, tope.Token) : null;
+            if (d?.Veredicto is { } v && d.Razon is { Length: > 0 } razon)
+            {
+                var clave = v == "keep" ? "mul_quedate" : v == "mulligan" ? "mul_mulligan" : "mul_arriesgada";
+                // El veredicto de la IA delante, su razón, y las cuentas de antes sin su veredicto.
+                var cuentas = deLasCuentas.Split(". ", 2) is { Length: 2 } partes ? partes[1] : "";
+                // Qué poner debajo: lo que diga la IA; si no lo dice, lo de las cuentas (ya va en `cuentas`).
+                var fondo = mulligans > 0 && clave != "mul_mulligan" && d.AlFondo is { Length: > 0 } af ? " " + Textos.T("mul_fondo_cuales", string.Join(", ", af)) : "";
+                if (fondo.Length > 0) cuentas = QuitarFondo(cuentas);
+                conIa = $"{Textos.T(clave)}{fondo} {razon} {cuentas}".Trim();
+            }
         }
-        catch { /* sin IA, se queda el de las cuentas */ }
+        catch { /* sin IA (o tarda demasiado): el de las cuentas */ }
+        // Si mientras pensaba ha llegado otra mano o ya ha empezado la partida, ya no sirve.
+        if (esta != Volatile.Read(ref manoEnCurso)) return;
+        MostrarMano(conIa ?? deLasCuentas);
     }
 
     /// <summary>
