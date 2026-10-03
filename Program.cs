@@ -407,6 +407,32 @@ internal static class Program
                     (Columna.Accion.SinergiaRival, "sinrival:0", Textos.T("col_sinergia_rival", "cementerio, con un nombre larguísimo para ver el visor")),
                     (Columna.Accion.Resumen, "resumen", Textos.T("col_resumen")));
                 Columna.Destacar("resumen");
+                // --mazo: las cartas del último mazo del registro, como en el residente.
+                if (args.Contains("--mazo"))
+                {
+                    var vinculoMazo = Vinculo.Leer();
+                    using var httpMazo = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(2) };
+                    if (vinculoMazo is not null) httpMazo.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoMazo.Token);
+                    // El registro de ahora (el último de la lista), abierto sin estorbar a Arena, que lo está escribiendo.
+                    var registro = LogArena.FicherosPorDefecto(LogArena.Carpeta()).LastOrDefault(File.Exists);
+                    string? linea = null;
+                    if (registro is not null)
+                    {
+                        using var fs = new FileStream(registro, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                        using var sr = new StreamReader(fs);
+                        for (var l = sr.ReadLine(); l is not null; l = sr.ReadLine())
+                            // La línea con la lista: la de la petición (la respuesta, «<== EventSetDeckV3(…)», no la lleva).
+                            if ((l.Contains("EventSetDeckV3", StringComparison.Ordinal) || l.Contains("DeckUpsertDeckV3", StringComparison.Ordinal)) && l.Contains("MainDeck", StringComparison.Ordinal)) linea = l;
+                    }
+                    var deLinea = linea is null ? [] : Contexto.CartasDe(linea);
+                    var resp = await httpMazo.GetAsync($"{PuertaDevice}/cartas?ids={string.Join(",", deLinea.Select(c => c.Grp))}");
+                    var dm = await resp.Content.ReadFromJsonAsync<RespuestaCartasMazo>(JsonOpciones);
+                    var lista = new List<Columna.CartaMazo>();
+                    foreach (var c in dm?.Cartas ?? [])
+                        lista.Add(new Columna.CartaMazo(c.Arena, deLinea.First(x => x.Grp == c.Arena).N, c.Nombre ?? "?", c.Coste ?? "", c.Cmc, c.Tierra, await BajarImagen(c.Arte)));
+                    Columna.CartasDelMazo(lista);
+                    Console.WriteLine($"mazo de prueba: {lista.Count} cartas");
+                }
                 // --aviso: un aviso con miniaturas, como el de una sinergia del rival.
                 if (args.Contains("--aviso"))
                 {
@@ -498,6 +524,28 @@ internal static class Program
             PanelCartas.AlAbrir = AbrirDelPanel;
             await EnsenarEstadisticas(d);
             await Task.Delay(TimeSpan.FromSeconds(15));
+            PanelCartas.Cerrar();
+            return 0;
+        }
+        if (args.Length > 0 && args[0] == "--probar-importacion")
+        {
+            // El diálogo de importar con una respuesta guardada de /importacion,
+            // 40 s; guardar no sube nada: espera dos segundos y dice qué se eligió.
+            var d = JsonSerializer.Deserialize<RespuestaRevision>(File.ReadAllText(args[1]), JsonOpciones)!;
+            PanelCartas.SiempreVisible = true;
+            var rot = d.Rotulos!;
+            var mazosPrueba = (d.Mazos ?? []).Select(m => new PanelCartas.MazoImp(m.ArenaId!, m.Nombre!, m.Estado ?? "nuevo", m.Etiqueta ?? "", m.Detalle ?? "", m.Marcado)).ToArray();
+            var falla = args.Contains("--falla");
+            PanelCartas.MostrarTexto(rot.Titulo ?? Textos.T("imp_titulo"), [], "", conImportacion: new PanelCartas.Importacion(
+                rot.Intro ?? "", rot.Recientes ?? "", rot.Todos ?? "", rot.Ninguno ?? "", d.Coleccion, d.ColeccionTexto, mazosPrueba,
+                Guardar: async (elegidos, coleccion) =>
+                {
+                    await Task.Delay(2000);
+                    Console.WriteLine($"guardar: coleccion={coleccion} mazos={string.Join(",", elegidos)}");
+                    return !falla;
+                },
+                AbrirWeb: () => Console.WriteLine("abrir la web")));
+            await Task.Delay(TimeSpan.FromSeconds(40));
             PanelCartas.Cerrar();
             return 0;
         }
@@ -905,7 +953,10 @@ internal static class Program
                 // Las filas que pone el juego (ver más abajo): abren la web en el
                 // sitio exacto, que es quien sabe traducir nombre de mazo → mazo
                 // tuyo y arena_id → carta (rutas /api/puente/*).
+                // «Mejorar» abre su desplegable en la propia columna; la primera
+                // fila, el creador de mazos inteligente, lleva a la web como antes.
                 case Columna.Accion.Mejorar:
+                case Columna.Accion.Creador:
                     if (dato is not null) Abrir($"{Sitio}/api/puente/mazo?nombre={Uri.EscapeDataString(dato)}&idioma={Textos.Idioma}");
                     break;
                 case Columna.Accion.Similares:
@@ -1158,6 +1209,8 @@ internal static class Program
         }
         httpResidente = http;
         Contexto.Cambio += ActualizarColumna;
+        // Las cartas del mazo de ahora, para el desplegable «Mejorar» (ver CargarCartasMazo).
+        Contexto.Cambio += () => _ = CargarCartasMazo(http);
         Contexto.Cambio += () => VigilarAmenazas(http, ActualizarColumna);
         _ = Task.Run(async () => { try { if (await BuscarVersionNueva() is not null) Columna.Destacar("version"); } catch { /* sin red */ } });
         Contexto.Cambio += () => { if (Contexto.EnPartida && partidaPendiente is not null) { partidaPendiente = null; Columna.Olvidar("resumen"); } };
@@ -1538,6 +1591,41 @@ internal static class Program
     /// y aún no ha llegado a la web, se sube primero, para que el marcador que
     /// sale ya la cuente.
     /// </summary>
+    /// <summary>La lista de cartas que ya tiene la columna, para no volver a pedirla con cada cambio del juego.</summary>
+    private static string firmaCartasMazo = "";
+
+    /// <summary>
+    /// LAS CARTAS DEL MAZO DE AHORA, PARA EL DESPLEGABLE «MEJORAR» de la
+    /// columna (pedido el 2026-10-03). El registro da los números de Arena y
+    /// cuántas; la web, de una vez, el nombre, el coste y la ilustración
+    /// (/api/mtga-device/cartas), que se baja a disco como las demás imágenes.
+    /// Sólo cuando cambia el mazo: Contexto avisa con cada carta que señalas.
+    /// </summary>
+    private static async Task CargarCartasMazo(HttpClient http)
+    {
+        var cartas = Contexto.CartasMazo;
+        var firma = string.Join(",", cartas.Select(c => $"{c.Grp}x{c.N}"));
+        if (firma == firmaCartasMazo) return;
+        firmaCartasMazo = firma;
+        if (cartas.Length == 0) { Columna.CartasDelMazo([]); return; }
+        try
+        {
+            var r = await http.GetAsync($"{PuertaDevice}/cartas?ids={string.Join(",", cartas.Select(c => c.Grp))}");
+            if (!r.IsSuccessStatusCode) { firmaCartasMazo = ""; return; }
+            var d = await r.Content.ReadFromJsonAsync<RespuestaCartasMazo>(JsonOpciones);
+            var cuantas = cartas.ToDictionary(c => c.Grp, c => c.N);
+            var lista = new List<Columna.CartaMazo>();
+            foreach (var c in d?.Cartas ?? [])
+            {
+                if (c.Nombre is not { Length: > 0 } nombre || !cuantas.TryGetValue(c.Arena, out var n)) continue;
+                lista.Add(new Columna.CartaMazo(c.Arena, n, nombre, c.Coste ?? "", c.Cmc, c.Tierra, await BajarImagen(c.Arte)));
+            }
+            // Si mientras bajaba se cambió de mazo, esto ya no es lo de ahora.
+            if (firma == firmaCartasMazo) Columna.CartasDelMazo(lista);
+        }
+        catch { firmaCartasMazo = ""; }
+    }
+
     private static async Task PanelEstadisticas(HttpClient http)
     {
         try
@@ -1952,18 +2040,80 @@ internal static class Program
         if (estado != 200) { alTerminar?.Invoke(Subida.Fallo); return true; }
         if (respuesta?.Pendiente is null) { alTerminar?.Invoke(Subida.AlDia); return true; }
 
-        // Pedido desde la columna: se abre la página de revisión con ESTA
-        // importación, y el aviso lo dice. De fondo no se abre nada: quien juega
-        // no quiere que le salte el navegador.
+        // Pedido desde la columna: SE ELIGE AHÍ MISMO, encima de Arena (ver
+        // PanelImportacion.cs). Sólo si el diálogo no puede salir —la web no
+        // contesta, o es una anterior a /importacion— se abre la página de
+        // revisión, como antes. De fondo no se abre nada: quien juega no quiere
+        // que le salte nada encima; el aviso dice dónde está el botón.
         if (abrirNavegador)
         {
-            Abrir($"{Sitio}{RutaImportar()}?revisar={Uri.EscapeDataString(respuesta.Pendiente)}");
-            Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_pendiente_navegador", respuesta.Mazos ?? 0), 8);
+            if (!await PanelImportacion(http, respuesta.Pendiente))
+            {
+                Abrir($"{Sitio}{RutaImportar()}?revisar={Uri.EscapeDataString(respuesta.Pendiente)}");
+                Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_pendiente_navegador", respuesta.Mazos ?? 0), 8);
+            }
         }
         // `avisar` en falso: a media partida (ver Residente), el aviso se guarda para el cierre.
-        else if (avisar) Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_pendiente", respuesta.Mazos ?? 0));
+        else if (avisar) Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_pendiente_columna", respuesta.Mazos ?? 0, Textos.T("col_importar")));
         alTerminar?.Invoke(Subida.Pendiente);
         return true;
+    }
+
+    /// <summary>
+    /// EL DIÁLOGO DE IMPORTAR, ENCIMA DE ARENA (pedido el 2026-10-03): pide a
+    /// la web la lectura pendiente ya preparada para elegir y la enseña. Devuelve
+    /// false si no ha podido, y entonces quien llama abre la página de revisión.
+    /// Si no hay nada que decidir —todos los mazos iguales a los guardados y sin
+    /// colección— no se abre nada: se dice que está al día.
+    /// </summary>
+    private static async Task<bool> PanelImportacion(HttpClient http, string pendiente)
+    {
+        try
+        {
+            var r = await http.GetAsync($"{PuertaDevice}/importacion?idioma={Textos.Idioma}&id={Uri.EscapeDataString(pendiente)}");
+            if (!r.IsSuccessStatusCode) return false;
+            var d = await r.Content.ReadFromJsonAsync<RespuestaRevision>(JsonOpciones);
+            if (d?.Pendiente is not string id || d.Rotulos is not { } rot) return false;
+            var mazos = (d.Mazos ?? []).Where(m => m.ArenaId is { Length: > 0 } && m.Nombre is { Length: > 0 })
+                .Select(m => new PanelCartas.MazoImp(m.ArenaId!, m.Nombre!, m.Estado ?? "nuevo", m.Etiqueta ?? "", m.Detalle ?? "", m.Marcado))
+                .ToArray();
+            if (mazos.All(m => m.Estado == "igual") && d.Coleccion == 0)
+            {
+                Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("col_al_dia"));
+                return true;
+            }
+            var revisar = $"{Sitio}{RutaImportar()}?revisar={Uri.EscapeDataString(id)}";
+            var dialogo = new PanelCartas.Importacion(
+                rot.Intro ?? "", rot.Recientes ?? "", rot.Todos ?? "", rot.Ninguno ?? "",
+                d.Coleccion, d.ColeccionTexto, mazos,
+                Guardar: (elegidos, coleccion) => GuardarEleccion(http, id, elegidos, coleccion),
+                AbrirWeb: () => Abrir(revisar));
+            // El «subiendo…» de la columna ya ha dicho lo suyo: ahora habla el diálogo.
+            Superposicion.Ocultar();
+            PanelCartas.MostrarTexto(rot.Titulo ?? Textos.T("imp_titulo"), [], "", conImportacion: dialogo);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Guarda lo marcado en el diálogo y lo cuenta encima del juego. False si no se pudo.</summary>
+    private static async Task<bool> GuardarEleccion(HttpClient http, string id, string[] mazos, bool coleccion)
+    {
+        try
+        {
+            var r = await http.PostAsJsonAsync($"{PuertaDevice}/importacion", new { id, mazos, coleccion }, JsonOpciones);
+            if (!r.IsSuccessStatusCode) return false;
+            var d = await r.Content.ReadFromJsonAsync<RespuestaImportar>(JsonOpciones);
+            // «Arena» es el mazo de la colección, no uno de los elegidos.
+            var n = (d?.MazosGuardados ?? []).Count(x => x != "Arena");
+            var partes = new List<string>();
+            if (coleccion) partes.Add(Textos.T("imp_hecho_coleccion"));
+            if (n > 0) partes.Add(Textos.T("imp_hecho_mazos", n));
+            if (partes.Count == 0) partes.Add(Textos.T("imp_hecho_nada"));
+            Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), string.Join(" ", partes));
+            return true;
+        }
+        catch { return false; }
     }
 
     /// <summary>La clave de Windows que arranca programas al iniciar sesión.</summary>
@@ -3114,6 +3264,29 @@ internal sealed record RespuestaImportar(
     [property: JsonPropertyName("sinTraducir")] int? SinTraducir,
     [property: JsonPropertyName("comodinesGuardados")] bool? ComodinesGuardados,
     [property: JsonPropertyName("mazosGuardados")] string[]? MazosGuardados);
+
+/// <summary>Lo que devuelve /api/mtga-device/cartas: las cartas del mazo, con coste e ilustración.</summary>
+internal sealed record RespuestaCartasMazo([property: JsonPropertyName("cartas")] CartaMazoPuente[]? Cartas);
+internal sealed record CartaMazoPuente(
+    [property: JsonPropertyName("arena")] int Arena, [property: JsonPropertyName("nombre")] string? Nombre,
+    [property: JsonPropertyName("coste")] string? Coste, [property: JsonPropertyName("cmc")] double Cmc,
+    [property: JsonPropertyName("tierra")] bool Tierra, [property: JsonPropertyName("arte")] string? Arte);
+
+/// <summary>Lo que devuelve GET /api/mtga-device/importacion: la lectura pendiente, lista para el diálogo.</summary>
+internal sealed record RespuestaRevision(
+    [property: JsonPropertyName("pendiente")] string? Pendiente,
+    [property: JsonPropertyName("textos")] RotulosRevision? Rotulos,
+    [property: JsonPropertyName("coleccion")] int Coleccion,
+    [property: JsonPropertyName("coleccionTexto")] string? ColeccionTexto,
+    [property: JsonPropertyName("mazos")] MazoRevision[]? Mazos);
+internal sealed record RotulosRevision(
+    [property: JsonPropertyName("titulo")] string? Titulo, [property: JsonPropertyName("intro")] string? Intro,
+    [property: JsonPropertyName("recientes")] string? Recientes, [property: JsonPropertyName("todos")] string? Todos,
+    [property: JsonPropertyName("ninguno")] string? Ninguno);
+internal sealed record MazoRevision(
+    [property: JsonPropertyName("arenaId")] string? ArenaId, [property: JsonPropertyName("nombre")] string? Nombre,
+    [property: JsonPropertyName("estado")] string? Estado, [property: JsonPropertyName("etiqueta")] string? Etiqueta,
+    [property: JsonPropertyName("detalle")] string? Detalle, [property: JsonPropertyName("marcado")] bool Marcado);
 
 // ─── lo que espera /api/mtga-import (lib/mtgaLog.ts) ────────────────────────
 

@@ -90,6 +90,15 @@ internal static class Contexto
     /// <summary>El formato del mazo de la cola («standard», «alchemy», «brawl»…), en minúsculas, o null.</summary>
     public static string? Formato { get; private set; }
 
+    /// <summary>
+    /// LAS CARTAS DE ESE MAZO: su <c>grpId</c> y cuántas, del mazo principal y
+    /// de la zona de mando. Vienen en la misma línea que el nombre (el
+    /// `Deck` del request de EventSetDeckV3 y DeckUpsertDeckV3), así que no hay
+    /// que pedírselas a nadie. Las pinta el desplegable «Mejorar» de la columna
+    /// (pedido del usuario el 2026-10-03).
+    /// </summary>
+    public static (int Grp, int N)[] CartasMazo { get; private set; } = [];
+
     /// <summary>El evento de la cola («Ladder», «QuickDraft_EOE_…»), o null.</summary>
     public static string? Evento { get; private set; }
 
@@ -163,6 +172,8 @@ internal static class Contexto
     // dentro de una cadena: \x22 es la comilla, \\ la barra que la precede.
     private static readonly Regex EventoCola = new(@"\\\x22EventName\\\x22:\\\x22([A-Za-z0-9_-]+)", RegexOptions.Compiled);
     private static readonly Regex FormatoMazo = new(@"\\\x22name\\\x22:\\\x22Format\\\x22,\\\x22value\\\x22:\\\x22([A-Za-z]+)", RegexOptions.Compiled);
+    // Cada carta del mazo, en el mismo JSON escapado: {\"cardId\":58437,\"quantity\":19}.
+    private static readonly Regex CartaDelMazo = new(@"\\\x22cardId\\\x22:(\d+),\\\x22quantity\\\x22:(\d+)", RegexOptions.Compiled);
     // La cronología: turno y jugador activo, vidas por asiento, equipo por
     // asiento, daño a un jugador (los jugadores son los objetos 1 y 2), y el
     // resultado.
@@ -208,6 +219,7 @@ internal static class Contexto
     private static readonly Dictionary<int, int> equipoPorAsiento = new();
     private static string idPartida = "";
     private static string? formato, evento, edicion;
+    private static (int Grp, int N)[] cartasMazo = [];
     private static string? fichero;
     private static long posicion;
     private static bool estrenando = true;
@@ -332,7 +344,11 @@ internal static class Contexto
                 if (m.Success)
                 {
                     var nombre = Desescapar(m.Groups[1].Value);
-                    if (nombre.Length > 0 && !nombre.StartsWith(PrefijoPrecon, StringComparison.Ordinal)) mazo = nombre;
+                    if (nombre.Length > 0 && !nombre.StartsWith(PrefijoPrecon, StringComparison.Ordinal))
+                    {
+                        mazo = nombre;
+                        cartasMazo = CartasDe(linea);
+                    }
                 }
                 // Y con qué formato y en qué cola: es lo que decide que las
                 // parecidas y los combos sean de lo que se está jugando.
@@ -563,13 +579,38 @@ internal static class Contexto
         return mano.ToArray();
     }
 
+    /// <summary>
+    /// Las cartas del mazo de una línea: las de `MainDeck` y `CommandZone`
+    /// (el comandante también es del mazo), sumadas por carta. El banquillo no:
+    /// no es lo que se va a jugar.
+    /// </summary>
+    internal static (int Grp, int N)[] CartasDe(string linea)
+    {
+        var cuenta = new Dictionary<int, int>();
+        foreach (var zona in new[] { "MainDeck", "CommandZone" })
+        {
+            var i = linea.IndexOf(zona, StringComparison.Ordinal);
+            if (i < 0) continue;
+            var fin = linea.IndexOf(']', i);
+            if (fin < 0) continue;
+            foreach (Match m in CartaDelMazo.Matches(linea, i))
+            {
+                if (m.Index > fin) break;
+                var grp = int.Parse(m.Groups[1].Value);
+                cuenta[grp] = cuenta.GetValueOrDefault(grp) + int.Parse(m.Groups[2].Value);
+            }
+        }
+        return cuenta.Select(kv => (kv.Key, kv.Value)).ToArray();
+    }
+
     private static void Cambiar(string? mazo, int? carta, int? otraCara, int? rival, int? rivalOtra, bool enPartida, string colores, int[] mesa, int[] vistas)
     {
-        if (mazo == Mazo && carta == Carta && otraCara == CartaOtraCara
+        if (mazo == null) cartasMazo = [];
+        if (mazo == Mazo && cartasMazo.SequenceEqual(CartasMazo) && carta == Carta && otraCara == CartaOtraCara
             && rival == CartaRival && rivalOtra == CartaRivalOtraCara && enPartida == EnPartida
             && colores == MisColores && mesa.SequenceEqual(MesaRival) && vistas.SequenceEqual(VistasRival)
             && formato == Formato && evento == Evento && edicion == Edicion) return;
-        Mazo = mazo; Carta = carta; CartaOtraCara = otraCara; CartaRival = rival; CartaRivalOtraCara = rivalOtra; EnPartida = enPartida;
+        Mazo = mazo; CartasMazo = cartasMazo; Carta = carta; CartaOtraCara = otraCara; CartaRival = rival; CartaRivalOtraCara = rivalOtra; EnPartida = enPartida;
         MisColores = colores; MesaRival = mesa; VistasRival = vistas; Formato = formato; Evento = evento; Edicion = edicion;
         try { Cambio?.Invoke(); } catch { /* lo que haga quien escucha es cosa suya */ }
     }

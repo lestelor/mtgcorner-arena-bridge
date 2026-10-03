@@ -274,13 +274,14 @@ internal static partial class PanelCartas
     private const int BAJO_COPIAR = -3;
 
     /// <summary>Enseña el resumen por secciones. <paramref name="textoPlano"/> es lo que copia el botón.</summary>
-    public static void MostrarTexto(string tituloPanel, IReadOnlyList<SeccionTexto> secciones, string textoPlano, IReadOnlyList<Enlace>? conEnlaces = null, string? tituloEnlaces = null, IReadOnlyList<Compra>? conCompras = null, string? tituloCompras = null, ResumenExtras? conExtras = null, Estadisticas? conEstadisticas = null)
+    public static void MostrarTexto(string tituloPanel, IReadOnlyList<SeccionTexto> secciones, string textoPlano, IReadOnlyList<Enlace>? conEnlaces = null, string? tituloEnlaces = null, IReadOnlyList<Compra>? conCompras = null, string? tituloCompras = null, ResumenExtras? conExtras = null, Estadisticas? conEstadisticas = null, Importacion? conImportacion = null)
     {
         Cerrar();
         titulo = tituloPanel;
         copia = textoPlano;
         extras = conExtras;
         est = conEstadisticas;
+        PrepararImportacion(conImportacion);
         rectPuntosEst = []; centroPuntosEst = []; rectFichasEst = []; rectPeldanosEst = []; rectSegmentosEst = []; puntosEst = [];
         mazoEst = -1;
         rectTonos = new RECT[conExtras?.Tonos.Length ?? 0];
@@ -298,7 +299,9 @@ internal static partial class PanelCartas
         var (anchoArena, altoArena) = MedidasDeArena();
         // EL ANCHO: con extras (el resumen), a dos columnas y tan ancho como
         // permita Arena hasta 1180; sin ellos, el de siempre (758).
-        var anchoDeseado = extras is not null || est is not null ? Math.Clamp(anchoArena - 80, 760, 1180) : 758;
+        // Importar, algo más estrecho: son filas de texto, a dos columnas si hay muchas.
+        var anchoDeseado = extras is not null || est is not null ? Math.Clamp(anchoArena - 80, 760, 1180)
+            : imp is not null ? Math.Clamp(anchoArena - 80, 760, 980) : 758;
         (anchoCarta, altoCarta) = ((anchoDeseado - MARGEN * 2 - (POR_FILA - 1) * AIRE) / POR_FILA, 237);
         var altoMaximo = altoArena - 60;
 
@@ -333,9 +336,9 @@ internal static partial class PanelCartas
         var fTexto = CreateFont(TAM_TEXTO, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
         var anterior = SelectObject(hdc, fTexto);
         var anchoTodo = ANCHO_PANEL - MARGEN * 2;
-        var dosColumnas = extras is not null || est is not null;
-        // Stats reparte casi a medias (la evolución y los mazos piden sitio); el resumen, 42/58.
-        var anchoIzq = dosColumnas ? (anchoTodo - HUECO_COLUMNAS) * (est is not null ? 54 : 42) / 100 : anchoTodo;
+        var dosColumnas = extras is not null || est is not null || imp is not null;
+        // Stats reparte casi a medias (la evolución y los mazos piden sitio); importar, a medias; el resumen, 42/58.
+        var anchoIzq = dosColumnas ? (anchoTodo - HUECO_COLUMNAS) * (est is not null ? 54 : imp is not null ? 50 : 42) / 100 : anchoTodo;
         var anchoDer = dosColumnas ? anchoTodo - HUECO_COLUMNAS - anchoIzq : anchoTodo;
         int AnchoDe(int col) => col == 1 ? anchoIzq : col == 2 ? anchoDer : anchoTodo;
         var colTexto = dosColumnas ? 2 : 0;
@@ -349,6 +352,7 @@ internal static partial class PanelCartas
             DrawText(hdc, t, -1, ref r, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
             return r.Bottom - r.Top;
         }
+        if (imp is { } importacion) AnadirBloquesImportacion(lista, importacion, anchoTodo, Medir);
         if (extras is { } ex)
         {
             if (ex.Titular is { Length: > 0 })
@@ -833,7 +837,7 @@ internal static partial class PanelCartas
             altoRegion = alto;
             SetWindowRgn(ventana, CreateRoundRectRgn(0, 0, ANCHO_PANEL + 1, alto + 1, 16, 16), true);
             // Stats casi opaco: sus gráficas no se leen con el juego asomando por detrás.
-            SetLayeredWindowAttributes(ventana, 0, (byte)(est is not null ? 252 : 244), LWA_ALPHA);
+            SetLayeredWindowAttributes(ventana, 0, (byte)(est is not null || imp is not null ? 252 : 244), LWA_ALPHA);
             SetTimer(ventana, new IntPtr(1), 500, IntPtr.Zero);   // seguir a Arena
             ShowWindow(ventana, ver ? SW_SHOWNOACTIVATE : 0);
             UpdateWindow(ventana);
@@ -909,8 +913,10 @@ internal static partial class PanelCartas
         {
             var xr = (short)(lParam.ToInt64() & 0xFFFF);
             var yr = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
+            var ci = QueHayEnImportacion(xr, yr);
+            if (ci != 0) return ci;
             var rb = RectBotonCopiar();
-            if (xr >= rb.Left && xr < rb.Right && yr >= rb.Top && yr < rb.Bottom) return BAJO_COPIAR;
+            if (imp is null && xr >= rb.Left && xr < rb.Right && yr >= rb.Top && yr < rb.Bottom) return BAJO_COPIAR;
             // El avatar antes que su mazo: está dentro de su tarjeta.
             var rav = rectAvatares;
             for (var i = 0; i < rav.Length; i++)
@@ -966,7 +972,7 @@ internal static partial class PanelCartas
                 var i = bajoRaton;
                 var lista = huecos;
                 var pulsable = i == -2 || i == BAJO_COPIAR || (i <= BAJO_ENLACE && i > BAJO_TONO) || (i <= BAJO_TONO && i > BAJO_TURNO) || (i <= BAJO_AVATAR && i > BAJO_JUGADA) || (i <= BAJO_COINCIDEN && i > BAJO_PUNTO_EST)
-                    || PulsableEstadisticas(i)
+                    || PulsableEstadisticas(i) || PulsableImportacion(i)
                     || (i >= 0 && i < lista.Length && (lista[i].Carta?.Ruta ?? lista[i].Seccion.Ruta) is not null);
                 SetCursor(LoadCursor(IntPtr.Zero, pulsable ? IDC_HAND : IDC_ARROW));
                 return new IntPtr(1);
@@ -1002,6 +1008,7 @@ internal static partial class PanelCartas
                 if (i == -2) { PostMessage(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero); return IntPtr.Zero; }
                 if (i == BAJO_COPIAR) { copiado = Copiar(copia); InvalidateRect(hWnd, IntPtr.Zero, false); return IntPtr.Zero; }
                 if (PulsarEstadisticas(i, hWnd)) return IntPtr.Zero;
+                if (PulsarImportacion(i, hWnd)) return IntPtr.Zero;
                 if (i <= BAJO_COINCIDEN && BAJO_COINCIDEN - i < enlaces.Length && AlAbrir is { } abrirMazo)
                 {
                     var rutaMazo = enlaces[BAJO_COINCIDEN - i].Ruta;
@@ -1122,6 +1129,12 @@ internal static partial class PanelCartas
                     if (b.Especial is { } especialEst && especialEst.StartsWith("est_", StringComparison.Ordinal) && est is { } es)
                     {
                         if (y + b.Alto >= 0 && y < altoZona) PintarEstadistica(zona, especialEst, es, y, b.Alto, arriba, bx, bw);
+                        continue;
+                    }
+                    if (b.Especial is { } especialImp && especialImp.StartsWith("imp_", StringComparison.Ordinal) && imp is { } im)
+                    {
+                        // Siempre, aunque no se vea: así deja a cero el sitio de lo que no está a la vista.
+                        PintarImportacion(zona, especialImp, im, y, b.Alto, arriba, bx, bw, altoZona);
                         continue;
                     }
                     if (b.Especial is { } especial && extras is { } ex)
@@ -1378,20 +1391,25 @@ internal static partial class PanelCartas
                     }
                 }
 
-                // El botón «Copiar» / «Copiado» en el pie, a la derecha.
-                var rBoton = RectBotonCopiar();
-                var pincelBoton = CreateSolidBrush(bajoRaton == BAJO_COPIAR ? Rgb(56, 189, 248) : Rgb(26, 34, 54));
-                FillRect(hdc, ref rBoton, pincelBoton);
-                DeleteObject(pincelBoton);
-                SelectObject(hdc, fPie);
-                SetTextColor(hdc, bajoRaton == BAJO_COPIAR ? Rgb(9, 13, 24) : Rgb(226, 232, 240));
-                DrawText(hdc, Textos.T(copiado ? "panel_copiado" : "panel_copiar"), -1, ref rBoton, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                // Y a la izquierda, si hace falta, que se puede bajar con la rueda.
-                if (altoTexto > altoZona)
+                // Importar lleva su propio pie: guardar y revisar en la web.
+                if (imp is not null) PintarPieImportacion(hdc, altoZona);
+                else
                 {
-                    SetTextColor(hdc, Rgb(148, 163, 184));
-                    var rAviso = new RECT { Left = MARGEN, Top = alto - ALTO_PIE - MARGEN / 2, Right = rBoton.Left - AIRE, Bottom = alto };
-                    DrawText(hdc, Textos.T("panel_rueda"), -1, ref rAviso, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                    // El botón «Copiar» / «Copiado» en el pie, a la derecha.
+                    var rBoton = RectBotonCopiar();
+                    var pincelBoton = CreateSolidBrush(bajoRaton == BAJO_COPIAR ? Rgb(56, 189, 248) : Rgb(26, 34, 54));
+                    FillRect(hdc, ref rBoton, pincelBoton);
+                    DeleteObject(pincelBoton);
+                    SelectObject(hdc, fPie);
+                    SetTextColor(hdc, bajoRaton == BAJO_COPIAR ? Rgb(9, 13, 24) : Rgb(226, 232, 240));
+                    DrawText(hdc, Textos.T(copiado ? "panel_copiado" : "panel_copiar"), -1, ref rBoton, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    // Y a la izquierda, si hace falta, que se puede bajar con la rueda.
+                    if (altoTexto > altoZona)
+                    {
+                        SetTextColor(hdc, Rgb(148, 163, 184));
+                        var rAviso = new RECT { Left = MARGEN, Top = alto - ALTO_PIE - MARGEN / 2, Right = rBoton.Left - AIRE, Bottom = alto };
+                        DrawText(hdc, Textos.T("panel_rueda"), -1, ref rAviso, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                    }
                 }
             }
 

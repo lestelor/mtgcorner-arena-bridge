@@ -1013,8 +1013,8 @@ internal static class Textos
         ],
         ["ayuda_mejorar"] =
         [
-            "Opens this deck on the website with suggestions to improve it: cards to add or swap and what they cost.", "Abre este mazo en la web con sugerencias para mejorarlo: cartas que añadir o cambiar y lo que cuestan.", "Öffnet dieses Deck auf der Website mit Vorschlägen zur Verbesserung: Karten zum Hinzufügen oder Tauschen und ihre Preise.", "Ouvre ce deck sur le site avec des suggestions pour l'améliorer : cartes à ajouter ou à remplacer et leur prix.",
-            "Abre este baralho no site com sugestões para o melhorar: cartas a acrescentar ou trocar e o seu preço.", "Apre questo mazzo sul sito con suggerimenti per migliorarlo: carte da aggiungere o cambiare e il loro prezzo.", "サイトでこのデッキを開き、追加・入れ替え候補と価格の改善案を表示します。", "在网站上打开这副套牌并给出改进建议：可加入或替换的牌及其价格。",
+            "Your deck's cards: the smart deck builder at the top, and below each card, to see its similar cards, combos and synergies.", "Las cartas de tu mazo: arriba, el creador de mazos inteligente; debajo, cada carta, para ver sus similares, combos y sinergias.", "Die Karten deines Decks: oben der smarte Deckbauer, darunter jede Karte mit ähnlichen Karten, Kombos und Synergien.", "Les cartes de ton deck : en haut, le créateur de decks intelligent ; en dessous, chaque carte, pour voir ses similaires, combos et synergies.",
+            "As cartas do teu baralho: em cima, o criador de baralhos inteligente; em baixo, cada carta, para ver semelhantes, combos e sinergias.", "Le carte del tuo mazzo: in alto il creatore di mazzi intelligente; sotto, ogni carta, per vedere simili, combo e sinergie.", "デッキのカード一覧：上はスマートデッキビルダー、下は各カード（類似・コンボ・シナジーを表示）。", "你的套牌中的牌：上方是智能组牌器，下方是每张牌，可查看相似牌、组合技和协同。",
         ],
         ["ayuda_similares"] =
         [
@@ -1534,6 +1534,111 @@ internal static class Textos
         [
             "Other", "Otros", "Sonstige", "Autres",
             "Outros", "Altro", "その他", "其他",
+        ],
+        ["imp_titulo"] =
+        [
+            "Choose what to bring from Arena", "Elige qué traer de Arena", "Wähle, was aus Arena übernommen wird", "Choisis ce que tu importes d'Arena",
+            "Escolhe o que trazer do Arena", "Scegli cosa portare da Arena", "Arena から取り込む内容を選択", "选择要从 Arena 导入的内容",
+        ],
+        ["imp_contador"] =
+        [
+            "Decks: {0} · ticked: {1}", "Mazos: {0} · marcados: {1}", "Decks: {0} · markiert: {1}", "Decks : {0} · cochés : {1}",
+            "Baralhos: {0} · marcados: {1}", "Mazzi: {0} · selezionati: {1}", "デッキ：{0}・選択：{1}", "套牌：{0}・已选：{1}",
+        ],
+        ["imp_iguales"] =
+        [
+            "No changes ({0})", "Sin cambios ({0})", "Unverändert ({0})", "Sans changement ({0})",
+            "Sem alterações ({0})", "Senza modifiche ({0})", "変更なし（{0}）", "无变化（{0}）",
+        ],
+        ["imp_guardar"] =
+        [
+            "Save", "Guardar", "Speichern", "Enregistrer",
+            "Guardar", "Salva", "保存", "保存",
+        ],
+        ["imp_guardar_n"] =
+        [
+            "Save ticked ({0})", "Guardar marcados ({0})", "Markierte speichern ({0})", "Enregistrer la sélection ({0})",
+            "Guardar marcados ({0})", "Salva selezionati ({0})", "選択した項目を保存（{0}）", "保存所选（{0}）",
+        ],
+        ["imp_guardar_coleccion"] =
+        [
+            "Save the collection", "Guardar la colección", "Sammlung speichern", "Enregistrer la collection",
+            "Guardar a coleção", "Salva la collezione", "コレクションを保存", "保存收藏",
+        ],
+        ["imp_guardando"] =
+        [
+            "Saving…", "Guardando…", "Wird gespeichert…", "Enregistrement…",
+            "A guardar…", "Salvataggio…", "保存中…", "正在保存…",
+        ],
+        ["imp_web"] =
+        [
+            "Review on the website", "Revisar en la web", "Auf der Website prüfen", "Vérifier sur le site",
+            "Rever no site", "Rivedi sul sito", "サイトで確認", "在网站上查看",
+        ],
+        ["imp_fallo"] =
+        [
+            "Couldn't save. Try again, or review it on the website.", "No se pudo guardar. Prueba otra vez o revísalo en la web.", "Speichern fehlgeschlagen. Versuch es noch einmal oder prüfe es auf der Website.", "Échec de l'enregistrement. Réessaie ou vérifie sur le site.",
+            "Não foi possível guardar. Tenta outra vez ou revê no site.", "Salvataggio non riuscito. Riprova o rivedi sul sito.", "保存できませんでした。もう一度試すか、サイトで確認してください。", "保存失败。请重试，或在网站上查看。",
+        ],
+        ["imp_hecho_coleccion"] =
+        [
+            "Your collection is saved in MTG Corner.", "Tu colección está guardada en MTG Corner.", "Deine Sammlung ist in MTG Corner gespeichert.", "Ta collection est enregistrée sur MTG Corner.",
+            "A tua coleção está guardada no MTG Corner.", "La tua collezione è salvata su MTG Corner.", "コレクションを MTG Corner に保存しました。", "你的收藏已保存到 MTG Corner。",
+        ],
+        ["imp_hecho_mazos"] =
+        [
+            "Decks saved in MTG Corner: {0}.", "Mazos guardados en MTG Corner: {0}.", "In MTG Corner gespeicherte Decks: {0}.", "Decks enregistrés sur MTG Corner : {0}.",
+            "Baralhos guardados no MTG Corner: {0}.", "Mazzi salvati su MTG Corner: {0}.", "MTG Corner に保存したデッキ：{0}。", "已保存到 MTG Corner 的套牌：{0}。",
+        ],
+        ["imp_hecho_nada"] =
+        [
+            "Done: no deck was saved.", "Hecho: no se ha guardado ningún mazo.", "Fertig: Es wurde kein Deck gespeichert.", "C'est fait : aucun deck n'a été enregistré.",
+            "Feito: não foi guardado nenhum baralho.", "Fatto: nessun mazzo è stato salvato.", "完了：保存したデッキはありません。", "完成：没有保存任何套牌。",
+        ],
+        ["sup_pendiente_columna"] =
+        [
+            "{0} decks are waiting for your OK: open the MTG Corner menu and press «{1}» to choose them.", "{0} mazos esperan tu visto bueno: abre el menú de MTG Corner y pulsa «{1}» para elegirlos.", "{0} Decks warten auf dein OK: Öffne das MTG-Corner-Menü und klicke auf «{1}», um sie auszuwählen.", "{0} decks attendent ton accord : ouvre le menu MTG Corner et clique sur « {1} » pour les choisir.",
+            "{0} baralhos esperam a tua aprovação: abre o menu do MTG Corner e carrega em «{1}» para os escolher.", "{0} mazzi aspettano il tuo OK: apri il menu di MTG Corner e premi «{1}» per sceglierli.", "{0} 個のデッキが確認待ちです。MTG Corner のメニューを開き「{1}」を押して選んでください。", "{0} 副套牌等待你确认：打开 MTG Corner 菜单并点击「{1}」进行选择。",
+        ],
+        ["col_creador"] =
+        [
+            "Open in the smart deck builder", "Abrir en el creador de mazos inteligente", "Im smarten Deckbauer öffnen", "Ouvrir dans le créateur de decks intelligent",
+            "Abrir no criador de baralhos inteligente", "Apri nel creatore di mazzi intelligente", "スマートデッキビルダーで開く", "在智能组牌器中打开",
+        ],
+        ["col_cartas_antes"] =
+        [
+            "{0} above", "{0} más arriba", "{0} weiter oben", "{0} plus haut",
+            "{0} mais acima", "{0} più su", "上にあと {0} 枚", "上方还有 {0} 张",
+        ],
+        ["col_cartas_despues"] =
+        [
+            "{0} more below · mouse wheel", "{0} más abajo · rueda del ratón", "{0} weitere unten · Mausrad", "{0} de plus en dessous · molette",
+            "Mais {0} abaixo · roda do rato", "Altre {0} sotto · rotella del mouse", "下にあと {0} 枚・マウスホイール", "下方还有 {0} 张・鼠标滚轮",
+        ],
+        ["col_boton_similares"] =
+        [
+            "Similar", "Similares", "Ähnliche", "Similaires",
+            "Semelhantes", "Simili", "類似", "相似",
+        ],
+        ["col_boton_combos"] =
+        [
+            "Combos", "Combos", "Kombos", "Combos",
+            "Combos", "Combo", "コンボ", "组合技",
+        ],
+        ["col_boton_sinergias"] =
+        [
+            "Synergies", "Sinergias", "Synergien", "Synergies",
+            "Sinergias", "Sinergie", "シナジー", "协同",
+        ],
+        ["ayuda_creador"] =
+        [
+            "Opens this deck in the website's deck builder, with suggestions to improve it: cards to add or swap and what they cost.", "Abre este mazo en el creador de mazos de la web, con sugerencias para mejorarlo: cartas que añadir o cambiar y lo que cuestan.", "Öffnet dieses Deck im Deckbauer der Website mit Vorschlägen zur Verbesserung: Karten zum Hinzufügen oder Tauschen und ihre Preise.", "Ouvre ce deck dans le créateur de decks du site, avec des suggestions pour l'améliorer : cartes à ajouter ou à remplacer et leur prix.",
+            "Abre este baralho no criador de baralhos do site, com sugestões para o melhorar: cartas a acrescentar ou trocar e o seu preço.", "Apre questo mazzo nel creatore di mazzi del sito, con suggerimenti per migliorarlo: carte da aggiungere o cambiare e il loro prezzo.", "サイトのデッキビルダーでこのデッキを開き、追加・入れ替え候補と価格の改善案を表示します。", "在网站的组牌器中打开这副套牌，并给出改进建议：可加入或替换的牌及其价格。",
+        ],
+        ["ayuda_cartamazo"] =
+        [
+            "Click a card to see its similar cards, combos and synergies, right here over the game.", "Pulsa una carta para ver sus similares, combos y sinergias, aquí mismo encima del juego.", "Klicke auf eine Karte, um ähnliche Karten, Kombos und Synergien direkt über dem Spiel zu sehen.", "Clique sur une carte pour voir ses cartes similaires, combos et synergies, ici même au-dessus du jeu.",
+            "Clica numa carta para ver as semelhantes, combos e sinergias, aqui mesmo por cima do jogo.", "Clicca una carta per vedere simili, combo e sinergie, qui sopra il gioco.", "カードをクリックすると、類似カード・コンボ・シナジーをゲームの上に表示します。", "点击一张牌，即可在游戏上方查看相似牌、组合技和协同。",
         ],
     };
 }
