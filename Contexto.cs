@@ -175,6 +175,13 @@ internal static class Contexto
 
     /// <summary>Empieza tu primera fase principal (una vez por turno). Salta en el hilo del vigía.</summary>
     public static event Action<Mesa>? MiFasePrincipal;
+
+    /// <summary>
+    /// Empieza el turno DEL RIVAL (su mantenimiento), una vez por turno, con la
+    /// mesa: para los instantáneos y las cartas con destello que se pueden
+    /// jugar en su turno (el usuario, 2026-10-03). Salta en el hilo del vigía.
+    /// </summary>
+    public static event Action<Mesa>? TurnoDelRival;
     /// <summary>Arena ha vuelto a empezar el registro (lo rota al arrancar): sesión nueva, marcador a cero.</summary>
     public static event Action? RegistroReiniciado;
 
@@ -203,6 +210,8 @@ internal static class Contexto
     // «objectInstanceIds» es que está vacía.
     // La fase y de quién es el turno: «"phase": "Phase_Main1", "turnNumber": 18, "activePlayer": 1».
     private static readonly Regex Fase = new(@"""phase"":\s*""Phase_(\w+)"",\s*""turnNumber"":\s*(\d+),\s*""activePlayer"":\s*(\d)", RegexOptions.Compiled);
+    // El mantenimiento de un turno: «"phase": "Phase_Beginning", "step": "Step_Upkeep", "turnNumber": 8, "activePlayer": 2».
+    private static readonly Regex Mantenimiento = new(@"""phase"":\s*""Phase_Beginning"",\s*""step"":\s*""Step_Upkeep"",\s*""turnNumber"":\s*(\d+),\s*""activePlayer"":\s*(\d)", RegexOptions.Compiled);
     // Una carta con lo que la describe, hasta la siguiente o hasta lo que viene
     // detrás de la lista de cartas (anotaciones, zonas, turno…): dentro,
     // «"isTapped": true» si está girada. Sin esos finales, la ÚLTIMA carta de
@@ -261,6 +270,9 @@ internal static class Contexto
     private static int turnoAvisado, turnoPorAvisar;
     /// <summary>La mesa tal como estaba en la línea en que empezó la fase: al acabar la tanda ya puede haber tierras giradas.</summary>
     private static Mesa? mesaPorAvisar;
+    /// <summary>Lo mismo para el principio del turno del rival.</summary>
+    private static int turnoRivalAvisado;
+    private static Mesa? mesaRivalPorAvisar;
     /// <summary>Los mulligans de la mano en curso: suma con cada «mulligan» tuyo y vuelve a cero al quedártela.</summary>
     private static int mulligansHechos;
     /// <summary>
@@ -583,6 +595,15 @@ internal static class Contexto
             if (linea.Contains("GameObjectType_Card", StringComparison.Ordinal))
                 foreach (Match cg in CartaGirada.Matches(linea))
                     girada[int.Parse(cg.Groups[1].Value)] = cg.Groups[2].Value.Contains("\"isTapped\": true", StringComparison.Ordinal);
+            foreach (Match mt in Mantenimiento.Matches(linea))
+            {
+                var n = int.Parse(mt.Groups[1].Value);
+                if (miAsiento != 0 && int.Parse(mt.Groups[2].Value) != miAsiento && n != turnoRivalAvisado)
+                {
+                    turnoRivalAvisado = n;
+                    mesaRivalPorAvisar = MesaAhora(n);
+                }
+            }
             foreach (Match f in Fase.Matches(linea))
             {
                 var n = int.Parse(f.Groups[2].Value);
@@ -650,7 +671,8 @@ internal static class Contexto
                 idsZona.Clear();
                 duenoZona.Clear();
                 girada.Clear();
-                turnoAvisado = turnoPorAvisar = 0;
+                turnoAvisado = turnoPorAvisar = turnoRivalAvisado = 0;
+                mesaRivalPorAvisar = null;
                 vidaYoAhora = vidaRivalAhora = null;
                 firmaMano = "";
                 miAsiento = 0;
@@ -687,6 +709,12 @@ internal static class Contexto
             mesaPorAvisar = null;
             if (!leyendoLoViejo && miAsiento != 0)
                 try { MiFasePrincipal?.Invoke(mesaAviso); } catch { /* cosa de quien escucha */ }
+        }
+        if (mesaRivalPorAvisar is { } mesaRival)
+        {
+            mesaRivalPorAvisar = null;
+            if (!leyendoLoViejo && miAsiento != 0)
+                try { TurnoDelRival?.Invoke(mesaRival); } catch { /* cosa de quien escucha */ }
         }
         leyendoLoViejo = false;
     }

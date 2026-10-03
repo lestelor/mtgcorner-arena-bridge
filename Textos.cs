@@ -1745,5 +1745,20 @@ internal static class Textos
             "Hand: {0}", "Mano: {0}", "Hand: {0}", "Main : {0}",
             "Mão: {0}", "Mano: {0}", "手札：{0}", "起手：{0}",
         ],
+        ["consejo_titulo_rival"] =
+        [
+            "Advice · opponent's turn {0} (experimental)", "Consejo · turno {0} del rival (experimental)", "Tipp · Zug {0} des Gegners (experimentell)", "Conseil · tour {0} de l'adversaire (expérimental)",
+            "Conselho · turno {0} do adversário (experimental)", "Consiglio · turno {0} dell'avversario (sperimentale)", "アドバイス・相手の{0}ターン目（実験的）", "建议・对手的第 {0} 回合（实验性）",
+        ],
+        ["aviso_dice"] =
+        [
+            "{0} says", "{0} dice", "{0} sagt", "{0} dit",
+            "{0} diz", "{0} dice", "{0}のひとこと", "{0}说",
+        ],
+        ["mul_fondo_cuales"] =
+        [
+            "Put on the bottom: {0}.", "Pon al fondo: {0}.", "Unter die Bibliothek: {0}.", "Mets en dessous : {0}.",
+            "Põe no fundo: {0}.", "Metti in fondo: {0}.", "ボトムに：{0}。", "置底：{0}。",
+        ],
     };
 }

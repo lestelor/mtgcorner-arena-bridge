@@ -135,6 +135,23 @@ internal static class Superposicion
     [DllImport("gdiplus.dll")] private static extern int GdiplusStartup(out IntPtr token, ref GdiplusStartupInput entrada, IntPtr salida);
     [DllImport("gdiplus.dll", CharSet = CharSet.Unicode)] private static extern int GdipLoadImageFromFile(string fichero, out IntPtr imagen);
     [DllImport("gdiplus.dll")] private static extern int GdipDisposeImage(IntPtr imagen);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr despues, int x, int y, int ancho, int alto, uint banderas);
+    [DllImport("user32.dll")] private static extern bool KillTimer(IntPtr hWnd, IntPtr id);
+    [StructLayout(LayoutKind.Sequential)] private struct PuntoG { public int X, Y; }
+    [DllImport("gdiplus.dll")] private static extern int GdipSetSmoothingMode(IntPtr g, int modo);
+    [DllImport("gdiplus.dll")] private static extern int GdipCreateSolidFill(uint argb, out IntPtr brocha);
+    [DllImport("gdiplus.dll")] private static extern int GdipDeleteBrush(IntPtr brocha);
+    [DllImport("gdiplus.dll")] private static extern int GdipCreatePen1(uint argb, float ancho, int unidad, out IntPtr pluma);
+    [DllImport("gdiplus.dll")] private static extern int GdipDeletePen(IntPtr pluma);
+    [DllImport("gdiplus.dll")] private static extern int GdipCreatePath(int relleno, out IntPtr camino);
+    [DllImport("gdiplus.dll")] private static extern int GdipDeletePath(IntPtr camino);
+    [DllImport("gdiplus.dll")] private static extern int GdipAddPathArcI(IntPtr camino, int x, int y, int ancho, int alto, float inicio, float barrido);
+    [DllImport("gdiplus.dll")] private static extern int GdipAddPathLineI(IntPtr camino, int x1, int y1, int x2, int y2);
+    [DllImport("gdiplus.dll")] private static extern int GdipClosePathFigure(IntPtr camino);
+    [DllImport("gdiplus.dll")] private static extern int GdipFillPath(IntPtr g, IntPtr brocha, IntPtr camino);
+    [DllImport("gdiplus.dll")] private static extern int GdipDrawPath(IntPtr g, IntPtr pluma, IntPtr camino);
+    [DllImport("gdiplus.dll")] private static extern int GdipGetImageWidth(IntPtr imagen, out uint ancho);
+    [DllImport("gdiplus.dll")] private static extern int GdipGetImageHeight(IntPtr imagen, out uint alto);
     [DllImport("gdiplus.dll")] private static extern int GdipCreateFromHDC(IntPtr hdc, out IntPtr grafico);
     [DllImport("gdiplus.dll")] private static extern int GdipDeleteGraphics(IntPtr grafico);
     [DllImport("gdiplus.dll")] private static extern int GdipSetInterpolationMode(IntPtr grafico, int modo);
@@ -171,7 +188,39 @@ internal static class Superposicion
     private static uint Rgb(int r, int g, int b) => (uint)(r | (g << 8) | (b << 16));
 
     /// <summary>Ancho y alto del aviso, y el aire que deja contra el borde del juego.</summary>
-    private const int ANCHO = 380, ALTO_TEXTO_MIN = 104, MARGEN = 28;
+    private const int ANCHO_BASE = 380, ALTO_TEXTO_MIN = 104, MARGEN = 28;
+    /// <summary>
+    /// LA FIGURA DEL ENTRENADOR a la izquierda, en los consejos (mulligan y cada
+    /// turno): el que el usuario eligió en el resumen (pedido el 2026-10-03,
+    /// «estaría gracioso que saliese la figura del entrenador»). Con ella, el
+    /// aviso es más ancho y el texto empieza a su derecha.
+    /// </summary>
+    private const int ANCHO_AVATAR = 76;
+    private static int ANCHO = ANCHO_BASE;
+    /// <summary>Dónde empieza el texto: 18, o a la derecha de la figura.</summary>
+    private static int izq = 18;
+    private static string? avatarFichero;
+    private static IntPtr avatarImg;
+
+    /// <summary>
+    /// EL ENTRENADOR DE TODOS LOS AVISOS (el usuario, 2026-10-03: «que salga
+    /// siempre el muñeco en esa ventana», «y quizás se puede hacer más
+    /// divertida»): su figura, su nombre y su color. Con él, el aviso es su
+    /// bocadillo de cómic: el texto en un globo con el pico hacia él, su color
+    /// en el borde y «EL SARGENTO DICE» arriba, entra deslizándose y él da
+    /// unos botes como si hablara. Sin figura (aún no ha bajado), el aviso de
+    /// siempre. Lo pone Program.
+    /// </summary>
+    public static Func<(string? Figura, string Nombre, (int R, int G, int B) Color)>? Entrenador { get; set; }
+    private static string nombreEntrenador = "";
+    private static uint colorEntrenador = Rgb(245, 158, 11);
+    private static (int R, int G, int B) colorEntrenadorRgb = (245, 158, 11);
+
+    /// <summary>La entrada: dónde acaba, cuándo empezó y cuánto se ha movido la figura.</summary>
+    private static int destinoX, destinoY;
+    private static readonly System.Diagnostics.Stopwatch reloj = new();
+    private static int saltoFigura;
+    private const int DESLIZ = 70, MS_ENTRADA = 260, MS_BOTES = 1500;
     /// <summary>
     /// LO QUE MIDE LA PARTE DE TEXTO: lo que pida el cuerpo, entre las dos
     /// líneas de siempre y unas ocho. Era fijo y el consejo de cada turno, que
@@ -187,6 +236,13 @@ internal static class Superposicion
     private static IntPtr gdiplus;
     /// <summary>La alerta en pantalla es fija: se queda hasta su X y se puede pulsar.</summary>
     private static bool esFijo;
+    /// <summary>
+    /// CON SU X: las alertas fijas y, desde el 2026-10-03, los consejos (los
+    /// avisos importantes: mulligan y cada turno). «Que las ventanas de
+    /// consejos tengan una X para cerrarlas» (el usuario). Los consejos siguen
+    /// yéndose solos a su tiempo; la X es para quitarlos antes.
+    /// </summary>
+    private static bool conCierre;
     /// <summary>Qué hay bajo el ratón: la X (-2), la miniatura i (0..n) o nada (-1).</summary>
     private static int bajoRaton = -1;
     private const int BAJO_X = -2, LADO_X = 28;
@@ -226,11 +282,11 @@ internal static class Superposicion
     /// antes de que nadie la leyera. Cualquier fallo se traga: un aviso que no
     /// sale no puede estropear una importación que ya salió bien.
     /// </summary>
-    public static void Mostrar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false)
+    public static void Mostrar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false, string? avatar = null)
     {
         try
         {
-            var hilo = MostrarSinEsperar(titulo, texto, segundos, imagenes, fijo);
+            var hilo = MostrarSinEsperar(titulo, texto, segundos, imagenes, fijo, avatar: avatar);
             // Una fija dura lo que tarde alguien en cerrarla.
             if (fijo) hilo?.Join(); else hilo?.Join(TimeSpan.FromSeconds(segundos + 3));
         }
@@ -246,7 +302,7 @@ internal static class Superposicion
     /// esto, un «subiendo» de veinte segundos y un «hecho» de seis se apilarían
     /// en el mismo sitio y el de encima taparía al otro.
     /// </summary>
-    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false, bool importante = false)
+    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false, bool importante = false, string? avatar = null)
     {
         /**
          * UN AVISO IMPORTANTE NO LO PISA OTRO CUALQUIERA mientras dura. Cada
@@ -261,7 +317,11 @@ internal static class Superposicion
         {
             Ocultar();
             var ficheros = (imagenes ?? []).Where(f => !string.IsNullOrEmpty(f) && File.Exists(f)).Take(MAX_MINIS).ToArray();
-            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos, ficheros, fijo); } catch (Exception e) { Console.Error.WriteLine($"[aviso] {e.GetType().Name}: {e.Message}"); } });
+            var ent = Entrenador?.Invoke();
+            var figura = avatar ?? ent?.Figura;
+            var conAvatar = figura is { Length: > 0 } && File.Exists(figura) ? figura : null;
+            if (ent is { } e) { nombreEntrenador = e.Nombre; colorEntrenadorRgb = e.Color; colorEntrenador = Rgb(e.Color.R, e.Color.G, e.Color.B); }
+            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos, ficheros, fijo, conAvatar, importante); } catch (Exception e) { Console.Error.WriteLine($"[aviso] {e.GetType().Name}: {e.Message}"); } });
             hilo.IsBackground = true;
             hilo.Start();
             return hilo;
@@ -282,7 +342,7 @@ internal static class Superposicion
     /// <summary>La ventana del aviso que está en pantalla, o cero.</summary>
     private static volatile IntPtr ventanaActual;
 
-    private static void Correr(string titulo, string texto, int segundos, string[] ficheros, bool fijo)
+    private static void Correr(string titulo, string texto, int segundos, string[] ficheros, bool fijo, string? avatar = null, bool importante = false)
     {
         // EN PÍXELES DE VERDAD. `GetWindowRect` devuelve píxeles físicos; sin
         // declararse consciente del DPI, Windows virtualiza las coordenadas y
@@ -295,9 +355,16 @@ internal static class Superposicion
         textoCuerpo = texto;
         ficherosMini = ficheros;
         esFijo = fijo;
+        conCierre = fijo || importante;
         bajoRaton = -1;
         miniZoom = -1;
+        avatarFichero = avatar;
+        avatarImg = IntPtr.Zero;
+        ANCHO = ANCHO_BASE + (avatar is null ? 0 : ANCHO_AVATAR + 12);
+        izq = avatar is null ? 18 : 18 + ANCHO_AVATAR + 12;
         ALTO_TEXTO = AltoDelCuerpo(texto);
+        // Con la figura, al menos lo que ella mide (retratos: algo más altos que anchos).
+        if (avatar is not null) ALTO_TEXTO = Math.Max(ALTO_TEXTO, 14 + ANCHO_AVATAR * 4 / 3 + 14);
         ALTO = ALTO_TEXTO + (ficheros.Length > 0 ? ALTO_MINI + AIRE_MINI : 0);
         procedimiento = Procedimiento;
 
@@ -312,9 +379,13 @@ internal static class Superposicion
         if (RegisterClassEx(ref clase) == 0) { var err = Marshal.GetLastWin32Error(); if (err != 1410 /* ERROR_CLASS_ALREADY_EXISTS */) Console.Error.WriteLine($"[aviso] RegisterClassEx falló: error {err}"); }
 
         var (x, y) = Donde();
+        destinoX = x; destinoY = y;
+        // Con figura, entra deslizándose desde un poco más a la derecha.
+        var animada = avatar is not null;
+        if (animada) x += DESLIZ;
         var ventana = CreateWindowEx(
             // La fija no lleva WS_EX_TRANSPARENT: tiene que recibir el ratón (la X y el zoom).
-            WS_EX_TOPMOST | (fijo ? 0 : WS_EX_TRANSPARENT) | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+            WS_EX_TOPMOST | (conCierre ? 0 : WS_EX_TRANSPARENT) | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
             "MtgCornerAviso", "MTG Corner", WS_POPUP,
             x, y, ANCHO, ALTO, IntPtr.Zero, IntPtr.Zero, instancia, IntPtr.Zero);
         if (ventana == IntPtr.Zero) { Console.Error.WriteLine($"[aviso] CreateWindowEx falló: error {Marshal.GetLastWin32Error()}"); return; }
@@ -322,9 +393,12 @@ internal static class Superposicion
         // Esquinas redondeadas y un punto de transparencia, para que no parezca
         // un cuadro de diálogo de 1998.
         SetWindowRgn(ventana, CreateRoundRectRgn(0, 0, ANCHO + 1, ALTO + 1, 18, 18), true);
-        SetLayeredWindowAttributes(ventana, 0, 240, LWA_ALPHA);
+        SetLayeredWindowAttributes(ventana, 0, (byte)(animada ? 0 : 240), LWA_ALPHA);
 
         if (!fijo) SetTimer(ventana, new IntPtr(1), (uint)Math.Max(1, segundos) * 1000, IntPtr.Zero);
+        // La animación: otro reloj, de fotogramas (el 1 es el que cierra el aviso).
+        saltoFigura = 0;
+        if (animada) { reloj.Restart(); SetTimer(ventana, new IntPtr(2), 16, IntPtr.Zero); }
         ventanaActual = ventana;
         ShowWindow(ventana, SW_SHOWNOACTIVATE);   // sin robarle el foco al juego
         UpdateWindow(ventana);
@@ -382,9 +456,23 @@ internal static class Superposicion
                 return IntPtr.Zero;
 
             case WM_LBUTTONUP:
-                if (esFijo && QueHayEn(lParam) == BAJO_X) PostMessage(ventana, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                if (conCierre && QueHayEn(lParam) == BAJO_X) PostMessage(ventana, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
                 return IntPtr.Zero;
 
+            case WM_TIMER when wParam.ToInt64() == 2:
+            {
+                // LA ENTRADA: se desliza a su sitio y aparece (curva que frena al
+                // final); luego la figura da unos botes, como quien habla.
+                var ms = reloj.ElapsedMilliseconds;
+                var p = Math.Min(1.0, ms / (double)MS_ENTRADA);
+                var e = 1 - Math.Pow(1 - p, 3);
+                SetWindowPos(ventana, IntPtr.Zero, destinoX + (int)Math.Round((1 - e) * DESLIZ), destinoY, 0, 0, 0x1 /* NOSIZE */ | 0x4 /* NOZORDER */ | 0x10 /* NOACTIVATE */);
+                SetLayeredWindowAttributes(ventana, 0, (byte)Math.Round(240 * e), LWA_ALPHA);
+                var salto = ms < MS_BOTES ? (int)Math.Round(5 * Math.Abs(Math.Sin(ms / 1000.0 * Math.PI * 5))) : 0;
+                if (salto != saltoFigura) { saltoFigura = salto; InvalidateRect(ventana, IntPtr.Zero, false); }
+                if (ms >= MS_BOTES && p >= 1) KillTimer(ventana, new IntPtr(2));
+                return IntPtr.Zero;
+            }
             case WM_TIMER:
             case WM_CLOSE:
                 if (ventanaActual == ventana) ventanaActual = IntPtr.Zero;
@@ -395,16 +483,52 @@ internal static class Superposicion
             case WM_DESTROY:
                 foreach (var m in minis) if (m != IntPtr.Zero) GdipDisposeImage(m);
                 minis.Clear();
+                if (avatarImg != IntPtr.Zero) { GdipDisposeImage(avatarImg); avatarImg = IntPtr.Zero; }
                 PostQuitMessage(0);
                 return IntPtr.Zero;
         }
         return DefWindowProc(ventana, mensaje, wParam, lParam);
     }
 
-    /// <summary>Dónde está la X de una alerta fija, en la ventana.</summary>
-    private static RECT RectX() => new() { Left = ANCHO - LADO_X - 8, Top = 8, Right = ANCHO - 8, Bottom = 8 + LADO_X };
+    /// <summary>Dónde está la X, en la ventana: arriba a la derecha; con el bocadillo, dentro de él (su borde acaba a 12 del filo).</summary>
+    private static RECT RectX() => avatarFichero is not null
+        ? new() { Left = ANCHO - LADO_X - 18, Top = 12, Right = ANCHO - 18, Bottom = 12 + LADO_X }
+        : new() { Left = ANCHO - LADO_X - 8, Top = 8, Right = ANCHO - 8, Bottom = 8 + LADO_X };
 
     /// <summary>Dónde está la miniatura i, en la ventana.</summary>
+    /// <summary>
+    /// EL BOCADILLO: un globo redondeado detrás del título y del texto, con el
+    /// borde del color del entrenador y un pico que apunta a su cara.
+    /// </summary>
+    private static void PintarBocadillo(IntPtr hdc)
+    {
+        if (gdiplus == IntPtr.Zero)
+        {
+            var entrada = new GdiplusStartupInput { GdiplusVersion = 1 };
+            GdiplusStartup(out gdiplus, ref entrada, IntPtr.Zero);
+        }
+        if (GdipCreateFromHDC(hdc, out var g) != 0 || g == IntPtr.Zero) return;
+        GdipSetSmoothingMode(g, 4);
+        int x = izq - 10, y = 8, w = ANCHO - 12 - x, h = ALTO_TEXTO - 8 - y, r = 12, d = r * 2;
+        int picoY = 30, picoX = x - 12;
+        GdipCreatePath(0, out var c);
+        GdipAddPathArcI(c, x, y, d, d, 180, 90);
+        GdipAddPathArcI(c, x + w - d, y, d, d, 270, 90);
+        GdipAddPathArcI(c, x + w - d, y + h - d, d, d, 0, 90);
+        GdipAddPathArcI(c, x, y + h - d, d, d, 90, 90);
+        // El pico, en el lado izquierdo, hacia la figura.
+        GdipAddPathLineI(c, x, y + h - r, x, picoY + 14);
+        GdipAddPathLineI(c, x, picoY + 14, picoX, picoY + 4);
+        GdipAddPathLineI(c, picoX, picoY + 4, x, picoY);
+        GdipClosePathFigure(c);
+        var (cr, cg, cb) = colorEntrenadorRgb;
+        GdipCreateSolidFill(0xFF141C2E, out var relleno);
+        GdipFillPath(g, relleno, c);
+        GdipCreatePen1((uint)((255 << 24) | (cr << 16) | (cg << 8) | cb), 1.6f, 2, out var pluma);
+        GdipDrawPath(g, pluma, c);
+        GdipDeleteBrush(relleno); GdipDeletePen(pluma); GdipDeletePath(c); GdipDeleteGraphics(g);
+    }
+
     /// <summary>El alto de la parte de texto para este cuerpo, medido con la letra con que se pinta.</summary>
     private static int AltoDelCuerpo(string cuerpo)
     {
@@ -414,19 +538,19 @@ internal static class Superposicion
         var anterior = SelectObject(hdc, fuente);
         try
         {
-            var r = new RECT { Left = 0, Top = 0, Right = ANCHO - 36, Bottom = 0 };
+            var r = new RECT { Left = 0, Top = 0, Right = ANCHO - izq - 26, Bottom = 0 };
             DrawText(hdc, cuerpo, -1, ref r, DT_LEFT | DT_WORDBREAK | DT_CALCRECT);
             return Math.Clamp(58 + (r.Bottom - r.Top) + 12, ALTO_TEXTO_MIN, 58 + 8 * 23 + 12);
         }
         finally { SelectObject(hdc, anterior); DeleteObject(fuente); ReleaseDC(IntPtr.Zero, hdc); }
     }
 
-    private static RECT RectMini(int i) => new() { Left = 18 + i * (ANCHO_MINI + AIRE_MINI), Top = ALTO_TEXTO - 4, Right = 18 + i * (ANCHO_MINI + AIRE_MINI) + ANCHO_MINI, Bottom = ALTO_TEXTO - 4 + ALTO_MINI };
+    private static RECT RectMini(int i) => new() { Left = izq + i * (ANCHO_MINI + AIRE_MINI), Top = ALTO_TEXTO - 4, Right = izq + i * (ANCHO_MINI + AIRE_MINI) + ANCHO_MINI, Bottom = ALTO_TEXTO - 4 + ALTO_MINI };
 
     /// <summary>Qué hay bajo un punto de la ventana: la X, una miniatura o nada. Sólo en las fijas: las otras no ven el ratón.</summary>
     private static int QueHayEn(IntPtr lParam)
     {
-        if (!esFijo) return -1;
+        if (!conCierre) return -1;
         var x = (short)(lParam.ToInt64() & 0xFFFF);
         var y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
         bool Dentro(RECT r) => x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
@@ -503,22 +627,26 @@ internal static class Superposicion
             var todo = new RECT { Left = 0, Top = 0, Right = ANCHO, Bottom = ALTO };
             FillRect(hdc, ref todo, fondo);
             var banda = new RECT { Left = 0, Top = 0, Right = 4, Bottom = ALTO };
-            FillRect(hdc, ref banda, filo);
+            if (avatarFichero is not null) { var pincelBanda = CreateSolidBrush(colorEntrenador); FillRect(hdc, ref banda, pincelBanda); DeleteObject(pincelBanda); }
+            else FillRect(hdc, ref banda, filo);
+            if (avatarFichero is not null) PintarBocadillo(hdc);
 
             SetBkMode(hdc, TRANSPARENT_BK);
 
             SelectObject(hdc, marca);
             SetTextColor(hdc, Rgb(252, 211, 77));
-            var rMarca = new RECT { Left = 18, Top = 12, Right = ANCHO - 18, Bottom = 28 };
-            DrawText(hdc, "MTG CORNER", -1, ref rMarca, DT_LEFT | DT_SINGLELINE);
+            var rMarca = new RECT { Left = izq, Top = 12, Right = ANCHO - 18, Bottom = 28 };
+            // Con el entrenador, quién habla y en su color; sin él, la marca.
+            if (avatarFichero is not null && nombreEntrenador.Length > 0) SetTextColor(hdc, colorEntrenador);
+            DrawText(hdc, avatarFichero is not null && nombreEntrenador.Length > 0 ? Textos.T("aviso_dice", nombreEntrenador).ToUpperInvariant() : "MTG CORNER", -1, ref rMarca, DT_LEFT | DT_SINGLELINE);
 
             SelectObject(hdc, fuerte);
             SetTextColor(hdc, Rgb(255, 255, 255));
-            var rTitulo = new RECT { Left = 18, Top = 30, Right = ANCHO - (esFijo ? LADO_X + 16 : 18), Bottom = 56 };
+            var rTitulo = new RECT { Left = izq, Top = 30, Right = conCierre ? RectX().Left - 6 : ANCHO - 18, Bottom = 56 };
             DrawText(hdc, textoTitulo, -1, ref rTitulo, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-            // LA X de las fijas, arriba a la derecha; se ilumina al pasar.
-            if (esFijo)
+            // LA X de las fijas y de los consejos, arriba a la derecha; se ilumina al pasar.
+            if (conCierre)
             {
                 var rx = RectX();
                 if (bajoRaton == BAJO_X) { var resalte = CreateSolidBrush(Rgb(51, 65, 85)); FillRect(hdc, ref rx, resalte); DeleteObject(resalte); }
@@ -531,11 +659,30 @@ internal static class Superposicion
 
             SelectObject(hdc, normal);
             SetTextColor(hdc, Rgb(203, 213, 225));
-            var rCuerpo = new RECT { Left = 18, Top = 58, Right = ANCHO - 18, Bottom = ALTO_TEXTO - 10 };
+            var rCuerpo = new RECT { Left = izq, Top = 58, Right = ANCHO - 26, Bottom = ALTO_TEXTO - 10 };
             DrawText(hdc, textoCuerpo, -1, ref rCuerpo, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
 
             // Las miniaturas, en fila bajo el texto. Se cargan la primera vez
             // que se pinta y se sueltan al cerrar.
+            if (avatarFichero is { } fichAvatar)
+            {
+                if (gdiplus == IntPtr.Zero)
+                {
+                    var entradaA = new GdiplusStartupInput { GdiplusVersion = 1 };
+                    GdiplusStartup(out gdiplus, ref entradaA, IntPtr.Zero);
+                }
+                if (avatarImg == IntPtr.Zero && GdipLoadImageFromFile(fichAvatar, out var cargada) == 0) avatarImg = cargada;
+                if (avatarImg != IntPtr.Zero && GdipCreateFromHDC(hdc, out var gA) == 0 && gA != IntPtr.Zero)
+                {
+                    GdipSetInterpolationMode(gA, 7);
+                    GdipGetImageWidth(avatarImg, out var aw); GdipGetImageHeight(avatarImg, out var ah);
+                    // Con su proporción, del ancho de su hueco y sin pasarse del alto del aviso.
+                    var altoA = aw > 0 ? Math.Min(ALTO_TEXTO - 28, (int)(ANCHO_AVATAR * (double)ah / aw)) : ANCHO_AVATAR;
+                    var anchoA = ah > 0 ? (int)(altoA * (double)aw / ah) : ANCHO_AVATAR;
+                    GdipDrawImageRectI(gA, avatarImg, 18 + (ANCHO_AVATAR - anchoA) / 2, 14 - saltoFigura, anchoA, altoA);
+                    GdipDeleteGraphics(gA);
+                }
+            }
             if (ficherosMini.Length > 0)
             {
                 if (gdiplus == IntPtr.Zero)

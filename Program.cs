@@ -559,6 +559,10 @@ internal static class Program
             var mesaC = new Contexto.Mesa(3, [58437, 92081, 51307, 91549, 92073],
                 [new(58437, false, true), new(58437, false, true), new(92089, false, false)], [new(93838, false, false)], 20, 18);
             Console.WriteLine($"competitivo «Qualifier_Weekend»: {EventoCompetitivo("Qualifier_Weekend")} · «Ladder»: {EventoCompetitivo("Ladder")}");
+            // --tono=sargento (o amable, directo): la figura y la voz de ese entrenador.
+            if (args.FirstOrDefault(a => a.StartsWith("--tono=")) is { } tonoArg && TONOS.Contains(tonoArg[7..])) tonoActual = tonoArg[7..];
+            await PrecargarEntrenadores();
+            Superposicion.Entrenador = DatosEntrenador;
             await ConsejoTurno(httpC, mesaC);
             await Task.Delay(TimeSpan.FromSeconds(args.Contains("--sin-ventana") ? 1 : 26));
             return 0;
@@ -593,9 +597,17 @@ internal static class Program
                 int[] Mano(int t) => [.. Enumerable.Repeat(tierraP, t), .. Enumerable.Range(0, 7 - t).Select(i => hechizos[i % hechizos.Length])];
                 foreach (var (t, m) in new[] { (2, 0), (1, 0), (3, 0), (5, 0), (2, 1) })
                     Console.WriteLine($"{t} tierras, {m} mulligans: {TextoMulligan(Mano(t), t, m, mazoP, "prueba")}");
+                // --ia: también la respuesta de la IA para la mano de 2 tierras.
+                if (args.Contains("--ia"))
+                {
+                    var rIa = await httpP.PostAsJsonAsync($"{PuertaDevice}/mulligan", new { idioma = Textos.Idioma, formato = "standard", mano = Mano(2), mazo = mazoP.Select(c => new { grp = c.Grp, n = c.N }), mulligans = 0, tierras = 2, probabilidad = 54, objetivo = 3 }, JsonOpciones);
+                    Console.WriteLine($"IA: {await rIa.Content.ReadAsStringAsync()}");
+                }
                 // --sin-ventana: sólo la consola (para probar con una partida en marcha).
                 if (args.Contains("--sin-ventana")) return 0;
-                Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), TextoMulligan(Mano(2), 2, 0, mazoP, "prueba"), 15, importante: true);
+                await PrecargarEntrenadores();
+                Superposicion.Entrenador = DatosEntrenador;
+                Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), TextoMulligan(Mano(2), 2, 1, mazoP, "prueba"), 15, importante: true);
                 await Task.Delay(TimeSpan.FromSeconds(16));
                 return 0;
             }
@@ -663,6 +675,7 @@ internal static class Program
             // La biblioteca (rastreador) y las manos ofrecidas (consejo de mulligan).
             Contexto.BibliotecaCambio += () => Console.WriteLine($"BIBLIOTECA {Contexto.BibliotecaTam}  fuera=[{string.Join(",", Contexto.FueraDeBiblioteca.Select(kv => $"{kv.Key}x{kv.Value}"))}]");
             Contexto.ManoNueva += (cartas, tierras, mulligans) => Console.WriteLine($"MANO OFRECIDA [{string.Join(",", cartas)}] tierras={tierras} mulligans={mulligans}");
+            Contexto.TurnoDelRival += m => Console.WriteLine($"TURNO DEL RIVAL T{m.Turno} mano=[{string.Join(",", m.Mano)}] mía=[{string.Join(",", m.Mia.Select(c => c.Grp + (c.Girada ? "g" : "")))}]");
             Contexto.MiFasePrincipal += m => Console.WriteLine($"FASE PRINCIPAL T{m.Turno} mano=[{string.Join(",", m.Mano)}] mía=[{string.Join(",", m.Mia.Select(c => c.Grp + (c.Girada ? "g" : "")))}] rival=[{string.Join(",", m.DelRival.Select(c => c.Grp + (c.Girada ? "g" : "")))}] vidas {m.VidaYo}/{m.VidaRival}");
             // Con un segundo argumento se vigila otro fichero (un Player-prev.log
             // con partidas acabadas, para probar la cronología sin jugar una).
@@ -1053,7 +1066,7 @@ internal static class Program
                     }
                     break;
                 case Columna.Accion.Mano:
-                    if (manoAviso is { } maPulsada) Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), maPulsada.Texto, 20, importante: true);
+                    if (manoAviso is { } maPulsada) Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), maPulsada.Texto, 20, importante: true, avatar: FiguraEntrenador());
                     break;
                 case Columna.Accion.Consejo:
                     // Encender o apagar el consejo de cada turno (experimental).
@@ -1282,9 +1295,15 @@ internal static class Program
         Contexto.Cambio += ActualizarRastreador;
         Contexto.ManoNueva += ConsejoMulligan;
         // El consejo de cada turno, si está encendido (ver ConsejoTurno).
-        consejoActivo = LeerAjustes().Consejo;
+        var ajustes = LeerAjustes();
+        consejoActivo = ajustes.Consejo;
+        if (ajustes.Tono is { } tonoGuardado && TONOS.Contains(tonoGuardado)) tonoActual = tonoGuardado;
+        _ = PrecargarEntrenadores();
+        Superposicion.Entrenador = DatosEntrenador;
         Columna.ConsejoActivo = () => consejoActivo;
         Contexto.MiFasePrincipal += mesa => { if (consejoActivo) _ = ConsejoTurno(http, mesa); };
+        // Y al empezar el del rival, lo que puedas jugar a destiempo (instantáneos, destello).
+        Contexto.TurnoDelRival += mesa => { if (consejoActivo) _ = ConsejoTurno(http, mesa, rival: true); };
         // Empieza tu primer turno: la fila de la mano ya no hace falta.
         Contexto.MiFasePrincipal += _ => { if (manoAviso is not null) { manoAviso = null; Columna.Olvidar("mano"); refrescarColumna?.Invoke(); } };
         Contexto.PartidaAcabada += ApuntarMano;
@@ -1618,6 +1637,8 @@ internal static class Program
             {
                 if (t == tonoActual || httpResidente is null) return;
                 tonoActual = t;
+                // Y se recuerda: es también la figura y la voz de los consejos.
+                GuardarAjustes();
                 _ = Task.Run(async () =>
                 {
                     Columna.EnCurso("resumen");
@@ -1673,7 +1694,8 @@ internal static class Program
 
     private static volatile bool consejoActivo;
 
-    internal sealed record Ajustes(bool Consejo);
+    /// <summary>Lo que se recuerda entre sesiones: el consejo de cada turno y el entrenador elegido en el resumen.</summary>
+    internal sealed record Ajustes(bool Consejo, string? Tono = null);
     private static string FicheroAjustes => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MtgCornerArenaBridge", "ajustes.json");
 
     private static Ajustes LeerAjustes()
@@ -1687,7 +1709,7 @@ internal static class Program
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FicheroAjustes)!);
-            File.WriteAllText(FicheroAjustes, JsonSerializer.Serialize(new Ajustes(consejoActivo), JsonOpciones));
+            File.WriteAllText(FicheroAjustes, JsonSerializer.Serialize(new Ajustes(consejoActivo, tonoActual), JsonOpciones));
         }
         catch { /* sin guardar, vale para esta sesión */ }
     }
@@ -1704,7 +1726,7 @@ internal static class Program
         [property: System.Text.Json.Serialization.JsonPropertyName("por_que")] string? PorQue);
 
     /// <summary>Pide el consejo de este turno y lo enseña encima del juego.</summary>
-    private static async Task ConsejoTurno(HttpClient http, Contexto.Mesa mesa)
+    private static async Task ConsejoTurno(HttpClient http, Contexto.Mesa mesa, bool rival = false)
     {
         if (EventoCompetitivo(Contexto.Evento) || mesa.Mano.Length == 0) return;
         try
@@ -1712,6 +1734,8 @@ internal static class Program
             var cuerpo = new
             {
                 idioma = Textos.Idioma,
+                tono = tonoActual,
+                momento = rival ? "rival" : "propio",
                 formato = Contexto.Formato,
                 turno = mesa.Turno,
                 vidaYo = mesa.VidaYo,
@@ -1728,7 +1752,7 @@ internal static class Program
             // Sin IA, al menos lo que se puede jugar con el maná de este turno.
             if (texto.Length == 0 && d.Jugables is { Length: > 0 } j) texto = Textos.T("consejo_jugables", string.Join(", ", j), d.Mana);
             if (texto.Length == 0) return;
-            Superposicion.MostrarSinEsperar(Textos.T("consejo_titulo", mesa.Turno), texto, 25, importante: true);
+            Superposicion.MostrarSinEsperar(Textos.T(rival ? "consejo_titulo_rival" : "consejo_titulo", mesa.Turno), texto, 25, importante: true, avatar: FiguraEntrenador());
         }
         catch { /* sin consejo este turno */ }
     }
@@ -1778,17 +1802,96 @@ internal static class Program
     /// <summary>Rehace las filas de la columna; la pone el residente (es su función local).</summary>
     private static Action? refrescarColumna;
 
-    /// <summary>Arena te ofrece una mano: el consejo, encima del juego (importante: no lo tapa otro aviso) y en la columna.</summary>
+    /// <summary>Las figuras de los tres entrenadores, ya en disco: los consejos las enseñan junto al texto.</summary>
+    private static readonly Dictionary<string, string> figurasEntrenador = new();
+
+    private static async Task PrecargarEntrenadores()
+    {
+        foreach (var t in TONOS)
+            if (await BajarImagen($"{Sitio}{PuertaDevice}/logo/entrenador-{t}.png") is { } f)
+                lock (figurasEntrenador) figurasEntrenador[t] = f;
+    }
+
+    /// <summary>El entrenador para los avisos: su figura, su nombre y su color (sargento verde militar, amable rosa, directo azul).</summary>
+    private static (string? Figura, string Nombre, (int R, int G, int B) Color) DatosEntrenador() =>
+        (FiguraEntrenador(), Textos.T("tono_" + tonoActual),
+         tonoActual == "sargento" ? (132, 204, 22) : tonoActual == "amable" ? (244, 114, 182) : (56, 189, 248));
+
+    /// <summary>La figura del entrenador elegido, o null si aún no ha bajado.</summary>
+    private static string? FiguraEntrenador()
+    {
+        lock (figurasEntrenador) return figurasEntrenador.TryGetValue(tonoActual, out var f) ? f : null;
+    }
+
+    internal sealed record RespuestaMulligan(
+        [property: System.Text.Json.Serialization.JsonPropertyName("veredicto")] string? Veredicto,
+        [property: System.Text.Json.Serialization.JsonPropertyName("razon")] string? Razon,
+        [property: System.Text.Json.Serialization.JsonPropertyName("alFondo")] string[]? AlFondo = null);
+
+    /// <summary>
+    /// Arena te ofrece una mano: el consejo, encima del juego (importante: no
+    /// lo tapa otro aviso) y en la columna. PRIMERO el de las cuentas, al
+    /// instante; DESPUÉS, si llega en unos segundos, el de la IA mirando la mano
+    /// entera —qué cartas se apoyan entre sí, si hay plan para los primeros
+    /// turnos— (el usuario, 2026-10-03: «que no sólo se base en el número de
+    /// tierras»), que lo sustituye con su veredicto y conserva las cuentas.
+    /// En eventos competitivos, nada.
+    /// </summary>
     private static void ConsejoMulligan(int[] cartas, int tierras, int mulligans)
     {
         ultimaMano = (tierras, mulligans);
+        if (EventoCompetitivo(Contexto.Evento)) return;
         var texto = TextoMulligan(cartas, tierras, mulligans, Contexto.CartasMazo, Contexto.Mazo);
-        // El veredicto es la primera frase («Quédatela.», «Mulligan.»).
+        MostrarMano(texto);
+        if (httpResidente is { } http) _ = MulliganConIa(http, cartas, tierras, mulligans, texto);
+    }
+
+    /// <summary>El consejo de la mano en el aviso y en la fila «Mano: …» de la columna; el veredicto es la primera frase.</summary>
+    private static void MostrarMano(string texto)
+    {
         var veredicto = texto.Split(". ", 2)[0].TrimEnd('.');
         manoAviso = (Textos.T("col_mano", veredicto), texto, DateTime.UtcNow.AddSeconds(90));
         Columna.Destacar("mano");
         refrescarColumna?.Invoke();
-        Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), texto, 20, importante: true);
+        Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), texto, 20, importante: true, avatar: FiguraEntrenador());
+    }
+
+    private static async Task MulliganConIa(HttpClient http, int[] cartas, int tierras, int mulligans, string deLasCuentas)
+    {
+        try
+        {
+            var mazo = Contexto.CartasMazo;
+            var tamMazo = mazo.Length > 0 ? mazo.Sum(c => c.N) : 60;
+            var datos = cartasDelMazoActual.GroupBy(c => c.Grp).ToDictionary(g => g.Key, g => g.First());
+            var tierrasMazo = datos.Count > 0 ? mazo.Where(c => datos.TryGetValue(c.Grp, out var d) && d.Tierra).Sum(c => c.N) : (int)Math.Round(tamMazo * 0.4);
+            var objetivo = tierras < 3 ? 3 : 4;
+            var p = AlMenos(Math.Max(0, objetivo - tierras), objetivo - 1, Math.Max(0, tierrasMazo - tierras), Math.Max(1, tamMazo - cartas.Length));
+            var r = await http.PostAsJsonAsync($"{PuertaDevice}/mulligan", new
+            {
+                idioma = Textos.Idioma,
+                tono = tonoActual,
+                formato = Contexto.Formato,
+                mano = cartas,
+                mazo = mazo.Select(c => new { grp = c.Grp, n = c.N }),
+                mulligans,
+                tierras,
+                probabilidad = Math.Round(p * 100),
+                objetivo,
+            }, JsonOpciones);
+            if (!r.IsSuccessStatusCode) return;
+            var d = await r.Content.ReadFromJsonAsync<RespuestaMulligan>(JsonOpciones);
+            if (d?.Veredicto is not { } v || d.Razon is not { Length: > 0 } razon) return;
+            // Si mientras pensaba ya ha empezado la partida, ya no sirve.
+            if (manoAviso is null) return;
+            var clave = v == "keep" ? "mul_quedate" : v == "mulligan" ? "mul_mulligan" : "mul_arriesgada";
+            // El veredicto de la IA delante, su razón, y las cuentas de antes sin su veredicto.
+            var cuentas = deLasCuentas.Split(". ", 2) is { Length: 2 } partes ? partes[1] : "";
+            // Qué poner debajo: lo que diga la IA; si no lo dice, lo de las cuentas (ya va en `cuentas`).
+            var fondo = mulligans > 0 && clave != "mul_mulligan" && d.AlFondo is { Length: > 0 } af ? " " + Textos.T("mul_fondo_cuales", string.Join(", ", af)) : "";
+            if (fondo.Length > 0) cuentas = QuitarFondo(cuentas);
+            MostrarMano($"{Textos.T(clave)}{fondo} {razon} {cuentas}".Trim());
+        }
+        catch { /* sin IA, se queda el de las cuentas */ }
     }
 
     /// <summary>
@@ -1821,7 +1924,7 @@ internal static class Program
 
         var lineas = new List<string>
         {
-            Textos.T(veredicto) + (mulligans > 0 && veredicto != "mul_mulligan" ? " " + Textos.T("mul_al_fondo", mulligans) : ""),
+            Textos.T(veredicto) + (mulligans > 0 && veredicto != "mul_mulligan" ? " " + FondoPorCuentas(cartas, tierras, mulligans, datos) : ""),
             Textos.T("mul_resumen", tierras, baratas),
         };
         // La probabilidad, sólo si dice algo: con 4 tierras o más ya está hecha.
@@ -1837,6 +1940,38 @@ internal static class Program
             }
         }
         return string.Join(" ", lineas);
+    }
+
+    /// <summary>
+    /// QUÉ PONER DEBAJO TRAS UN MULLIGAN, sin IA (el usuario, 2026-10-03: «que
+    /// te aconseje qué carta poner debajo»): con cuatro tierras o más, sobran
+    /// tierras; si no, lo más caro, que es lo que tarda en jugarse. Con nombres
+    /// si se conocen las cartas; si no, cuántas.
+    /// </summary>
+    private static string FondoPorCuentas(int[] cartas, int tierras, int mulligans, Dictionary<int, Columna.CartaMazo> datos)
+    {
+        if (datos.Count == 0) return Textos.T("mul_al_fondo", mulligans);
+        var restantes = cartas.Where(g => datos.ContainsKey(g)).Select(g => datos[g]).ToList();
+        var elegidas = new List<string>();
+        for (var i = 0; i < mulligans && restantes.Count > 0; i++)
+        {
+            var quedanTierras = restantes.Count(c => c.Tierra);
+            var c = quedanTierras >= 4 ? restantes.First(x => x.Tierra) : restantes.Where(x => !x.Tierra).OrderByDescending(x => x.Cmc).FirstOrDefault() ?? restantes[0];
+            elegidas.Add(c.Nombre);
+            restantes.Remove(c);
+        }
+        return elegidas.Count > 0 ? Textos.T("mul_fondo_cuales", string.Join(", ", elegidas)) : Textos.T("mul_al_fondo", mulligans);
+    }
+
+    /// <summary>Quita de un texto de las cuentas la frase de qué poner debajo (cuando la IA ya lo ha dicho).</summary>
+    private static string QuitarFondo(string texto)
+    {
+        var frase = Textos.T("mul_fondo_cuales", "\u0001");
+        var inicio = frase.Split('\u0001')[0];
+        var i = texto.IndexOf(inicio, StringComparison.Ordinal);
+        if (i < 0) return texto;
+        var fin = texto.IndexOf(". ", i, StringComparison.Ordinal);
+        return (texto[..i] + (fin < 0 ? "" : texto[(fin + 2)..])).Trim();
     }
 
     /// <summary>Probabilidad de sacar al menos <paramref name="k"/> éxitos en <paramref name="n"/> robos (hipergeométrica).</summary>

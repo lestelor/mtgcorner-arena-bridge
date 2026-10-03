@@ -797,6 +797,19 @@ internal static class Columna
             case WM_MOUSELEAVE:
                 siguiendoRaton = false;
                 if (ForzarAbierta) return IntPtr.Zero;
+                /**
+                 * EL DESPLEGABLE DEL MAZO SE QUEDA ABIERTO hasta que se cierra con
+                 * su flecha o se elige otra cosa de la columna (el usuario,
+                 * 2026-10-03: al ir a la ventana de similares, que está a la
+                 * derecha, se cerraba y había que volver a abrirlo). La columna se
+                 * queda abierta con él; sólo deja de resaltar la fila.
+                 */
+                if (desplegado)
+                {
+                    filaBajoRaton = -1;
+                    InvalidateRect(hWnd, IntPtr.Zero, true);
+                    return IntPtr.Zero;
+                }
                 abierta = false;
                 filaBajoRaton = -1;
                 // Al cerrarse la columna, el desplegable se pliega y el rastreador se queda en su fila.
@@ -837,6 +850,8 @@ internal static class Columna
                     {
                         case Accion.Mejorar:
                             desplegado = !desplegado; cartaAbierta = null; desdeCarta = 0;
+                            // Abierto el desplegable, abierta la columna: se queda así hasta cerrarlo.
+                            if (desplegado) abierta = true;
                             Rehacer(); Recolocar();
                             return IntPtr.Zero;
                         case Accion.CartaMazo or Accion.Rastreo when f.Carta is { } carta && alPulsar is { } pulsarCarta:
@@ -862,6 +877,8 @@ internal static class Columna
                 {
                     var accion = filas[fila].Accion;
                     var dato = filas[fila].Dato;
+                    // Otra opción de la columna: el desplegable del mazo se pliega.
+                    if (desplegado) { desplegado = false; cartaAbierta = null; desdeCarta = 0; Rehacer(); Recolocar(); }
                     // Fuera del hilo de la ventana: lo que hace un icono puede
                     // tardar (subir la colección), y el bucle de mensajes no
                     // puede pararse a esperarlo.
