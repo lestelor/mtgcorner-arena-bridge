@@ -549,6 +549,22 @@ internal static class Program
             PanelCartas.Cerrar();
             return 0;
         }
+        // --probar-pila [--tono=X]: varios avisos a la vez (2026-10-04). El consejo
+        // arriba con la figura; la alerta y el informativo, bocadillos de seguida
+        // debajo; al irse el consejo (14 s), la alerta hereda la figura.
+        if (args.Length > 0 && args[0] == "--probar-pila")
+        {
+            if (args.FirstOrDefault(a => a.StartsWith("--tono=")) is { } tonoP && TONOS.Contains(tonoP[7..])) tonoActual = tonoP[7..];
+            await PrecargarEntrenadores();
+            Superposicion.Entrenador = DatosEntrenador;
+            Superposicion.MostrarSinEsperar(Textos.T("consejo_titulo", 4), "Play Plains, then cast Skyward Spider: you need a creature to hang your auras on, and it has ward 2.", 14, importante: true);
+            await Task.Delay(1200);
+            Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_amenaza", "Kiora, the Rising Tide + Bringer of the Last Gift", "reanimate everything"), 30, fijo: true);
+            await Task.Delay(1200);
+            Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("col_subiendo"), 10);
+            await Task.Delay(20000);
+            return 0;
+        }
         if (args.Length > 0 && args[0] == "--probar-consejo")
         {
             // Una mesa de ejemplo con cartas de Mono-White Auras: turno 3, dos

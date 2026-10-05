@@ -196,11 +196,19 @@ internal static class Superposicion
     /// aviso es más ancho y el texto empieza a su derecha.
     /// </summary>
     private const int ANCHO_AVATAR = 76;
-    private static int ANCHO = ANCHO_BASE;
+    /*
+     * CADA AVISO, SU ESTADO (2026-10-04). Desde que se apilan pueden estar varios
+     * en pantalla, y cada uno vive en su propio hilo con su propia ventana y su
+     * propio bucle de mensajes: todo lo de abajo que describe UN aviso —tamaño,
+     * textos, figura, miniaturas, la X, la animación— es [ThreadStatic], así
+     * que cada ventana ve el suyo. Correr lo inicializa entero al empezar (los
+     * valores de las declaraciones sólo valen para el primer hilo).
+     */
+    [ThreadStatic] private static int ANCHO;
     /// <summary>Dónde empieza el texto: 18, o a la derecha de la figura.</summary>
-    private static int izq = 18;
-    private static string? avatarFichero;
-    private static IntPtr avatarImg;
+    [ThreadStatic] private static int izq;
+    [ThreadStatic] private static string? avatarFichero;
+    [ThreadStatic] private static IntPtr avatarImg;
 
     /// <summary>
     /// EL ENTRENADOR DE TODOS LOS AVISOS (el usuario, 2026-10-03: «que salga
@@ -212,50 +220,81 @@ internal static class Superposicion
     /// siempre. Lo pone Program.
     /// </summary>
     public static Func<(string? Figura, string Nombre, (int R, int G, int B) Color)>? Entrenador { get; set; }
-    private static string nombreEntrenador = "";
-    private static uint colorEntrenador = Rgb(245, 158, 11);
-    private static (int R, int G, int B) colorEntrenadorRgb = (245, 158, 11);
+    [ThreadStatic] private static string? nombreEntrenador;
+    [ThreadStatic] private static uint colorEntrenador;
+    [ThreadStatic] private static (int R, int G, int B) colorEntrenadorRgb;
 
-    /// <summary>La entrada: dónde acaba, cuándo empezó y cuánto se ha movido la figura.</summary>
-    private static int destinoX, destinoY;
-    private static readonly System.Diagnostics.Stopwatch reloj = new();
-    private static int saltoFigura;
+    /// <summary>La entrada: cuándo empezó y cuánto se ha movido la figura (adónde va lo dice la pila).</summary>
+    [ThreadStatic] private static System.Diagnostics.Stopwatch? reloj;
+    [ThreadStatic] private static int saltoFigura;
     private const int DESLIZ = 70, MS_ENTRADA = 260, MS_BOTES = 1500;
     /// <summary>
     /// LO QUE MIDE LA PARTE DE TEXTO: lo que pida el cuerpo, entre las dos
     /// líneas de siempre y unas ocho. Era fijo y el consejo de cada turno, que
     /// dice jugada, ataque y por qué, se cortaba a media frase (2026-10-03).
     /// </summary>
-    private static int ALTO_TEXTO = ALTO_TEXTO_MIN;
+    [ThreadStatic] private static int ALTO_TEXTO;
     /// <summary>Las miniaturas: cartas pequeñas en fila bajo el texto (pedido del usuario el 2026-09-26: «no hace falta que sean muy grandes»).</summary>
     private const int ANCHO_MINI = 70, ALTO_MINI = 98, AIRE_MINI = 8, MAX_MINIS = 4;
     /// <summary>El alto del aviso que hay en pantalla: el del texto, y las miniaturas si las lleva.</summary>
-    private static int ALTO = ALTO_TEXTO_MIN;
-    private static string[] ficherosMini = [];
-    private static readonly List<IntPtr> minis = new();
+    [ThreadStatic] private static int ALTO;
+    [ThreadStatic] private static string[]? ficherosMini;
+    [ThreadStatic] private static List<IntPtr>? minis;
+    /// <summary>El arranque de GDI+ es del proceso, uno para todos los avisos (ver ArrancarGdiplus).</summary>
     private static IntPtr gdiplus;
+    private static readonly object cerrojoGdiplus = new();
+
+    /// <summary>GDI+ se arranca una vez por proceso; con varios avisos a la vez, dos hilos podían hacerlo a la par.</summary>
+    private static void ArrancarGdiplus()
+    {
+        lock (cerrojoGdiplus)
+        {
+            if (gdiplus != IntPtr.Zero) return;
+            var entrada = new GdiplusStartupInput { GdiplusVersion = 1 };
+            GdiplusStartup(out gdiplus, ref entrada, IntPtr.Zero);
+        }
+    }
     /// <summary>La alerta en pantalla es fija: se queda hasta su X y se puede pulsar.</summary>
-    private static bool esFijo;
+    [ThreadStatic] private static bool esFijo;
+    /// <summary>
+    /// EL PRIMERO DE LA PILA HABLA CON FIGURA; LOS DEMÁS SON SUS BOCADILLOS
+    /// (el usuario, 2026-10-04: «en dos bocadillos diferentes, como dos mensajes
+    /// del coach»). Con el entrenador, sólo el de arriba lleva figura, banda,
+    /// «EL SARGENTO DICE» y pico; los de debajo son el globo solo, alineado con
+    /// el suyo, y lo de alrededor deja ver el juego (ver AplicarForma). Cambia
+    /// en vivo: si se cierra el primero, el siguiente pasa a llevar la figura
+    /// (la pila se lo dice con WM_PRIMERA, cada ventana vive en su hilo).
+    /// </summary>
+    [ThreadStatic] private static bool esPrimera;
+    private const uint WM_PRIMERA = 0x8001; // WM_APP + 1
+    /// <summary>
+    /// LAS DOS ALTURAS de la parte de texto: como primero (con sitio para la
+    /// figura) y de seguida (sólo su texto, y sin la línea de «… DICE», que no
+    /// repite: por eso su texto sube SUBE_SEGUIDA). La pila coloca con la que
+    /// toca y, al cambiar de papel, la ventana se redimensiona (AjustarAlto).
+    /// </summary>
+    [ThreadStatic] private static int altoTextoPrimera, altoTextoSeguida;
+    private const int SUBE_SEGUIDA = 16;
     /// <summary>
     /// CON SU X: las alertas fijas y, desde el 2026-10-03, los consejos (los
     /// avisos importantes: mulligan y cada turno). «Que las ventanas de
     /// consejos tengan una X para cerrarlas» (el usuario). Los consejos siguen
     /// yéndose solos a su tiempo; la X es para quitarlos antes.
     /// </summary>
-    private static bool conCierre;
+    [ThreadStatic] private static bool conCierre;
     /// <summary>Qué hay bajo el ratón: la X (-2), la miniatura i (0..n) o nada (-1).</summary>
-    private static int bajoRaton = -1;
+    [ThreadStatic] private static int bajoRaton;
     private const int BAJO_X = -2, LADO_X = 28;
     /// <summary>La carta en grande al pasar por una miniatura: la mitad de la imagen «normal» de Scryfall (488×680), así sale nítida.</summary>
     private const int ANCHO_ZOOM = 244, ALTO_ZOOM = 340;
-    private static IntPtr ventanaZoom;
-    private static int miniZoom = -1;
+    [ThreadStatic] private static IntPtr ventanaZoom;
+    [ThreadStatic] private static int miniZoom;
 
     // El procedimiento de ventana se guarda en un campo estático A PROPÓSITO:
     // Windows se queda con su puntero, y si el recolector se llevara el
     // delegado, el primer mensaje que llegara saltaría a memoria liberada.
     private static WndProc? procedimiento;
-    private static string textoTitulo = "", textoCuerpo = "";
+    [ThreadStatic] private static string? textoTitulo, textoCuerpo;
 
     /// <summary>La ventana principal de Arena, o cero si no está abierto.</summary>
     private static IntPtr VentanaDeArena()
@@ -298,30 +337,30 @@ internal static class Superposicion
     /// trabajo que hacer mientras se lee («Subiendo…» y a subir). Devuelve el
     /// hilo, por si alguien quiere esperarlo igual.
     ///
-    /// UNO SOLO A LA VEZ: el que hubiera se quita antes de poner el nuevo. Sin
-    /// esto, un «subiendo» de veinte segundos y un «hecho» de seis se apilarían
-    /// en el mismo sitio y el de encima taparía al otro.
+    /// APILADOS, NO UNO SOLO (el usuario, 2026-10-04: «si hay varios avisos que
+    /// se solapan deberían aparecer unos debajo de los otros»). Antes cada aviso
+    /// cerraba el anterior, y con el consejo de cada turno en pantalla los demás
+    /// se DESCARTABAN —los de combos del rival se marcaban como avisados y no
+    /// volvían a salir—. Ahora van en una pila arriba a la derecha (ver
+    /// Recolocar), y sólo se sustituyen los de la misma RANURA:
+    ///  · el consejo (`importante`: mulligan y cada turno), al anterior consejo;
+    ///  · los informativos («subiendo…», «hecho»), al informativo anterior: un
+    ///    «hecho» tapando su propio «subiendo» era justo lo que se quería;
+    ///  · las alertas fijas (combos y sinergias del rival) no sustituyen a nadie:
+    ///    se quedan, cada una con su X.
     /// </summary>
     public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false, bool importante = false, string? avatar = null)
     {
-        /**
-         * UN AVISO IMPORTANTE NO LO PISA OTRO CUALQUIERA mientras dura. Cada
-         * aviso cierra el anterior, y el consejo de mulligan —que sólo sirve en
-         * los segundos en que decides— lo tapaba la subida de fondo que hace el
-         * programa al arrancar («no he visto que se me aconseje», el usuario,
-         * 2026-10-03). Los importantes sí se sustituyen entre ellos.
-         */
-        if (!importante && DateTime.UtcNow < importanteHasta) return null;
-        if (importante) importanteHasta = DateTime.UtcNow.AddSeconds(segundos);
         try
         {
-            Ocultar();
+            var ranura = importante ? RANURA_CONSEJO : fijo ? null : RANURA_INFO;
+            if (ranura is not null) CerrarRanura(ranura);
             var ficheros = (imagenes ?? []).Where(f => !string.IsNullOrEmpty(f) && File.Exists(f)).Take(MAX_MINIS).ToArray();
             var ent = Entrenador?.Invoke();
             var figura = avatar ?? ent?.Figura;
             var conAvatar = figura is { Length: > 0 } && File.Exists(figura) ? figura : null;
-            if (ent is { } e) { nombreEntrenador = e.Nombre; colorEntrenadorRgb = e.Color; colorEntrenador = Rgb(e.Color.R, e.Color.G, e.Color.B); }
-            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos, ficheros, fijo, conAvatar, importante); } catch (Exception e) { Console.Error.WriteLine($"[aviso] {e.GetType().Name}: {e.Message}"); } });
+            var quien = ent is { } e ? (e.Nombre, e.Color) : ("", (245, 158, 11));
+            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos, ficheros, fijo, conAvatar, importante, ranura, quien); } catch (Exception ex) { Console.Error.WriteLine($"[aviso] {ex.GetType().Name}: {ex.Message}"); } });
             hilo.IsBackground = true;
             hilo.Start();
             return hilo;
@@ -329,20 +368,111 @@ internal static class Superposicion
         catch { return null; }
     }
 
-    /// <summary>Quita el aviso que haya, si hay alguno. Desde cualquier hilo.</summary>
-    public static void Ocultar()
+    /// <summary>Quita el aviso informativo que haya («subiendo…»), si hay alguno. Desde cualquier hilo.</summary>
+    public static void Ocultar() => CerrarRanura(RANURA_INFO);
+
+    // ── LA PILA ────────────────────────────────────────────────────────────
+
+    private const string RANURA_CONSEJO = "consejo", RANURA_INFO = "info";
+    /// <summary>Entre aviso y aviso, y cuántos caben: más de cuatro ya tapan medio juego.</summary>
+    private const int HUECO_PILA = 10, MAX_PILA = 4;
+
+    /// <summary>Un aviso en pantalla: lo que hace falta para colocarlo en la pila.</summary>
+    private sealed class Apilado
     {
-        var v = ventanaActual;
-        if (v != IntPtr.Zero) PostMessage(v, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        public IntPtr Ventana;
+        public string? Ranura;
+        public bool Importante;
+        public long Orden;
+        public int Ancho, AltoPrimera, AltoSeguida, X, Y;
+        /// <summary>Mientras entra deslizándose se coloca él solo (su reloj de fotogramas).</summary>
+        public bool Animando;
+        /// <summary>Lleva entrenador (bocadillo): entre dos así no hace falta hueco, ya tienen su margen.</summary>
+        public bool ConFigura;
+        /// <summary>El de arriba del todo: el único que pinta la figura (ver esPrimera).</summary>
+        public bool Primera;
+    }
+    private static readonly List<Apilado> pila = new();
+    private static long ordenPila;
+
+    /// <summary>Cierra el aviso de esa ranura, si hay. Sale de la pila YA: el nuevo se coloca sin su hueco.</summary>
+    private static void CerrarRanura(string ranura)
+    {
+        List<IntPtr> cerrar;
+        lock (pila)
+        {
+            var fuera = pila.Where(a => a.Ranura == ranura).ToList();
+            foreach (var a in fuera) pila.Remove(a);
+            cerrar = fuera.Select(a => a.Ventana).Where(v => v != IntPtr.Zero).ToList();
+        }
+        foreach (var v in cerrar) PostMessage(v, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
     }
 
-    /// <summary>Hasta cuándo dura el último aviso importante (ver MostrarSinEsperar).</summary>
-    private static DateTime importanteHasta;
+    /// <summary>
+    /// COLOCA LA PILA: arriba a la derecha del juego (o de la pantalla), el
+    /// consejo primero y los demás debajo por orden de llegada, cada uno pegado
+    /// al borde derecho. Al cerrarse uno, los de debajo suben. A las ventanas
+    /// de otros hilos se las mueve sin esperarlas (SWP_ASYNCWINDOWPOS): esperar
+    /// a otro hilo de aviso desde éste podría trabar a los dos.
+    /// </summary>
+    private static void Recolocar()
+    {
+        var (derecha, arriba) = Esquina();
+        var mover = new List<Apilado>();
+        var cambianDePapel = new List<(IntPtr Ventana, bool Primera)>();
+        lock (pila)
+        {
+            var y = arriba;
+            Apilado? anterior = null;
+            foreach (var a in pila.OrderBy(a => a.Importante ? 0 : 1).ThenBy(a => a.Orden))
+            {
+                // Dos bocadillos seguidos se separan con su propio margen; con un aviso sin figura, aire de por medio.
+                if (anterior is not null) y += anterior.ConFigura && a.ConFigura ? 0 : HUECO_PILA;
+                var x = derecha - a.Ancho;
+                if (a.X != x || a.Y != y) { a.X = x; a.Y = y; if (!a.Animando && a.Ventana != IntPtr.Zero) mover.Add(a); }
+                var primera = anterior is null;
+                if (a.Primera != primera) { a.Primera = primera; if (a.Ventana != IntPtr.Zero) cambianDePapel.Add((a.Ventana, primera)); }
+                y += a.Primera || !a.ConFigura ? a.AltoPrimera : a.AltoSeguida;
+                anterior = a;
+            }
+        }
+        foreach (var a in mover)
+            SetWindowPos(a.Ventana, IntPtr.Zero, a.X, a.Y, 0, 0, 0x1 /* NOSIZE */ | 0x4 /* NOZORDER */ | 0x10 /* NOACTIVATE */ | 0x4000 /* ASYNCWINDOWPOS */);
+        foreach (var (v, primera) in cambianDePapel) PostMessage(v, WM_PRIMERA, new IntPtr(primera ? 1 : 0), IntPtr.Zero);
+    }
 
-    /// <summary>La ventana del aviso que está en pantalla, o cero.</summary>
-    private static volatile IntPtr ventanaActual;
+    /// <summary>La parte de texto y el total, según sea el primero o uno de seguida.</summary>
+    private static void AjustarAlto()
+    {
+        ALTO_TEXTO = DeSeguida ? altoTextoSeguida : altoTextoPrimera;
+        ALTO = ALTO_TEXTO + (ficherosMini is { Length: > 0 } ? ALTO_MINI + AIRE_MINI : 0);
+    }
 
-    private static void Correr(string titulo, string texto, int segundos, string[] ficheros, bool fijo, string? avatar = null, bool importante = false)
+    /// <summary>¿Este aviso se pinta como bocadillo de seguida (sin figura, sólo el globo)?</summary>
+    private static bool DeSeguida => avatarFichero is not null && !esPrimera;
+
+    /// <summary>
+    /// La forma de la ventana: el rectángulo redondeado de siempre o, si es un
+    /// bocadillo de seguida, sólo el globo (las miniaturas incluidas): lo demás
+    /// no se pinta y deja ver el juego, y el ratón pasa por ahí al juego.
+    /// </summary>
+    private static void AplicarForma(IntPtr ventana)
+    {
+        // El globo va de (izq-10, 8) a (ANCHO-12, ALTO_TEXTO-8) (ver PintarBocadillo):
+        // un píxel más por cada lado, para no cortar la mitad de fuera de su borde.
+        var abajo = ficherosMini is { Length: > 0 } ? ALTO - 3 : ALTO_TEXTO - 6;
+        var forma = DeSeguida
+            ? CreateRoundRectRgn(izq - 11, 7, ANCHO - 10, abajo, 26, 26)
+            : CreateRoundRectRgn(0, 0, ANCHO + 1, ALTO + 1, 18, 18);
+        SetWindowRgn(ventana, forma, true);
+    }
+
+    private static Apilado? EnPila(IntPtr ventana)
+    {
+        lock (pila) return pila.FirstOrDefault(a => a.Ventana == ventana);
+    }
+
+    private static void Correr(string titulo, string texto, int segundos, string[] ficheros, bool fijo, string? avatar, bool importante, string? ranura, (string Nombre, (int R, int G, int B) Color) quien)
     {
         // EN PÍXELES DE VERDAD. `GetWindowRect` devuelve píxeles físicos; sin
         // declararse consciente del DPI, Windows virtualiza las coordenadas y
@@ -354,18 +484,29 @@ internal static class Superposicion
         textoTitulo = titulo;
         textoCuerpo = texto;
         ficherosMini = ficheros;
+        minis = new();
+        reloj = new();
+        ventanaZoom = IntPtr.Zero;
+        nombreEntrenador = quien.Nombre;
+        colorEntrenadorRgb = quien.Color;
+        colorEntrenador = Rgb(quien.Color.R, quien.Color.G, quien.Color.B);
         esFijo = fijo;
-        conCierre = fijo || importante;
+        // TODOS CON SU X (el usuario, 2026-10-04: «hay uno que no tiene la x de
+        // cerrar»). Los informativos la tenían sin ella para dejar pasar el clic
+        // al juego; apilados con los demás, que se vayan cuando uno quiera.
+        conCierre = true;
         bajoRaton = -1;
         miniZoom = -1;
         avatarFichero = avatar;
         avatarImg = IntPtr.Zero;
         ANCHO = ANCHO_BASE + (avatar is null ? 0 : ANCHO_AVATAR + 12);
         izq = avatar is null ? 18 : 18 + ANCHO_AVATAR + 12;
-        ALTO_TEXTO = AltoDelCuerpo(texto);
+        var alto = AltoDelCuerpo(texto);
         // Con la figura, al menos lo que ella mide (retratos: algo más altos que anchos).
-        if (avatar is not null) ALTO_TEXTO = Math.Max(ALTO_TEXTO, 14 + ANCHO_AVATAR * 4 / 3 + 14);
-        ALTO = ALTO_TEXTO + (ficheros.Length > 0 ? ALTO_MINI + AIRE_MINI : 0);
+        altoTextoPrimera = avatar is null ? alto : Math.Max(alto, 14 + ANCHO_AVATAR * 4 / 3 + 14);
+        altoTextoSeguida = avatar is null ? alto : alto - SUBE_SEGUIDA;
+        esPrimera = true;
+        AjustarAlto();
         procedimiento = Procedimiento;
 
         var instancia = GetModuleHandle(null);
@@ -378,28 +519,56 @@ internal static class Superposicion
         };
         if (RegisterClassEx(ref clase) == 0) { var err = Marshal.GetLastWin32Error(); if (err != 1410 /* ERROR_CLASS_ALREADY_EXISTS */) Console.Error.WriteLine($"[aviso] RegisterClassEx falló: error {err}"); }
 
-        var (x, y) = Donde();
-        destinoX = x; destinoY = y;
-        // Con figura, entra deslizándose desde un poco más a la derecha.
+        // Su sitio en la pila: se apunta antes de crear la ventana para nacer ya
+        // donde le toca (y empujar a los de debajo si es un consejo).
         var animada = avatar is not null;
+        var extraMinis = ficheros.Length > 0 ? ALTO_MINI + AIRE_MINI : 0;
+        var yo = new Apilado
+        {
+            Ranura = ranura, Importante = importante, Ancho = ANCHO, Animando = animada, ConFigura = avatar is not null,
+            AltoPrimera = altoTextoPrimera + extraMinis, AltoSeguida = altoTextoSeguida + extraMinis,
+        };
+        List<IntPtr> sobran;
+        lock (pila)
+        {
+            yo.Orden = ++ordenPila;
+            pila.Add(yo);
+            // Más de los que caben: fuera los más antiguos que no sean un consejo.
+            var fuera = pila.Where(a => a != yo && !a.Importante).OrderBy(a => a.Orden).Take(Math.Max(0, pila.Count - MAX_PILA)).ToList();
+            foreach (var a in fuera) pila.Remove(a);
+            sobran = fuera.Select(a => a.Ventana).Where(v => v != IntPtr.Zero).ToList();
+        }
+        foreach (var v in sobran) PostMessage(v, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        Recolocar();
+        var x = yo.X;
+        var y = yo.Y;
+        lock (pila) esPrimera = yo.Primera;
+        AjustarAlto();
+        // Con figura, entra deslizándose desde un poco más a la derecha.
         if (animada) x += DESLIZ;
         var ventana = CreateWindowEx(
             // La fija no lleva WS_EX_TRANSPARENT: tiene que recibir el ratón (la X y el zoom).
             WS_EX_TOPMOST | (conCierre ? 0 : WS_EX_TRANSPARENT) | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
             "MtgCornerAviso", "MTG Corner", WS_POPUP,
             x, y, ANCHO, ALTO, IntPtr.Zero, IntPtr.Zero, instancia, IntPtr.Zero);
-        if (ventana == IntPtr.Zero) { Console.Error.WriteLine($"[aviso] CreateWindowEx falló: error {Marshal.GetLastWin32Error()}"); return; }
+        if (ventana == IntPtr.Zero)
+        {
+            Console.Error.WriteLine($"[aviso] CreateWindowEx falló: error {Marshal.GetLastWin32Error()}");
+            lock (pila) pila.Remove(yo);
+            Recolocar();
+            return;
+        }
+        lock (pila) yo.Ventana = ventana;
 
         // Esquinas redondeadas y un punto de transparencia, para que no parezca
-        // un cuadro de diálogo de 1998.
-        SetWindowRgn(ventana, CreateRoundRectRgn(0, 0, ANCHO + 1, ALTO + 1, 18, 18), true);
+        // un cuadro de diálogo de 1998 (o sólo el globo, si es un bocadillo de seguida).
+        AplicarForma(ventana);
         SetLayeredWindowAttributes(ventana, 0, (byte)(animada ? 0 : 240), LWA_ALPHA);
 
         if (!fijo) SetTimer(ventana, new IntPtr(1), (uint)Math.Max(1, segundos) * 1000, IntPtr.Zero);
         // La animación: otro reloj, de fotogramas (el 1 es el que cierra el aviso).
         saltoFigura = 0;
         if (animada) { reloj.Restart(); SetTimer(ventana, new IntPtr(2), 16, IntPtr.Zero); }
-        ventanaActual = ventana;
         ShowWindow(ventana, SW_SHOWNOACTIVATE);   // sin robarle el foco al juego
         UpdateWindow(ventana);
 
@@ -427,6 +596,14 @@ internal static class Superposicion
         {
             case WM_PAINT:
                 Pintar(ventana);
+                return IntPtr.Zero;
+
+            case WM_PRIMERA:
+                esPrimera = wParam != IntPtr.Zero;
+                AjustarAlto();
+                SetWindowPos(ventana, IntPtr.Zero, 0, 0, ANCHO, ALTO, 0x2 /* NOMOVE */ | 0x4 /* NOZORDER */ | 0x10 /* NOACTIVATE */);
+                AplicarForma(ventana);
+                InvalidateRect(ventana, IntPtr.Zero, false);
                 return IntPtr.Zero;
 
             case WM_ERASEBKGND:
@@ -463,10 +640,19 @@ internal static class Superposicion
             {
                 // LA ENTRADA: se desliza a su sitio y aparece (curva que frena al
                 // final); luego la figura da unos botes, como quien habla.
-                var ms = reloj.ElapsedMilliseconds;
+                var ms = reloj!.ElapsedMilliseconds;
                 var p = Math.Min(1.0, ms / (double)MS_ENTRADA);
                 var e = 1 - Math.Pow(1 - p, 3);
-                SetWindowPos(ventana, IntPtr.Zero, destinoX + (int)Math.Round((1 - e) * DESLIZ), destinoY, 0, 0, 0x1 /* NOSIZE */ | 0x4 /* NOZORDER */ | 0x10 /* NOACTIVATE */);
+                // Adonde diga la pila AHORA: si mientras entra se cierra otro, sube con ella.
+                var sitio = EnPila(ventana);
+                if (sitio is not null && p < 1)
+                    SetWindowPos(ventana, IntPtr.Zero, sitio.X + (int)Math.Round((1 - e) * DESLIZ), sitio.Y, 0, 0, 0x1 /* NOSIZE */ | 0x4 /* NOZORDER */ | 0x10 /* NOACTIVATE */);
+                else if (sitio is not null && sitio.Animando)
+                {
+                    // Llegó: desde ahora lo mueve Recolocar.
+                    lock (pila) sitio.Animando = false;
+                    SetWindowPos(ventana, IntPtr.Zero, sitio.X, sitio.Y, 0, 0, 0x1 /* NOSIZE */ | 0x4 /* NOZORDER */ | 0x10 /* NOACTIVATE */);
+                }
                 SetLayeredWindowAttributes(ventana, 0, (byte)Math.Round(240 * e), LWA_ALPHA);
                 var salto = ms < MS_BOTES ? (int)Math.Round(5 * Math.Abs(Math.Sin(ms / 1000.0 * Math.PI * 5))) : 0;
                 if (salto != saltoFigura) { saltoFigura = salto; InvalidateRect(ventana, IntPtr.Zero, false); }
@@ -475,13 +661,15 @@ internal static class Superposicion
             }
             case WM_TIMER:
             case WM_CLOSE:
-                if (ventanaActual == ventana) ventanaActual = IntPtr.Zero;
                 if (ventanaZoom != IntPtr.Zero) DestroyWindow(ventanaZoom);
                 DestroyWindow(ventana);
                 return IntPtr.Zero;
 
             case WM_DESTROY:
-                foreach (var m in minis) if (m != IntPtr.Zero) GdipDisposeImage(m);
+                // Fuera de la pila, y los de debajo suben a su hueco.
+                lock (pila) pila.RemoveAll(a => a.Ventana == ventana);
+                Recolocar();
+                foreach (var m in minis!) if (m != IntPtr.Zero) GdipDisposeImage(m);
                 minis.Clear();
                 if (avatarImg != IntPtr.Zero) { GdipDisposeImage(avatarImg); avatarImg = IntPtr.Zero; }
                 PostQuitMessage(0);
@@ -500,13 +688,9 @@ internal static class Superposicion
     /// EL BOCADILLO: un globo redondeado detrás del título y del texto, con el
     /// borde del color del entrenador y un pico que apunta a su cara.
     /// </summary>
-    private static void PintarBocadillo(IntPtr hdc)
+    private static void PintarBocadillo(IntPtr hdc, bool conPico = true)
     {
-        if (gdiplus == IntPtr.Zero)
-        {
-            var entrada = new GdiplusStartupInput { GdiplusVersion = 1 };
-            GdiplusStartup(out gdiplus, ref entrada, IntPtr.Zero);
-        }
+        ArrancarGdiplus();
         if (GdipCreateFromHDC(hdc, out var g) != 0 || g == IntPtr.Zero) return;
         GdipSetSmoothingMode(g, 4);
         int x = izq - 10, y = 8, w = ANCHO - 12 - x, h = ALTO_TEXTO - 8 - y, r = 12, d = r * 2;
@@ -516,10 +700,13 @@ internal static class Superposicion
         GdipAddPathArcI(c, x + w - d, y, d, d, 270, 90);
         GdipAddPathArcI(c, x + w - d, y + h - d, d, d, 0, 90);
         GdipAddPathArcI(c, x, y + h - d, d, d, 90, 90);
-        // El pico, en el lado izquierdo, hacia la figura.
-        GdipAddPathLineI(c, x, y + h - r, x, picoY + 14);
-        GdipAddPathLineI(c, x, picoY + 14, picoX, picoY + 4);
-        GdipAddPathLineI(c, picoX, picoY + 4, x, picoY);
+        // El pico, en el lado izquierdo, hacia la figura (un bocadillo de seguida no lo lleva).
+        if (conPico)
+        {
+            GdipAddPathLineI(c, x, y + h - r, x, picoY + 14);
+            GdipAddPathLineI(c, x, picoY + 14, picoX, picoY + 4);
+            GdipAddPathLineI(c, picoX, picoY + 4, x, picoY);
+        }
         GdipClosePathFigure(c);
         var (cr, cg, cb) = colorEntrenadorRgb;
         GdipCreateSolidFill(0xFF141C2E, out var relleno);
@@ -627,9 +814,10 @@ internal static class Superposicion
             var todo = new RECT { Left = 0, Top = 0, Right = ANCHO, Bottom = ALTO };
             FillRect(hdc, ref todo, fondo);
             var banda = new RECT { Left = 0, Top = 0, Right = 4, Bottom = ALTO };
-            if (avatarFichero is not null) { var pincelBanda = CreateSolidBrush(colorEntrenador); FillRect(hdc, ref banda, pincelBanda); DeleteObject(pincelBanda); }
+            if (DeSeguida) { /* sin banda: es sólo el globo */ }
+            else if (avatarFichero is not null) { var pincelBanda = CreateSolidBrush(colorEntrenador); FillRect(hdc, ref banda, pincelBanda); DeleteObject(pincelBanda); }
             else FillRect(hdc, ref banda, filo);
-            if (avatarFichero is not null) PintarBocadillo(hdc);
+            if (avatarFichero is not null) PintarBocadillo(hdc, conPico: !DeSeguida);
 
             SetBkMode(hdc, TRANSPARENT_BK);
 
@@ -637,12 +825,15 @@ internal static class Superposicion
             SetTextColor(hdc, Rgb(252, 211, 77));
             var rMarca = new RECT { Left = izq, Top = 12, Right = ANCHO - 18, Bottom = 28 };
             // Con el entrenador, quién habla y en su color; sin él, la marca.
-            if (avatarFichero is not null && nombreEntrenador.Length > 0) SetTextColor(hdc, colorEntrenador);
-            DrawText(hdc, avatarFichero is not null && nombreEntrenador.Length > 0 ? Textos.T("aviso_dice", nombreEntrenador).ToUpperInvariant() : "MTG CORNER", -1, ref rMarca, DT_LEFT | DT_SINGLELINE);
+            if (avatarFichero is not null && nombreEntrenador is { Length: > 0 }) SetTextColor(hdc, colorEntrenador);
+            // De seguida no repite quién habla: es el mismo entrenador de arriba.
+            if (!DeSeguida)
+                DrawText(hdc, avatarFichero is not null && nombreEntrenador is { Length: > 0 } ? Textos.T("aviso_dice", nombreEntrenador).ToUpperInvariant() : "MTG CORNER", -1, ref rMarca, DT_LEFT | DT_SINGLELINE);
 
             SelectObject(hdc, fuerte);
             SetTextColor(hdc, Rgb(255, 255, 255));
-            var rTitulo = new RECT { Left = izq, Top = 30, Right = conCierre ? RectX().Left - 6 : ANCHO - 18, Bottom = 56 };
+            var sube = DeSeguida ? SUBE_SEGUIDA : 0;
+            var rTitulo = new RECT { Left = izq, Top = 30 - sube, Right = conCierre ? RectX().Left - 6 : ANCHO - 18, Bottom = 56 - sube };
             DrawText(hdc, textoTitulo, -1, ref rTitulo, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 
             // LA X de las fijas y de los consejos, arriba a la derecha; se ilumina al pasar.
@@ -659,18 +850,14 @@ internal static class Superposicion
 
             SelectObject(hdc, normal);
             SetTextColor(hdc, Rgb(203, 213, 225));
-            var rCuerpo = new RECT { Left = izq, Top = 58, Right = ANCHO - 26, Bottom = ALTO_TEXTO - 10 };
+            var rCuerpo = new RECT { Left = izq, Top = 58 - sube, Right = ANCHO - 26, Bottom = ALTO_TEXTO - 10 };
             DrawText(hdc, textoCuerpo, -1, ref rCuerpo, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
 
             // Las miniaturas, en fila bajo el texto. Se cargan la primera vez
             // que se pinta y se sueltan al cerrar.
-            if (avatarFichero is { } fichAvatar)
+            if (avatarFichero is { } fichAvatar && !DeSeguida)
             {
-                if (gdiplus == IntPtr.Zero)
-                {
-                    var entradaA = new GdiplusStartupInput { GdiplusVersion = 1 };
-                    GdiplusStartup(out gdiplus, ref entradaA, IntPtr.Zero);
-                }
+                ArrancarGdiplus();
                 if (avatarImg == IntPtr.Zero && GdipLoadImageFromFile(fichAvatar, out var cargada) == 0) avatarImg = cargada;
                 if (avatarImg != IntPtr.Zero && GdipCreateFromHDC(hdc, out var gA) == 0 && gA != IntPtr.Zero)
                 {
@@ -685,11 +872,7 @@ internal static class Superposicion
             }
             if (ficherosMini.Length > 0)
             {
-                if (gdiplus == IntPtr.Zero)
-                {
-                    var entrada = new GdiplusStartupInput { GdiplusVersion = 1 };
-                    GdiplusStartup(out gdiplus, ref entrada, IntPtr.Zero);
-                }
+                ArrancarGdiplus();
                 if (minis.Count == 0)
                     foreach (var f in ficherosMini) minis.Add(GdipLoadImageFromFile(f, out var img) == 0 ? img : IntPtr.Zero);
                 if (GdipCreateFromHDC(hdc, out var grafico) == 0 && grafico != IntPtr.Zero)
@@ -728,19 +911,20 @@ internal static class Superposicion
     /// hay. Arriba y no abajo: la parte de abajo de Arena es donde está la
     /// mano, que es lo último que conviene tapar aunque no se pueda pulsar.
     /// </summary>
-    private static (int X, int Y) Donde()
+    /// <summary>La esquina de la pila: el borde derecho y el de arriba, dentro del juego (o de la pantalla).</summary>
+    private static (int Derecha, int Arriba) Esquina()
     {
         var arena = VentanaDeArena();
         if (arena != IntPtr.Zero && GetWindowRect(arena, out var r) && r.Right > r.Left)
         {
-            return (r.Right - ANCHO - MARGEN, r.Top + MARGEN);
+            return (r.Right - MARGEN, r.Top + MARGEN);
         }
 
         var area = new RECT();
         if (SystemParametersInfo(SPI_GETWORKAREA, 0, ref area, 0) && area.Right > area.Left)
         {
-            return (area.Right - ANCHO - MARGEN, area.Top + MARGEN);
+            return (area.Right - MARGEN, area.Top + MARGEN);
         }
-        return (MARGEN, MARGEN);
+        return (MARGEN + ANCHO_BASE, MARGEN);
     }
 }

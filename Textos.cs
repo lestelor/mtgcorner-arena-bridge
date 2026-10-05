@@ -1118,8 +1118,11 @@ internal static class Textos
         ],
         ["tono_directo"] =
         [
-            "Direct", "Directo", "Direkt", "Direct",
-            "Direto", "Diretto", "率直", "直接",
+            // «Profesor» y no «Directo» (el usuario, 2026-10-04): la figura es un
+            // profesor con birrete. La clave sigue siendo «directo»: es la que
+            // guarda ajustes.json y la que entiende la web (lib/tonoEntrenador.ts).
+            "Professor", "Profesor", "Professor", "Professeur",
+            "Professor", "Professore", "教授", "教授",
         ],
         ["tono_sargento"] =
         [
