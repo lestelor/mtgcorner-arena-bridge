@@ -565,6 +565,41 @@ internal static class Program
             await Task.Delay(20000);
             return 0;
         }
+        // --probar-mesa [registro]: repasa un registro de Arena (por defecto el
+        // Player-prev.log) y escribe la mesa de cada aviso de fase con lo que
+        // manda el consejo: instancia, fuerza/resistencia de ahora, mareo, a qué
+        // va pegada y las fichas. Sin ventanas (2026-10-07). Con --consejo, las
+        // cuatro últimas mesas de la última partida se mandan a la web (la de
+        // MTGCORNER_SITIO, p. ej. http://localhost:3000) y se escribe la respuesta.
+        if (args.Length > 0 && args[0] == "--probar-mesa")
+        {
+            var registroM = args.Length > 1 && !args[1].StartsWith("--") ? args[1] : Path.Combine(LogArena.Carpeta(), "Player-prev.log");
+            var ultimas = new List<(Contexto.Mesa Mesa, bool Rival)>();
+            void Apuntar(Contexto.Mesa m, bool rival)
+            {
+                // Una partida nueva (el turno vuelve atrás): fuera las de la anterior.
+                if (ultimas.Count > 0 && m.Turno < ultimas[^1].Mesa.Turno - 2) ultimas.Clear();
+                ultimas.Add((m, rival));
+            }
+            string Carta(Contexto.EnMesa c) => $"{(c.Ficha is { } f ? f + "*" : c.Grp.ToString())}#{c.Id}"
+                + (c.Fuerza is { } fu ? $" {fu}/{c.Resistencia}" : "") + (c.Girada ? " g" : "") + (c.Mareada ? " m" : "") + (c.En is { } en ? $" ->#{en}" : "");
+            void Escribir(string que, Contexto.Mesa m) => Console.WriteLine(
+                $"{que} T{m.Turno} vidas {m.VidaYo}/{m.VidaRival} mano=[{string.Join(",", m.Mano)}]\n  mía:   {string.Join(" | ", m.Mia.Where(c => !c.Tierra).Select(Carta))} (+{m.Mia.Count(c => c.Tierra)} tierras, {m.Mia.Count(c => c.Tierra && !c.Girada)} sin girar)\n  rival: {string.Join(" | ", m.DelRival.Where(c => !c.Tierra).Select(Carta))} (+{m.DelRival.Count(c => c.Tierra)} tierras)");
+            Contexto.MiFasePrincipal += m => { Escribir("FASE PRINCIPAL", m); Apuntar(m, false); };
+            Contexto.TurnoDelRival += m => { Escribir("TURNO RIVAL", m); Apuntar(m, true); };
+            Contexto.Repasar(registroM);
+            Console.WriteLine($"vistas del rival al final: [{string.Join(",", Contexto.VistasRival)}]  formato={Contexto.Formato}");
+            if (!args.Contains("--consejo")) return 0;
+            var vinculoM = Vinculo.Leer();
+            using var httpM = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(2) };
+            if (vinculoM is not null) httpM.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoM.Token);
+            foreach (var (m, rival) in ultimas.TakeLast(4))
+            {
+                var r = await httpM.PostAsJsonAsync($"{PuertaDevice}/consejo", CuerpoConsejo(m, rival), JsonOpciones);
+                Console.WriteLine($"\n=== {(rival ? "TURNO RIVAL" : "FASE PRINCIPAL")} T{m.Turno} → {(int)r.StatusCode}\n{await r.Content.ReadAsStringAsync()}");
+            }
+            return 0;
+        }
         if (args.Length > 0 && args[0] == "--probar-consejo")
         {
             // Una mesa de ejemplo con cartas de Mono-White Auras: turno 3, dos
@@ -1747,26 +1782,41 @@ internal static class Program
         [property: System.Text.Json.Serialization.JsonPropertyName("ataque")] string? Ataque,
         [property: System.Text.Json.Serialization.JsonPropertyName("por_que")] string? PorQue);
 
+    /// <summary>Una carta de la mesa como la lee /api/mtga-device/consejo.</summary>
+    private static object EnMesaJson(Contexto.EnMesa c) => new
+    {
+        grp = c.Grp, girada = c.Girada, tierra = c.Tierra, id = c.Id,
+        fuerza = c.Fuerza, resistencia = c.Resistencia, mareada = c.Mareada, en = c.En, ficha = c.Ficha, subtipos = c.Subtipos,
+    };
+
+    /// <summary>Lo que se manda a /api/mtga-device/consejo con una mesa.</summary>
+    private static object CuerpoConsejo(Contexto.Mesa mesa, bool rival) => new
+    {
+        idioma = Textos.Idioma,
+        tono = tonoActual,
+        momento = rival ? "rival" : "propio",
+        formato = Contexto.Formato,
+        turno = mesa.Turno,
+        vidaYo = mesa.VidaYo,
+        vidaRival = mesa.VidaRival,
+        mano = mesa.Mano,
+        // Desde el 1.21.0, con lo que hace falta para sumar el combate (ver Contexto.EnMesa).
+        mia = mesa.Mia.Select(EnMesaJson),
+        rival = mesa.DelRival.Select(EnMesaJson),
+        // Lo que el rival ha enseñado en la partida: la web adivina su mazo.
+        vistasRival = Contexto.VistasRival,
+        // El mazo que se juega, para su plan (la web lo guarda por persona y nombre).
+        nombreMazo = Contexto.Mazo,
+        lista = Contexto.CartasMazo.Select(c => new { grp = c.Grp, n = c.N }),
+    };
+
     /// <summary>Pide el consejo de este turno y lo enseña encima del juego.</summary>
     private static async Task ConsejoTurno(HttpClient http, Contexto.Mesa mesa, bool rival = false)
     {
         if (EventoCompetitivo(Contexto.Evento) || mesa.Mano.Length == 0) return;
         try
         {
-            var cuerpo = new
-            {
-                idioma = Textos.Idioma,
-                tono = tonoActual,
-                momento = rival ? "rival" : "propio",
-                formato = Contexto.Formato,
-                turno = mesa.Turno,
-                vidaYo = mesa.VidaYo,
-                vidaRival = mesa.VidaRival,
-                mano = mesa.Mano,
-                mia = mesa.Mia.Select(c => new { grp = c.Grp, girada = c.Girada, tierra = c.Tierra }),
-                rival = mesa.DelRival.Select(c => new { grp = c.Grp, girada = c.Girada }),
-            };
-            var r = await http.PostAsJsonAsync($"{PuertaDevice}/consejo", cuerpo, JsonOpciones);
+            var r = await http.PostAsJsonAsync($"{PuertaDevice}/consejo", CuerpoConsejo(mesa, rival), JsonOpciones);
             if (!r.IsSuccessStatusCode) return;
             var d = await r.Content.ReadFromJsonAsync<RespuestaConsejo>(JsonOpciones);
             if (d is null) return;
@@ -1908,6 +1958,8 @@ internal static class Program
                 formato = Contexto.Formato,
                 mano = cartas,
                 mazo = mazo.Select(c => new { grp = c.Grp, n = c.N }),
+                // Para el plan del mazo (desde el 1.21.0).
+                nombreMazo = Contexto.Mazo,
                 mulligans,
                 tierras,
                 probabilidad = Math.Round(p * 100),

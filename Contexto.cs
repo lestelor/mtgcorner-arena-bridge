@@ -161,8 +161,18 @@ internal static class Contexto
     /// </summary>
     public static event Action<int[], int, int>? ManoNueva;
 
-    /// <summary>Una carta en la mesa: cuál es, si está girada y si es tierra.</summary>
-    public sealed record EnMesa(int Grp, bool Girada, bool Tierra);
+    /// <summary>
+    /// Una carta en la mesa: cuál es, si está girada y si es tierra. Desde el
+    /// 1.21.0 (2026-10-07), también lo que el consejo de turno necesita para
+    /// sumar el combate: su número de instancia, la fuerza y resistencia DE
+    /// AHORA (el juego las manda ya con auras y contadores: un 2/2 que acaba en
+    /// 11/8), si está mareada, a qué instancia va pegada (auras, equipos) y, si
+    /// es una ficha, su tipo («Spider», «Glimmer»): las fichas no tienen carta.
+    /// Y los subtipos de todo («Forest», «Human Scout»): hay tierras básicas con
+    /// un arte cuyo número de Arena no conoce Scryfall, y sin ellos la web no
+    /// sabría ni que es un Forest.
+    /// </summary>
+    public sealed record EnMesa(int Grp, bool Girada, bool Tierra, int Id = 0, int? Fuerza = null, int? Resistencia = null, bool Mareada = false, int? En = null, string? Ficha = null, string? Subtipos = null);
 
     /// <summary>
     /// LA MESA AL EMPEZAR TU PRIMERA FASE PRINCIPAL, para el consejo de cada
@@ -216,7 +226,15 @@ internal static class Contexto
     // detrás de la lista de cartas (anotaciones, zonas, turno…): dentro,
     // «"isTapped": true» si está girada. Sin esos finales, la ÚLTIMA carta de
     // la lista no encontraba dónde acabar y se quedaba girada para siempre.
-    private static readonly Regex CartaGirada = new(@"""instanceId"":\s*(\d+),\s*""grpId"":\s*\d+,\s*""type"":\s*""GameObjectType_Card""(.{0,3000}?)(?=""instanceId""|""annotations""|""persistentAnnotations""|""diffDeleted|""turnInfo""|""zones""|""players""|""timers""|""actions""|""gameInfo""|$)", RegexOptions.Compiled);
+    private static readonly Regex CartaGirada = new(@"""instanceId"":\s*(\d+),\s*""grpId"":\s*\d+,\s*""type"":\s*""GameObjectType_(?:Card|Token)""(.{0,3000}?)(?=""instanceId""|""annotations""|""persistentAnnotations""|""diffDeleted|""turnInfo""|""zones""|""players""|""timers""|""actions""|""gameInfo""|$)", RegexOptions.Compiled);
+    // Dentro de la descripción de una carta (ver CartaGirada): la fuerza y la
+    // resistencia de ahora, y sus subtipos. El juego escribe un 0 como «{ }»
+    // (sin «value»), así que el número es opcional.
+    private static readonly Regex Fuerza = new(@"""power"":\s*\{\s*(?:""value"":\s*(-?\d+))?\s*\}", RegexOptions.Compiled);
+    private static readonly Regex Resistencia = new(@"""toughness"":\s*\{\s*(?:""value"":\s*(-?\d+))?\s*\}", RegexOptions.Compiled);
+    private static readonly Regex Subtipos = new(@"""subtypes"":\s*\[([^\]]{0,200})\]", RegexOptions.Compiled);
+    // Un aura o un equipo pegado: «"affectorId": 296, "affectedIds": [ 288 ], "type": [ "AnnotationType_Attachment" ]».
+    private static readonly Regex Pegado = new(@"""affectorId"":\s*(\d+),\s*""affectedIds"":\s*\[\s*(\d+)\s*\],\s*""type"":\s*\[\s*""AnnotationType_Attachment""", RegexOptions.Compiled);
     private static readonly Regex ZonaCompleta = new(@"""zoneId"":\s*(\d+),\s*""type"":\s*""ZoneType_\w+"",\s*""visibility"":\s*""\w+""(?:,\s*""ownerSeatId"":\s*(\d+))?(?:,\s*""objectInstanceIds"":\s*\[([\d,\s]*)\])?", RegexOptions.Compiled);
     // Un traslado: qué instancia y a qué zona llega. Los detalles son una lista de
     // pares y `zone_dest` no es el primero, así que se salta con `.{0,400}?`.
@@ -246,7 +264,7 @@ internal static class Contexto
     private const string PrefijoPrecon = "?=?Loc/";
 
     /// <summary>Instancia en la mesa → la carta que es, de quién, en qué zona y, si está transformada, su otra cara.</summary>
-    private static readonly Dictionary<int, (int Grp, bool EsCarta, bool EsTierra, int? Zona, int? Dueno, string Colores, int? Otra)> objetos = new();
+    private static readonly Dictionary<int, (int Grp, bool EsCarta, bool EsTierra, int? Zona, int? Dueno, string Colores, int? Otra, bool EsFicha)> objetos = new();
 
     /// <summary>«CardColor_White», «CardColor_Blue»… → «W», «U»…</summary>
     private static string Letras(string colores)
@@ -266,6 +284,10 @@ internal static class Contexto
     private static int? vidaYoAhora, vidaRivalAhora;
     /// <summary>Instancia → si está girada (la última vez que el juego la describió).</summary>
     private static readonly Dictionary<int, bool> girada = new();
+    /// <summary>Instancia → fuerza y resistencia de ahora, si está mareada y sus subtipos (la última vez que el juego la describió).</summary>
+    private static readonly Dictionary<int, (int? Fuerza, int? Resistencia, bool Mareada, string Subtipos)> estadoCarta = new();
+    /// <summary>Aura o equipo → la instancia a la que va pegado.</summary>
+    private static readonly Dictionary<int, int> pegadaA = new();
     /// <summary>El turno de tu última fase principal avisada, y el que está por avisar al acabar la tanda.</summary>
     private static int turnoAvisado, turnoPorAvisar;
     /// <summary>La mesa tal como estaba en la línea en que empezó la fase: al acabar la tanda ya puede haber tierras giradas.</summary>
@@ -362,6 +384,33 @@ internal static class Contexto
         fichero = rutaLog;
         hilo = new Thread(Vigilar) { IsBackground = true, Name = "contexto" };
         hilo.Start();
+    }
+
+    /// <summary>
+    /// TALLER (--probar-mesa): repasa un registro entero COMO SI SE ESTUVIERA
+    /// JUGANDO, a trozos, para que salten los avisos de cada fase (al arrancar
+    /// de verdad sólo se lee la cola y en silencio). Copia el registro a un
+    /// fichero temporal de 400 líneas en 400 líneas y lo lee tras cada trozo.
+    /// </summary>
+    internal static void Repasar(string rutaLog)
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "mtgcorner-repaso.log");
+        File.WriteAllText(tmp, "");
+        fichero = tmp;
+        posicion = 0;
+        estrenando = false;
+        var trozo = new System.Text.StringBuilder();
+        var n = 0;
+        foreach (var l in File.ReadLines(rutaLog))
+        {
+            trozo.Append(l).Append('\n');
+            if (++n % 400 != 0) continue;
+            File.AppendAllText(tmp, trozo.ToString());
+            trozo.Clear();
+            Leer();
+        }
+        File.AppendAllText(tmp, trozo.ToString());
+        Leer();
     }
 
     private static void Vigilar()
@@ -547,7 +596,7 @@ internal static class Contexto
                     // Un objeto que ya se conocía y vuelve sin zona (un cambio parcial)
                     // conserva la que tenía.
                     if (zona is null && objetos.TryGetValue(id, out var previo)) zona = previo.Zona;
-                    objetos[id] = (int.Parse(m.Groups[2].Value), esCarta, esTierra, zona, dueno, coloresObjeto, otra);
+                    objetos[id] = (int.Parse(m.Groups[2].Value), esCarta, esTierra, zona, dueno, coloresObjeto, otra, m.Groups[3].Value == "Token");
                 }
 
                 /**
@@ -592,9 +641,24 @@ internal static class Contexto
             // Tus respuestas: lo que cuenta los mulligans de la mano que llega.
             if (linea.Contains("MulliganOption_Mulligan", StringComparison.Ordinal)) mulligansHechos++;
             else if (linea.Contains("MulliganOption_AcceptHand", StringComparison.Ordinal)) mulligansHechos = 0;
-            if (linea.Contains("GameObjectType_Card", StringComparison.Ordinal))
+            if (linea.Contains("GameObjectType_Card", StringComparison.Ordinal) || linea.Contains("GameObjectType_Token", StringComparison.Ordinal))
                 foreach (Match cg in CartaGirada.Matches(linea))
-                    girada[int.Parse(cg.Groups[1].Value)] = cg.Groups[2].Value.Contains("\"isTapped\": true", StringComparison.Ordinal);
+                {
+                    var idCarta = int.Parse(cg.Groups[1].Value);
+                    var cuerpo = cg.Groups[2].Value;
+                    girada[idCarta] = cuerpo.Contains("\"isTapped\": true", StringComparison.Ordinal);
+                    // Sin «power» no es criatura (o no lo es ahora): null, y la web usa la impresa.
+                    static int? Numero(Match m) => !m.Success ? null : m.Groups[1].Success ? int.Parse(m.Groups[1].Value) : 0;
+                    var sub = Subtipos.Match(cuerpo);
+                    estadoCarta[idCarta] = (
+                        Numero(Fuerza.Match(cuerpo)),
+                        Numero(Resistencia.Match(cuerpo)),
+                        cuerpo.Contains("\"hasSummoningSickness\": true", StringComparison.Ordinal),
+                        sub.Success ? string.Join(" ", Regex.Matches(sub.Groups[1].Value, @"SubType_(\w+)").Select(t => t.Groups[1].Value)) : "");
+                }
+            if (linea.Contains("AnnotationType_Attachment\"", StringComparison.Ordinal))
+                foreach (Match pg in Pegado.Matches(linea))
+                    pegadaA[int.Parse(pg.Groups[1].Value)] = int.Parse(pg.Groups[2].Value);
             foreach (Match mt in Mantenimiento.Matches(linea))
             {
                 var n = int.Parse(mt.Groups[1].Value);
@@ -671,6 +735,8 @@ internal static class Contexto
                 idsZona.Clear();
                 duenoZona.Clear();
                 girada.Clear();
+                estadoCarta.Clear();
+                pegadaA.Clear();
                 turnoAvisado = turnoPorAvisar = turnoRivalAvisado = 0;
                 mesaRivalPorAvisar = null;
                 vidaYoAhora = vidaRivalAhora = null;
@@ -762,8 +828,13 @@ internal static class Contexto
             if (!zonas.TryGetValue(idz, out var tipo) || tipo != "Battlefield") continue;
             foreach (var id in ids)
             {
-                if (!objetos.TryGetValue(id, out var o) || !o.EsCarta || o.Grp <= 0) continue;
-                var c = new EnMesa(o.Grp, girada.GetValueOrDefault(id), o.EsTierra);
+                if (!objetos.TryGetValue(id, out var o) || !(o.EsCarta || o.EsFicha) || o.Grp <= 0) continue;
+                var est = estadoCarta.GetValueOrDefault(id);
+                // Lo pegado, sólo si aquello a lo que va sigue en la mesa (un aura que se fue con su criatura no cuenta).
+                int? en = pegadaA.TryGetValue(id, out var destino) && ids.Contains(destino) ? destino : null;
+                var c = new EnMesa(o.Grp, girada.GetValueOrDefault(id), o.EsTierra, id, est.Fuerza, est.Resistencia, est.Mareada, en,
+                    o.EsFicha ? (est.Subtipos is { Length: > 0 } st ? st : "Token") : null,
+                    est.Subtipos is { Length: > 0 } sts ? sts : null);
                 if (o.Dueno == miAsiento) mia.Add(c); else suya.Add(c);
             }
         }
