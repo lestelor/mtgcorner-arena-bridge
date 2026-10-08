@@ -596,7 +596,11 @@ internal static class Program
             foreach (var (m, rival) in ultimas.TakeLast(4))
             {
                 var r = await httpM.PostAsJsonAsync($"{PuertaDevice}/consejo", CuerpoConsejo(m, rival), JsonOpciones);
-                Console.WriteLine($"\n=== {(rival ? "TURNO RIVAL" : "FASE PRINCIPAL")} T{m.Turno} → {(int)r.StatusCode}\n{await r.Content.ReadAsStringAsync()}");
+                var crudo = await r.Content.ReadAsStringAsync();
+                Console.WriteLine($"\n=== {(rival ? "TURNO RIVAL" : "FASE PRINCIPAL")} T{m.Turno} → {(int)r.StatusCode}\n{crudo}");
+                // Y la línea de lo calculado, como saldría debajo del consejo.
+                try { if (JsonSerializer.Deserialize<RespuestaConsejo>(crudo, JsonOpciones) is { } dm && LineaCalculada(dm.Datos, rival) is { Length: > 0 } lc) Console.WriteLine("  LÍNEA: " + lc.Replace("\n", " | ")); }
+                catch { /* sólo es el taller */ }
             }
             return 0;
         }
@@ -1353,6 +1357,8 @@ internal static class Program
         Superposicion.Entrenador = DatosEntrenador;
         Columna.ConsejoActivo = () => consejoActivo;
         Contexto.MiFasePrincipal += mesa => { if (consejoActivo) _ = ConsejoTurno(http, mesa); };
+        // El mazo del rival se avisa una vez por partida: al acabar, a cero.
+        Contexto.PartidaAcabada += () => { mazoRivalAvisado = null; mazoRivalPorLista = false; };
         // Y al empezar el del rival, lo que puedas jugar a destiempo (instantáneos, destello).
         Contexto.TurnoDelRival += mesa => { if (consejoActivo) _ = ConsejoTurno(http, mesa, rival: true); };
         // Empieza tu primer turno: la fila de la mano ya no hace falta.
@@ -1780,7 +1786,61 @@ internal static class Program
         [property: System.Text.Json.Serialization.JsonPropertyName("mana")] int Mana,
         [property: System.Text.Json.Serialization.JsonPropertyName("jugada")] string? Jugada,
         [property: System.Text.Json.Serialization.JsonPropertyName("ataque")] string? Ataque,
-        [property: System.Text.Json.Serialization.JsonPropertyName("por_que")] string? PorQue);
+        [property: System.Text.Json.Serialization.JsonPropertyName("por_que")] string? PorQue,
+        [property: System.Text.Json.Serialization.JsonPropertyName("datos")] DatosConsejo? Datos = null);
+
+    /// <summary>
+    /// LO QUE LA WEB HA CALCULADO, SUELTO (desde el 1.22.0, 2026-10-08): el letal,
+    /// el peligro y el mazo probable del rival. Va debajo del consejo en una línea
+    /// propia, en tu idioma, y no lo escribe la IA: son cuentas, no opiniones. Fue
+    /// lo que pidió el usuario al no notar nada nuevo en el 1.21.0, que ya hacía
+    /// esas cuentas pero sólo se las daba a la IA.
+    /// </summary>
+    internal sealed record DatosConsejo(
+        [property: System.Text.Json.Serialization.JsonPropertyName("letal")] LetalConsejo? Letal,
+        [property: System.Text.Json.Serialization.JsonPropertyName("peligro")] PeligroConsejo? Peligro,
+        [property: System.Text.Json.Serialization.JsonPropertyName("rival")] RivalConsejo? Rival);
+    internal sealed record LetalConsejo(
+        [property: System.Text.Json.Serialization.JsonPropertyName("via")] string? Via,
+        [property: System.Text.Json.Serialization.JsonPropertyName("dano")] int Dano,
+        [property: System.Text.Json.Serialization.JsonPropertyName("vida")] int Vida);
+    internal sealed record PeligroConsejo(
+        [property: System.Text.Json.Serialization.JsonPropertyName("fuerza")] int Fuerza,
+        [property: System.Text.Json.Serialization.JsonPropertyName("vida")] int Vida);
+    internal sealed record RivalConsejo(
+        [property: System.Text.Json.Serialization.JsonPropertyName("nombre")] string? Nombre,
+        [property: System.Text.Json.Serialization.JsonPropertyName("via")] string? Via,
+        [property: System.Text.Json.Serialization.JsonPropertyName("coincidencias")] int Coincidencias);
+
+    /// <summary>
+    /// El mazo del rival ya avisado en esta partida: se dice UNA vez, no cada
+    /// turno. La suposición por colores cambia de un turno a otro según lo que
+    /// enseña el rival (Izzet, luego Grixis…) y repetirla mareaba; sólo se vuelve
+    /// a avisar si después encaja una LISTA, que es más fiable. Se borra al acabar
+    /// la partida.
+    /// </summary>
+    private static string? mazoRivalAvisado;
+    private static bool mazoRivalPorLista;
+
+    /// <summary>La línea de debajo del consejo con lo calculado, o "" si no hay nada que decir.</summary>
+    private static string LineaCalculada(DatosConsejo? datos, bool rival)
+    {
+        if (datos is null) return "";
+        var partes = new List<string>();
+        if (datos.Letal is { } l) partes.Add(Textos.T(l.Via == "aire" ? "cons_letal_aire" : "cons_letal_mesa", l.Dano, l.Vida));
+        if (datos.Peligro is { } p) partes.Add(Textos.T(rival ? "cons_peligro_ahora" : "cons_peligro", p.Fuerza, p.Vida));
+        if (datos.Rival is { Nombre: { Length: > 0 } nombre } r)
+        {
+            var porLista = r.Via == "lista";
+            if (mazoRivalAvisado is null || (porLista && !mazoRivalPorLista && nombre != mazoRivalAvisado))
+            {
+                partes.Add(Textos.T(porLista ? "cons_rival_lista" : "cons_rival_colores", nombre));
+                mazoRivalAvisado = nombre;
+                mazoRivalPorLista = porLista;
+            }
+        }
+        return string.Join("\n", partes);
+    }
 
     /// <summary>Una carta de la mesa como la lee /api/mtga-device/consejo.</summary>
     private static object EnMesaJson(Contexto.EnMesa c) => new
@@ -1823,6 +1883,9 @@ internal static class Program
             var texto = string.Join(" ", new[] { d.Jugada, d.Ataque, d.PorQue is { Length: > 0 } pq ? "— " + pq : null }.Where(t => t is { Length: > 0 }));
             // Sin IA, al menos lo que se puede jugar con el maná de este turno.
             if (texto.Length == 0 && d.Jugables is { Length: > 0 } j) texto = Textos.T("consejo_jugables", string.Join(", ", j), d.Mana);
+            // Y debajo, lo calculado (letal, peligro, mazo del rival), aunque la IA no diga nada.
+            var calculado = LineaCalculada(d.Datos, rival);
+            if (calculado.Length > 0) texto = texto.Length > 0 ? texto + "\n\n" + calculado : calculado;
             if (texto.Length == 0) return;
             Superposicion.MostrarSinEsperar(Textos.T(rival ? "consejo_titulo_rival" : "consejo_titulo", mesa.Turno), texto, 25, importante: true, avatar: FiguraEntrenador());
         }

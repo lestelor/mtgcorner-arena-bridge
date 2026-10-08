@@ -1728,6 +1728,37 @@ internal static class Textos
             "You can cast: {0} (mana: {1}).", "Puedes jugar: {0} (maná: {1}).", "Du kannst spielen: {0} (Mana: {1}).", "Tu peux jouer : {0} (mana : {1}).",
             "Podes jogar: {0} (mana: {1}).", "Puoi giocare: {0} (mana: {1}).", "プレイ可能：{0}（マナ：{1}）。", "可施放：{0}（法术力：{1}）。",
         ],
+        // Lo calculado, debajo del consejo (1.22.0): {0} y {1} son números, o el nombre del mazo.
+        ["cons_letal_mesa"] =
+        [
+            "Lethal: {0} damage with no blockers, the opponent is at {1}.", "Letal: {0} de daño sin bloqueadores, el rival está a {1}.", "Tödlich: {0} Schaden ohne Blocker, der Gegner hat {1} Leben.", "Létal : {0} dégâts sans bloqueurs, l'adversaire est à {1}.",
+            "Letal: {0} de dano sem bloqueadores, o adversário está a {1}.", "Letale: {0} danni senza bloccanti, l'avversario è a {1}.", "リーサル：ブロッカーなしで{0}点、相手のライフは{1}。", "斩杀：无阻挡者，可造成{0}点伤害，对手剩{1}点生命。",
+        ],
+        ["cons_letal_aire"] =
+        [
+            "Lethal in the air: {0} flying damage, the opponent is at {1}.", "Letal por el aire: {0} de daño volando, el rival está a {1}.", "Tödlich in der Luft: {0} Flugschaden, der Gegner hat {1} Leben.", "Létal par les airs : {0} dégâts en vol, l'adversaire est à {1}.",
+            "Letal pelo ar: {0} de dano a voar, o adversário está a {1}.", "Letale in volo: {0} danni volanti, l'avversario è a {1}.", "空からリーサル：飛行で{0}点、相手のライフは{1}。", "空中斩杀：飞行生物可造成{0}点伤害，对手剩{1}点生命。",
+        ],
+        ["cons_peligro"] =
+        [
+            "Careful: their creatures add up to {0} power and you are at {1}. Keep blockers back.", "Cuidado: sus criaturas suman {0} de fuerza y estás a {1}. Guarda bloqueadores.", "Vorsicht: Die gegnerischen Kreaturen haben zusammen {0} Stärke und du hast {1} Leben. Halte Blocker zurück.", "Attention : ses créatures totalisent {0} de force et tu es à {1}. Garde des bloqueurs.",
+            "Cuidado: as criaturas dele somam {0} de força e estás a {1}. Guarda bloqueadores.", "Attenzione: le sue creature sommano {0} di forza e sei a {1}. Tieni dei bloccanti.", "注意：相手のクリーチャーのパワー合計は{0}、あなたのライフは{1}。ブロッカーを残そう。", "小心：对手生物总力量为{0}，你剩{1}点生命。留好阻挡者。",
+        ],
+        ["cons_peligro_ahora"] =
+        [
+            "Danger: they can attack for {0} and you are at {1}.", "Peligro: puede atacarte por {0} y estás a {1}.", "Gefahr: Der Gegner kann mit {0} angreifen und du hast {1} Leben.", "Danger : il peut attaquer pour {0} et tu es à {1}.",
+            "Perigo: pode atacar-te com {0} e estás a {1}.", "Pericolo: può attaccarti per {0} e sei a {1}.", "危険：相手は{0}点で攻撃でき、あなたのライフは{1}。", "危险：对手可攻击{0}点，你剩{1}点生命。",
+        ],
+        ["cons_rival_lista"] =
+        [
+            "The opponent looks like {0}.", "El rival parece {0}.", "Der Gegner spielt wohl {0}.", "L'adversaire semble jouer {0}.",
+            "O adversário parece {0}.", "L'avversario sembra {0}.", "相手は{0}のようです。", "对手看起来是{0}。",
+        ],
+        ["cons_rival_colores"] =
+        [
+            "By its colours, the opponent may be {0}.", "Por sus colores, el rival puede ser {0}.", "Nach den Farben könnte der Gegner {0} spielen.", "D'après ses couleurs, l'adversaire joue peut-être {0}.",
+            "Pelas cores, o adversário pode ser {0}.", "Dai colori, l'avversario potrebbe essere {0}.", "色から見て、相手は{0}かもしれません。", "从颜色看，对手可能是{0}。",
+        ],
         ["consejo_activado"] =
         [
             "Advice each turn is on (experimental). At the start of your main phase you'll see a suggestion; it never plays for you and stays off in competitive events.", "Consejo por turno encendido (experimental). Al empezar tu fase principal verás una sugerencia; nunca juega por ti y en eventos competitivos no sale.", "Tipp pro Zug ist an (experimentell). Zu Beginn deiner Hauptphase siehst du einen Vorschlag; er spielt nie für dich und bleibt in kompetitiven Events aus.", "Conseil à chaque tour activé (expérimental). Au début de ta phase principale tu verras une suggestion ; il ne joue jamais à ta place et reste désactivé en compétition.",
