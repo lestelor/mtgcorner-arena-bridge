@@ -36,7 +36,7 @@ namespace MtgCornerArenaBridge;
 /// </summary>
 internal static class Columna
 {
-    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival, Inicio, Estadisticas, Creador, CartaMazo, MasCartas, Consejo, Biblioteca, Rastreo, Mano, MazoRival }
+    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival, Inicio, Estadisticas, Creador, CartaMazo, MasCartas, Consejo, Biblioteca, Rastreo, Mano, MazoRival, UltimoConsejo, Programa }
 
     /// <summary>
     /// Una fila. Las de contexto traen su etiqueta hecha y un dato (nombre del
@@ -108,6 +108,11 @@ internal static class Columna
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
     [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr contexto);
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int tecla);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hWnd, uint banderas);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
 
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
@@ -171,7 +176,7 @@ internal static class Columna
 
     /// <summary>
     /// Qué se puede hacer, en orden. Los glifos son de «Segoe MDL2 Assets»:
-    /// descargar, biblioteca, editar, encendido, cerrar.
+    /// descargar, biblioteca, gráfica, bombilla, editar y el engranaje de «Programa».
     /// </summary>
     private static readonly Fila[] Fijas =
     [
@@ -181,6 +186,16 @@ internal static class Columna
         // El consejo de cada turno, experimental: un interruptor, apagado de salida.
         new(Accion.Consejo, "\uE82F", "col_consejo_no", "consejo"),
         new(Accion.Constructor, "", "col_constructor"),
+        // Arranque, versión y salir, que casi no se usan, en UNA fila con sus
+        // tres botones (el usuario, 2026-10-09: «me parece bien la propuesta de
+        // unificación de menús»). La versión sale además sola, destacada,
+        // cuando hay una nueva (ver Rehacer).
+        new(Accion.Programa, "\uE713", "col_programa", "programa"),
+    ];
+
+    /// <summary>Las tres que agrupa la fila «Programa», con su glifo y su dato de siempre.</summary>
+    private static readonly Fila[] FilasPrograma =
+    [
         new(Accion.Arranque, "", "col_arranque"),
         new(Accion.Version, "\uE946", "col_version", "version"),
         new(Accion.Salir, "", "col_salir"),
@@ -223,6 +238,43 @@ internal static class Columna
     private static volatile string? enCurso;
     private static int faseCurso;
 
+    // ── UNA FILA POR CARTA, CON SUS TRES BOTONES ─────────────────────────
+    //
+    // En partida salían tres filas por carta señalada —«Similares a X»,
+    // «Combos con X», «Sinergias de X»— y otras tres por la del rival: seis
+    // filas para dos cartas. Desde el 2026-10-09 (el usuario: «quizás se podría
+    // poner un desplegable que salga a la derecha y de allí seleccionar
+    // similares/combos») es UNA fila por carta, con su nombre, y a su derecha
+    // tres botones: parecidas, combos y sinergias. Pulsar el nombre abre las
+    // parecidas, como antes. Al pasar por un botón, la fila dice cuál es.
+    private const int ANCHO_BOTON = 30;
+    /// <summary>Un botón de una fila: su glifo, lo que dice al pasar por encima y lo que hace.</summary>
+    private sealed record Boton(Fila Fila, string? Clave);
+    private static readonly Boton[] BotonesCarta =
+    [
+        new(new Fila(Accion.Similares, "\uE8C8", ""), "col_boton_similares"),
+        new(new Fila(Accion.Combos, "\uE71B", ""), "col_boton_combos"),
+        new(new Fila(Accion.Sinergias, "\uE945", ""), "col_boton_sinergias"),
+    ];
+    // Los de «Programa» dicen su rótulo de siempre («Arranque automático: sí», la versión…).
+    private static readonly Boton[] BotonesPrograma = FilasPrograma.Select(f => new Boton(f, null)).ToArray();
+    /// <summary>Los botones de una fila, o null si no lleva.</summary>
+    private static Boton[]? BotonesDe(Fila f) =>
+        f.Nivel > 0 ? null : f.Accion == Accion.Similares ? BotonesCarta : f.Accion == Accion.Programa ? BotonesPrograma : null;
+    private static string RotuloBoton(Boton b) => b.Clave is { } c ? Textos.T(c) : Etiqueta(b.Fila);
+    /// <summary>El botón bajo el ratón en la fila señalada, o -1.</summary>
+    private static int botonBajoRaton = -1;
+
+    /// <summary>
+    /// UN CLIC EN EL JUEGO CIERRA LO QUE HAYA ABIERTO (el usuario, 2026-10-09:
+    /// «si se pincha en el juego —no en el menú ni en la ventana emergente— que
+    /// se compacte el menú y se cierre la ventana»). Lo hace la propia columna
+    /// (el desplegable del mazo) y quien la arranca, con esto: las ventanas de
+    /// cartas, estadísticas y resúmenes. Lo pone Program.
+    /// </summary>
+    public static Action? AlPulsarFuera { get; set; }
+    private static bool botonAbajo;
+
     /// <summary>
     /// LA FILA QUE PIDE ATENCIÓN: su glifo y su nombre en ámbar y un punto en la
     /// esquina, hasta que se pulsa. Es cómo se ve, con la columna cerrada, que
@@ -235,13 +287,14 @@ internal static class Columna
     public static void Destacar(string dato)
     {
         lock (destacadas) destacadas.Add(dato);
-        Refrescar();
+        // La de la versión entra o sale de la lista (ver Rehacer); las demás sólo se repintan.
+        if (dato == "version") Rehacer(); else Refrescar();
     }
 
     public static void Olvidar(string dato)
     {
         lock (destacadas) destacadas.Remove(dato);
-        Refrescar();
+        if (dato == "version") Rehacer(); else Refrescar();
     }
 
     /// <summary>Si el consejo de cada turno está encendido, para el rótulo de su fila. Lo pone Program.</summary>
@@ -386,7 +439,7 @@ internal static class Columna
                 DrawText(hdc, Etiqueta(f), -1, ref r, DT_CALCRECT | DT_SINGLELINE);
                 // El hueco del icono, el texto, y el aire de la derecha (y la
                 // flecha del desplegable, o la ilustración y el coste de la carta).
-                var extra = f.Accion == Accion.Mejorar ? 30 : f.Accion is Accion.CartaMazo or Accion.Rastreo ? 70 : 0;
+                var extra = f.Accion == Accion.Mejorar ? 30 : f.Accion is Accion.CartaMazo or Accion.Rastreo ? 70 : BotonesDe(f) is { } bf ? bf.Length * ANCHO_BOTON + 4 : 0;
                 ancho = Math.Max(ancho, ANCHO_CERRADA + 2 + (r.Right - r.Left) + 16 + extra);
             }
             // Abierto el desplegable, un ancho fijo cómodo: si cambiara con cada
@@ -460,7 +513,12 @@ internal static class Columna
         }
         var conFijas = !(soloContexto && contexto.Length > 0) && !desplegado;
         var nuevas = new List<Fila>(arriba);
-        if (conFijas) nuevas.AddRange(Fijas);
+        if (conFijas)
+        {
+            nuevas.AddRange(Fijas);
+            bool novedad; lock (destacadas) novedad = destacadas.Contains("version");
+            if (novedad) nuevas.Insert(nuevas.Count - 1, FilasPrograma.First(f => f.Accion == Accion.Version));
+        }
         cuantasDeContexto = conFijas ? arriba.Count : 0;
         Filas = nuevas.ToArray();
         MedirAncho();   // el nombre del mazo o de la carta cambia lo que mide
@@ -481,6 +539,7 @@ internal static class Columna
         Accion.Consejo => "\uE82F",
         Accion.Mano => "\uE82F",
         Accion.MazoRival => "\uE77B",
+        Accion.UltimoConsejo => "\uE81C",
         _ => "",
     };
 
@@ -726,6 +785,50 @@ internal static class Columna
         Recortar(ancho);
     }
 
+    /// <summary>El hueco del botón k de la fila de una carta.</summary>
+    private static RECT RectBoton(int k, int n, int arriba, int ancho)
+    {
+        var izq = ancho - 6 - (n - k) * ANCHO_BOTON;
+        return new RECT { Left = izq, Top = arriba + 7, Right = izq + ANCHO_BOTON - 2, Bottom = arriba + ALTO_FILA - 7 };
+    }
+
+    /// <summary>Qué botón hay bajo el ratón en esa fila (0..2), o -1 (no es la fila de una carta, o no está encima).</summary>
+    private static int BotonEn(int fila, IntPtr lParam)
+    {
+        var filas = Filas;
+        if (!abierta || fila < 0 || fila >= filas.Length || BotonesDe(filas[fila]) is not { } botones) return -1;
+        var x = (short)(lParam.ToInt64() & 0xFFFF);
+        var arriba = ArribaDe(fila);
+        for (var k = 0; k < botones.Length; k++)
+        {
+            var r = RectBoton(k, botones.Length, arriba, anchoAbierta);
+            if (x >= r.Left && x < r.Right) return k;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Un clic nuevo con el botón izquierdo: si NO cae en una ventana de este
+    /// programa (la columna, una ventana de cartas, un aviso), es en el juego, y
+    /// se cierra lo abierto: el desplegable del mazo (la columna vuelve a su
+    /// sitio) y lo que cierre quien la arrancó (AlPulsarFuera).
+    /// </summary>
+    private static void MirarClicFuera()
+    {
+        if (!GetCursorPos(out var p)) return;
+        var raiz = GetAncestor(WindowFromPoint(p), 2 /* GA_ROOT */);
+        if (raiz == IntPtr.Zero) return;
+        GetWindowThreadProcessId(raiz, out var pid);
+        if (pid == (uint)Environment.ProcessId) return;
+        if (desplegado || cartaAbierta is not null)
+        {
+            desplegado = false; cartaAbierta = null; desdeCarta = 0;
+            if (!ForzarAbierta) { abierta = false; filaBajoRaton = -1; botonBajoRaton = -1; }
+            Rehacer(); Recolocar();
+        }
+        try { AlPulsarFuera?.Invoke(); } catch { /* lo de fuera, a su aire */ }
+    }
+
     /// <summary>La fila bajo un punto de la ventana, o -1.</summary>
     private static int FilaEn(IntPtr lParam)
     {
@@ -755,6 +858,10 @@ internal static class Columna
             case WM_TIMER:
                 if (wParam.ToInt64() == 2)
                 {
+                    // ¿Un clic nuevo? Si cae fuera de nuestras ventanas, se cierra lo abierto.
+                    var abajo = (GetAsyncKeyState(0x01 /* VK_LBUTTON */) & 0x8000) != 0;
+                    if (abajo && !botonAbajo && visible) MirarClicFuera();
+                    botonAbajo = abajo;
                     // EL VISOR: las etiquetas que no caben se desplazan de lado
                     // (pedido del usuario el 2026-09-26: «a veces se recortan las
                     // letras»). Sólo se repinta cuando hay algo que mover.
@@ -783,7 +890,9 @@ internal static class Columna
                     siguiendoRaton = TrackMouseEvent(ref seguir);
                 }
                 var fila = FilaEn(lParam);
-                var cambia = !abierta || fila != filaBajoRaton;
+                var boton = BotonEn(fila, lParam);
+                var cambia = !abierta || fila != filaBajoRaton || boton != botonBajoRaton;
+                botonBajoRaton = boton;
                 if (!abierta) { abierta = true; if (rastreo.Length > 0) Rehacer(); Recolocar(); }
                 // Una carta del desplegable recién señalada: a precalentar (ver AlSenalarCarta).
                 var filasM = Filas;
@@ -813,6 +922,7 @@ internal static class Columna
                 }
                 abierta = false;
                 filaBajoRaton = -1;
+                botonBajoRaton = -1;
                 // Al cerrarse la columna, el desplegable se pliega y el rastreador se queda en su fila.
                 if (desplegado || rastreo.Length > 0) { desplegado = false; cartaAbierta = null; desdeCarta = 0; Rehacer(); }
                 Recolocar();
@@ -878,6 +988,14 @@ internal static class Columna
                 {
                     var accion = filas[fila].Accion;
                     var dato = filas[fila].Dato;
+                    // Una fila con botones: el pulsado decide. Sin botón, en la de una carta
+                    // sus parecidas; en «Programa», la versión.
+                    if (BotonesDe(filas[fila]) is { } bs)
+                    {
+                        var bp = BotonEn(fila, lParam);
+                        if (bp >= 0 && bp < bs.Length) { accion = bs[bp].Fila.Accion; if (accion is not (Accion.Similares or Accion.Combos or Accion.Sinergias)) dato = bs[bp].Fila.Dato; }
+                        else if (accion == Accion.Programa) { accion = Accion.Version; dato = "version"; }
+                    }
                     // Otra opción de la columna: el desplegable del mazo se pliega.
                     if (desplegado) { desplegado = false; cartaAbierta = null; desdeCarta = 0; Rehacer(); Recolocar(); }
                     // Fuera del hilo de la ventana: lo que hace un icono puede
@@ -1014,7 +1132,24 @@ internal static class Columna
                     SelectObject(hdc, texto);
                     SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : nueva ? Rgb(252, 211, 77) : Rgb(226, 232, 240));
                     var esMazo = filas[i].Accion == Accion.Mejorar;
-                    var rTexto = new RECT { Left = ANCHO_CERRADA + 2, Top = arriba, Right = ancho - (esMazo ? 36 : 10), Bottom = arriba + ALTO_FILA };
+                    var botones = ocupada ? null : BotonesDe(filas[i]);
+                    var conBotones = botones is not null;
+                    var rTexto = new RECT { Left = ANCHO_CERRADA + 2, Top = arriba, Right = ancho - (esMazo ? 36 : botones is not null ? botones.Length * ANCHO_BOTON + 12 : 10), Bottom = arriba + ALTO_FILA };
+                    if (botones is not null)
+                    {
+                        // Los botones a la derecha; el señalado, resaltado y en azul.
+                        SelectObject(hdc, glifos);
+                        for (var k = 0; k < botones.Length; k++)
+                        {
+                            var rB = RectBoton(k, botones.Length, arriba, ancho);
+                            var sobreBoton = i == filaBajoRaton && k == botonBajoRaton;
+                            if (sobreBoton) { var pb = CreateSolidBrush(Rgb(40, 52, 82)); FillRect(hdc, ref rB, pb); DeleteObject(pb); }
+                            SetTextColor(hdc, sobreBoton ? Rgb(56, 189, 248) : Rgb(148, 163, 184));
+                            DrawText(hdc, botones[k].Fila.Glifo, -1, ref rB, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                        }
+                        SelectObject(hdc, texto);
+                        SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : nueva ? Rgb(252, 211, 77) : Rgb(226, 232, 240));
+                    }
                     if (esMazo)
                     {
                         // La flecha del desplegable, a la derecha: abajo cerrado, arriba abierto.
@@ -1026,6 +1161,12 @@ internal static class Columna
                         SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : nueva ? Rgb(252, 211, 77) : Rgb(226, 232, 240));
                     }
                     var rotulo = ocupada ? Etiqueta(filas[i]) + new string('.', 1 + faseCurso % 3) : Etiqueta(filas[i]);
+                    // Sobre un botón de la fila de la carta, la fila dice qué hace.
+                    if (botones is not null && i == filaBajoRaton && botonBajoRaton >= 0 && botonBajoRaton < botones.Length)
+                    {
+                        rotulo = RotuloBoton(botones[botonBajoRaton]);
+                        SetTextColor(hdc, Rgb(125, 211, 252));
+                    }
                     // ¿Cabe? Si no, se pinta entera desplazada según el latido
                     // del visor, recortada a su hueco: espera al principio, corre
                     // hasta el final, espera, y vuelve.

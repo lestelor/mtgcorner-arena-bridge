@@ -371,7 +371,11 @@ internal static class Program
         // (ver Protocolo.cs). Y si es el enlace quien nos abre, sólo «importar»
         // hace algo: es el flujo normal de abajo. Lo demás se ignora, que
         // cualquier web puede poner un enlace así.
-        Protocolo.Registrar();
+        // Salvo en los modos de taller (--probar-…) y --licencia: con el build de
+        // pruebas se registraba el enlace a ESA copia, y la web dejaba de abrir
+        // el programa de verdad hasta que éste se volvía a abrir (2026-10-09).
+        if (!(args.Length > 0 && (args[0].StartsWith("--probar", StringComparison.Ordinal) || args[0] == "--licencia")))
+            Protocolo.Registrar();
         var accion = Protocolo.Accion(args);
         if (accion is not null && accion != "importar") return 0;
 
@@ -403,14 +407,17 @@ internal static class Program
             Columna.SiempreVisible = true;
             Columna.ForzarAbierta = args.Contains("--abierta");
             Columna.Iniciar((a, d) => { Console.WriteLine($"pulsado: {a} {d}"); return Task.CompletedTask; }, ArrancaSolo);
+            // --novedad: como si hubiera versión nueva (su fila, sola y destacada).
+            if (args.Contains("--novedad")) Columna.Destacar("version");
             // --contexto: con las filas que pone el juego, para verlas sin jugar.
             if (args.Contains("--contexto"))
             {
                 Columna.FilasDeContexto(
                     (Columna.Accion.Mejorar, "Mono-White Auras (2)", Textos.T("col_mejorar", "Mono-White Auras (2)")),
-                    (Columna.Accion.Similares, "58437", Textos.T("col_similares", "Plains")),
-                    (Columna.Accion.Combos, "58437", Textos.T("col_combos", "Plains")),
-                    (Columna.Accion.Sinergias, "58437", Textos.T("col_sinergias", "Plains")),
+                    (Columna.Accion.UltimoConsejo, "ultimoconsejo", Textos.T("col_ultimo_consejo", 6)),
+                    (Columna.Accion.MazoRival, "mazorival", Textos.T("col_mazo_rival", "Orzhov Lifegain")),
+                    (Columna.Accion.Similares, "58437", "Plains"),
+                    (Columna.Accion.Similares, "92081", Textos.T("col_carta_rival", "Starscape Cleric")),
                     (Columna.Accion.SinergiaRival, "sinrival:0", Textos.T("col_sinergia_rival", "cementerio, con un nombre larguísimo para ver el visor")),
                     (Columna.Accion.Resumen, "resumen", Textos.T("col_resumen")));
                 Columna.Destacar("resumen");
@@ -1130,6 +1137,9 @@ internal static class Program
                 case Columna.Accion.Mano:
                     if (manoAviso is { } maPulsada) Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), maPulsada.Texto, 20, importante: true, avatar: FiguraEntrenador());
                     break;
+                case Columna.Accion.UltimoConsejo:
+                    if (ultimoConsejo is { } ucp) MostrarConsejo(ucp.Titulo, ucp.Texto, ucp.Calculado);
+                    break;
                 case Columna.Accion.MazoRival:
                     // El entrenador lo repite, con lo que hace ese mazo.
                     if (mazoRivalPartida is { } mrp)
@@ -1216,6 +1226,8 @@ internal static class Program
             // La mano ofrecida, mientras decides (ver ConsejoMulligan).
             if (manoAviso is { } ma && Contexto.EnPartida && DateTime.UtcNow < ma.Hasta) filas.Add((Columna.Accion.Mano, "mano", ma.Corto));
             // El mazo del rival, toda la partida (ver mazoRivalPartida).
+            // El último consejo, para recuperarlo si se cerró (ver ultimoConsejo).
+            if (Contexto.EnPartida && ultimoConsejo is { } uc) filas.Add((Columna.Accion.UltimoConsejo, "ultimoconsejo", Textos.T("col_ultimo_consejo", uc.Turno)));
             if (Contexto.EnPartida && mazoRivalPartida is { } mr) filas.Add((Columna.Accion.MazoRival, "mazorival", Textos.T("col_mazo_rival", mr.Nombre)));
             if (Contexto.Mazo is { } mazo) filas.Add((Columna.Accion.Mejorar, mazo, Textos.T("col_mejorar", mazo)));
             if (Contexto.Carta is { } grp)
@@ -1242,9 +1254,8 @@ internal static class Program
                     // El dato lleva las DOS caras si la carta está transformada
                     // («96052:96051»): sólo la frontal existe en Scryfall.
                     var cual = Contexto.CartaOtraCara is { } otra ? $"{grp}:{otra}" : grp.ToString();
-                    filas.Add((Columna.Accion.Similares, cual, Textos.T("col_similares", nombre)));
-                    filas.Add((Columna.Accion.Combos, cual, Textos.T("col_combos", nombre)));
-                    filas.Add((Columna.Accion.Sinergias, cual, Textos.T("col_sinergias", nombre)));
+                    // UNA fila con su nombre: parecidas, combos y sinergias van en sus botones (ver Columna).
+                    filas.Add((Columna.Accion.Similares, cual, nombre));
                     // Y POR ADELANTADO: similares, combos y sinergias de esa carta,
                     // con sus imágenes, antes de que nadie pulse nada (ver Precalentar).
                     _ = Precalentar(http, cual);
@@ -1275,9 +1286,7 @@ internal static class Program
                     var cual = Contexto.CartaRivalOtraCara is { } otra ? $"{grpRival}:{otra}" : grpRival.ToString();
                     // Parecidas, combos y sinergias de la carta del rival, en TUS
                     // colores (Similares ya manda `colores=`), y precalentadas.
-                    filas.Add((Columna.Accion.Similares, cual, Textos.T("col_rival_similares", nombreRival)));
-                    filas.Add((Columna.Accion.Combos, cual, Textos.T("col_rival_combos", nombreRival)));
-                    filas.Add((Columna.Accion.Sinergias, cual, Textos.T("col_rival_sinergias", nombreRival)));
+                    filas.Add((Columna.Accion.Similares, cual, Textos.T("col_carta_rival", nombreRival)));
                     _ = Precalentar(http, cual);
                 }
             }
@@ -1354,6 +1363,8 @@ internal static class Program
         }
         httpResidente = http;
         refrescarColumna = ActualizarColumna;
+        // Un clic en el juego cierra la ventana de cartas, estadísticas o resumen que haya.
+        Columna.AlPulsarFuera = PanelCartas.CerrarPorClicFuera;
         Contexto.Cambio += ActualizarColumna;
         // Las cartas del mazo de ahora, para el desplegable «Mejorar» (ver CargarCartasMazo).
         Contexto.Cambio += () => _ = CargarCartasMazo(http);
@@ -1374,7 +1385,7 @@ internal static class Program
         Columna.ConsejoActivo = () => consejoActivo;
         Contexto.MiFasePrincipal += mesa => { if (consejoActivo) _ = ConsejoTurno(http, mesa); };
         // El mazo del rival se avisa una vez por partida: al acabar, a cero.
-        Contexto.PartidaAcabada += () => { mazoRivalAvisado = null; mazoRivalPorLista = false; mazoRivalPartida = null; refrescarColumna?.Invoke(); };
+        Contexto.PartidaAcabada += () => { mazoRivalAvisado = null; mazoRivalPorLista = false; mazoRivalPartida = null; ultimoConsejo = null; refrescarColumna?.Invoke(); };
         // Y su ficha a la web, para que el plan del mazo aprenda de la partida.
         Contexto.PartidaAcabada += () => _ = MandarFicha(http);
         // Y al empezar el del rival, lo que puedas jugar a destiempo (instantáneos, destello).
@@ -1913,6 +1924,23 @@ internal static class Program
         catch { /* sin ficha esta vez */ }
     }
 
+    /// <summary>
+    /// EL ÚLTIMO CONSEJO DE LA PARTIDA, para volver a verlo (el usuario,
+    /// 2026-10-09: «a veces se cierran; que haya una fila que diga último consejo
+    /// y que al hacer clic se recupere»). Con su bocadillo de cuentas, si lo
+    /// tenía. Se renueva con cada consejo y se borra al acabar la partida.
+    /// </summary>
+    private static (string Titulo, string Texto, string Calculado, int Turno)? ultimoConsejo;
+
+    /// <summary>El consejo y, debajo, sus cuentas: al darlo y al recuperarlo desde la columna.</summary>
+    private static void MostrarConsejo(string titulo, string texto, string calculado)
+    {
+        if (texto.Length > 0)
+            Superposicion.MostrarSinEsperar(titulo, texto, 25, importante: true, avatar: FiguraEntrenador());
+        if (calculado.Length > 0)
+            Superposicion.MostrarSinEsperar(Textos.T("consejo_cuentas"), calculado, 25, importante: true, avatar: FiguraEntrenador(), ranura: Superposicion.RANURA_CUENTAS);
+    }
+
     /// <summary>Lo que se manda a /api/mtga-device/consejo con una mesa.</summary>
     private static object CuerpoConsejo(Contexto.Mesa mesa, bool rival) => new
     {
@@ -1955,10 +1983,11 @@ internal static class Program
             // misma letra, pasaba desapercibido).
             var calculado = LineaCalculada(d.Datos, rival);
             if (texto.Length == 0 && calculado.Length == 0) return;
-            if (texto.Length > 0)
-                Superposicion.MostrarSinEsperar(Textos.T(rival ? "consejo_titulo_rival" : "consejo_titulo", mesa.Turno), texto, 25, importante: true, avatar: FiguraEntrenador());
-            if (calculado.Length > 0)
-                Superposicion.MostrarSinEsperar(Textos.T("consejo_cuentas"), calculado, 25, importante: true, avatar: FiguraEntrenador(), ranura: Superposicion.RANURA_CUENTAS);
+            var titulo = Textos.T(rival ? "consejo_titulo_rival" : "consejo_titulo", mesa.Turno);
+            // Y se guarda: la fila «Último consejo» de la columna lo vuelve a sacar.
+            ultimoConsejo = (titulo, texto, calculado, mesa.Turno);
+            refrescarColumna?.Invoke();
+            MostrarConsejo(titulo, texto, calculado);
         }
         catch { /* sin consejo este turno */ }
     }

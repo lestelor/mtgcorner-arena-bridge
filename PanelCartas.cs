@@ -772,6 +772,18 @@ internal static partial class PanelCartas
     public static void Mostrar(string tituloPanel, IReadOnlyList<Carta> cartas) =>
         Mostrar(tituloPanel, [new Seccion(null, null, cartas)]);
 
+    /// <summary>
+    /// Lo quita sin esperar a que se vaya, por un clic en el juego (ver
+    /// Columna.AlPulsarFuera): lo pide el hilo de la columna, que no puede
+    /// pararse. El diálogo de importar NO se cierra así: elegir qué mazos subir
+    /// no se puede perder por un clic de más en la mesa; ése, con su X.
+    /// </summary>
+    public static void CerrarPorClicFuera()
+    {
+        var v = ventana;
+        if (v != IntPtr.Zero && imp is null) PostMessage(v, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+    }
+
     /// <summary>Lo quita. Se puede llamar desde cualquier hilo.</summary>
     public static void Cerrar()
     {

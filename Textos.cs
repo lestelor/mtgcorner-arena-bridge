@@ -1728,6 +1728,44 @@ internal static class Textos
             "You can cast: {0} (mana: {1}).", "Puedes jugar: {0} (maná: {1}).", "Du kannst spielen: {0} (Mana: {1}).", "Tu peux jouer : {0} (mana : {1}).",
             "Podes jogar: {0} (mana: {1}).", "Puoi giocare: {0} (mana: {1}).", "プレイ可能：{0}（マナ：{1}）。", "可施放：{0}（法术力：{1}）。",
         ],
+        // La fila «Programa» del menú: arranque, versión y salir en botones (1.22.2).
+        ["col_programa"] =
+        [
+            "Program", "Programa", "Programm", "Programme",
+            "Programa", "Programma", "プログラム", "程序",
+        ],
+        ["ayuda_programa"] =
+        [
+            "Start with Windows, the program version and quit, in its three buttons.", "El arranque con Windows, la versión del programa y salir, en sus tres botones.", "Mit Windows starten, die Programmversion und Beenden, in den drei Schaltflächen.", "Démarrer avec Windows, la version du programme et quitter, dans ses trois boutons.",
+            "Arrancar com o Windows, a versão do programa e sair, nos seus três botões.", "Avvio con Windows, la versione del programma ed esci, nei suoi tre pulsanti.", "Windows起動時の自動開始、プログラムのバージョン、終了。3つのボタンにあります。", "随 Windows 启动、程序版本和退出，都在这三个按钮里。",
+        ],
+        // La fila de la carta del rival en la columna, y lo que dice al pasar por cada botón (1.22.2).
+        ["col_carta_rival"] =
+        [
+            "{0} (opponent)", "{0} (rival)", "{0} (Gegner)", "{0} (adversaire)",
+            "{0} (adversário)", "{0} (avversario)", "{0}（相手）", "{0}（对手）",
+        ],
+        ["col_boton_similares"] =
+        [
+            "Similar cards", "Cartas parecidas", "Ähnliche Karten", "Cartes similaires",
+            "Cartas semelhantes", "Carte simili", "似たカード", "相似卡牌",
+        ],
+        ["col_boton_combos"] =
+        [
+            "Combos", "Combos", "Kombos", "Combos",
+            "Combos", "Combo", "コンボ", "组合技",
+        ],
+        ["col_boton_sinergias"] =
+        [
+            "Synergies", "Sinergias", "Synergien", "Synergies",
+            "Sinergias", "Sinergie", "シナジー", "协同效应",
+        ],
+        // La fila de la columna que vuelve a sacar el último consejo (1.22.2). {0}: el turno.
+        ["col_ultimo_consejo"] =
+        [
+            "Last advice (turn {0})", "Último consejo (turno {0})", "Letzter Tipp (Zug {0})", "Dernier conseil (tour {0})",
+            "Último conselho (turno {0})", "Ultimo consiglio (turno {0})", "最後のアドバイス（ターン{0}）", "上一条建议（第{0}回合）",
+        ],
         // La fila de la columna con el mazo del rival, y el título de su bocadillo (1.22.1).
         ["col_mazo_rival"] =
         [
