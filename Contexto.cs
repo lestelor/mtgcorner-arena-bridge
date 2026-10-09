@@ -321,6 +321,8 @@ internal static class Contexto
     private static readonly List<ManoOfrecida> manos = new();
     private static readonly Dictionary<int, int> equipoPorAsiento = new();
     private static string idPartida = "";
+    /// <summary>El matchId de Arena de la partida en curso (o de la que acaba de terminar), o null. Para que el plan del mazo aprenda de cada partida (1.22.1).</summary>
+    public static string? PartidaActual => idPartida.Length > 0 ? idPartida : null;
     private static string? formato, evento, edicion;
     private static (int Grp, int N)[] cartasMazo = [];
     private static string? fichero;

@@ -1728,6 +1728,23 @@ internal static class Textos
             "You can cast: {0} (mana: {1}).", "Puedes jugar: {0} (maná: {1}).", "Du kannst spielen: {0} (Mana: {1}).", "Tu peux jouer : {0} (mana : {1}).",
             "Podes jogar: {0} (mana: {1}).", "Puoi giocare: {0} (mana: {1}).", "プレイ可能：{0}（マナ：{1}）。", "可施放：{0}（法术力：{1}）。",
         ],
+        // La fila de la columna con el mazo del rival, y el título de su bocadillo (1.22.1).
+        ["col_mazo_rival"] =
+        [
+            "Opponent: {0}", "Rival: {0}", "Gegner: {0}", "Adversaire : {0}",
+            "Adversário: {0}", "Avversario: {0}", "相手：{0}", "对手：{0}",
+        ],
+        ["mazo_rival_titulo"] =
+        [
+            "The opponent's deck", "El mazo del rival", "Das Deck des Gegners", "Le deck de l'adversaire",
+            "O deck do adversário", "Il mazzo dell'avversario", "相手のデッキ", "对手的套牌",
+        ],
+        // El título del bocadillo de las cuentas, debajo del consejo (1.22.1).
+        ["consejo_cuentas"] =
+        [
+            "The numbers", "Las cuentas", "Die Zahlen", "Les calculs",
+            "As contas", "I conti", "数字の確認", "算一算",
+        ],
         // Lo calculado, debajo del consejo (1.22.0): {0} y {1} son números, o el nombre del mazo.
         ["cons_letal_mesa"] =
         [

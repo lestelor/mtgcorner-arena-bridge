@@ -354,6 +354,13 @@ internal static class Program
         // Lo primero que se lee en la ventana: qué versión es ésta (pedido del
         // usuario el 2026-09-26, para saber qué tiene sin buscar el fichero).
         Console.WriteLine($"MTG Corner Arena Bridge v{VersionPropia}");
+        // --version: SÓLO la línea de arriba, y fuera. Antes de nada más, a
+        // propósito: sin esto un argumento desconocido seguía el camino normal,
+        // que registra el enlace mtgcorner:// y el arranque con Windows a ESTE
+        // fichero y cierra el residente que hubiera. Pasó el 2026-10-08 al
+        // comprobar un release descargado: el puente del usuario quedó cerrado y
+        // su arranque apuntando a un fichero temporal que luego se borró.
+        if (args.Length > 0 && args[0] is "--version" or "-v") return 0;
         Columna.Version = VersionPropia;
         // Primera suposición: el idioma de Windows, que es lo único que se sabe
         // antes de hablar con nadie. En cuanto se confirma en el navegador, la
@@ -1123,6 +1130,13 @@ internal static class Program
                 case Columna.Accion.Mano:
                     if (manoAviso is { } maPulsada) Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), maPulsada.Texto, 20, importante: true, avatar: FiguraEntrenador());
                     break;
+                case Columna.Accion.MazoRival:
+                    // El entrenador lo repite, con lo que hace ese mazo.
+                    if (mazoRivalPartida is { } mrp)
+                        Superposicion.MostrarSinEsperar(Textos.T("mazo_rival_titulo"),
+                            Textos.T(mrp.PorLista ? "cons_rival_lista" : "cons_rival_colores", mrp.Nombre) + (mrp.Plan is { Length: > 0 } pl ? "\n" + pl : ""),
+                            20, importante: true, avatar: FiguraEntrenador(), ranura: Superposicion.RANURA_CUENTAS);
+                    break;
                 case Columna.Accion.Consejo:
                     // Encender o apagar el consejo de cada turno (experimental).
                     consejoActivo = !consejoActivo;
@@ -1201,6 +1215,8 @@ internal static class Program
             var filas = new List<(Columna.Accion, string, string)>();
             // La mano ofrecida, mientras decides (ver ConsejoMulligan).
             if (manoAviso is { } ma && Contexto.EnPartida && DateTime.UtcNow < ma.Hasta) filas.Add((Columna.Accion.Mano, "mano", ma.Corto));
+            // El mazo del rival, toda la partida (ver mazoRivalPartida).
+            if (Contexto.EnPartida && mazoRivalPartida is { } mr) filas.Add((Columna.Accion.MazoRival, "mazorival", Textos.T("col_mazo_rival", mr.Nombre)));
             if (Contexto.Mazo is { } mazo) filas.Add((Columna.Accion.Mejorar, mazo, Textos.T("col_mejorar", mazo)));
             if (Contexto.Carta is { } grp)
             {
@@ -1358,7 +1374,9 @@ internal static class Program
         Columna.ConsejoActivo = () => consejoActivo;
         Contexto.MiFasePrincipal += mesa => { if (consejoActivo) _ = ConsejoTurno(http, mesa); };
         // El mazo del rival se avisa una vez por partida: al acabar, a cero.
-        Contexto.PartidaAcabada += () => { mazoRivalAvisado = null; mazoRivalPorLista = false; };
+        Contexto.PartidaAcabada += () => { mazoRivalAvisado = null; mazoRivalPorLista = false; mazoRivalPartida = null; refrescarColumna?.Invoke(); };
+        // Y su ficha a la web, para que el plan del mazo aprenda de la partida.
+        Contexto.PartidaAcabada += () => _ = MandarFicha(http);
         // Y al empezar el del rival, lo que puedas jugar a destiempo (instantáneos, destello).
         Contexto.TurnoDelRival += mesa => { if (consejoActivo) _ = ConsejoTurno(http, mesa, rival: true); };
         // Empieza tu primer turno: la fila de la mano ya no hace falta.
@@ -1810,7 +1828,9 @@ internal static class Program
     internal sealed record RivalConsejo(
         [property: System.Text.Json.Serialization.JsonPropertyName("nombre")] string? Nombre,
         [property: System.Text.Json.Serialization.JsonPropertyName("via")] string? Via,
-        [property: System.Text.Json.Serialization.JsonPropertyName("coincidencias")] int Coincidencias);
+        [property: System.Text.Json.Serialization.JsonPropertyName("coincidencias")] int Coincidencias,
+        // Qué hace ese mazo y qué vigilar, en una frase de la IA (desde el 1.22.1).
+        [property: System.Text.Json.Serialization.JsonPropertyName("plan")] string? Plan = null);
 
     /// <summary>
     /// El mazo del rival ya avisado en esta partida: se dice UNA vez, no cada
@@ -1822,6 +1842,15 @@ internal static class Program
     private static string? mazoRivalAvisado;
     private static bool mazoRivalPorLista;
 
+    /// <summary>
+    /// EL MAZO DEL RIVAL DE ESTA PARTIDA, para la columna (el usuario,
+    /// 2026-10-09: «que se quede allí»). El bocadillo lo dice una vez; la fila
+    /// «Rival: …» se queda toda la partida y, al pulsarla, el entrenador lo
+    /// repite con lo que hace ese mazo. Se mejora si llega una pista mejor (una
+    /// lista, o la explicación que aún no había) y se borra al acabar.
+    /// </summary>
+    private static (string Nombre, bool PorLista, string? Plan)? mazoRivalPartida;
+
     /// <summary>La línea de debajo del consejo con lo calculado, o "" si no hay nada que decir.</summary>
     private static string LineaCalculada(DatosConsejo? datos, bool rival)
     {
@@ -1832,9 +1861,18 @@ internal static class Program
         if (datos.Rival is { Nombre: { Length: > 0 } nombre } r)
         {
             var porLista = r.Via == "lista";
+            var antes = mazoRivalPartida;
+            if (antes is null || (porLista && !antes.Value.PorLista)
+                || (antes.Value.Nombre == nombre && antes.Value.Plan is null && r.Plan is { Length: > 0 }))
+            {
+                mazoRivalPartida = (nombre, porLista, r.Plan is { Length: > 0 } ? r.Plan : antes?.Nombre == nombre ? antes?.Plan : null);
+                refrescarColumna?.Invoke();
+            }
             if (mazoRivalAvisado is null || (porLista && !mazoRivalPorLista && nombre != mazoRivalAvisado))
             {
-                partes.Add(Textos.T(porLista ? "cons_rival_lista" : "cons_rival_colores", nombre));
+                partes.Add(Textos.T(porLista ? "cons_rival_lista" : "cons_rival_colores", nombre)
+                    // Y debajo del nombre, qué hace ese mazo (el usuario, 2026-10-09).
+                    + (r.Plan is { Length: > 0 } plan ? "\n" + plan : ""));
                 mazoRivalAvisado = nombre;
                 mazoRivalPorLista = porLista;
             }
@@ -1848,6 +1886,32 @@ internal static class Program
         grp = c.Grp, girada = c.Girada, tierra = c.Tierra, id = c.Id,
         fuerza = c.Fuerza, resistencia = c.Resistencia, mareada = c.Mareada, en = c.En, ficha = c.Ficha, subtipos = c.Subtipos,
     };
+
+    /// <summary>
+    /// AL ACABAR UNA PARTIDA, SU FICHA (1.22.1, el usuario el 2026-10-09: «que
+    /// el prompt del mazo se mejore a medida que se va probando»): lo que jugaste
+    /// en cada turno y el resultado. La web lo cruza con los consejos que dio en
+    /// esa partida y, cada pocas partidas de un mazo, la IA revisa su plan (ver
+    /// lib/aprendizajeMazo.ts en la web). No se manda en eventos competitivos,
+    /// donde no hay consejo. Sin red, no pasa nada.
+    /// </summary>
+    private static async Task MandarFicha(HttpClient http)
+    {
+        try
+        {
+            if (Contexto.UltimaPartida is not { } p || Contexto.PartidaActual is not { } id || EventoCompetitivo(Contexto.Evento)) return;
+            var cuerpo = new
+            {
+                partida = id,
+                mazo = p.Mazo,
+                gane = p.Gane,
+                idioma = Textos.Idioma,
+                turnos = p.Turnos.Select(t => new { n = t.N, activo = t.Activo, jugadas = t.JugadasYo.ToArray() }).ToArray(),
+            };
+            using var r = await http.PostAsJsonAsync($"{PuertaDevice}/partida-fin", cuerpo, JsonOpciones);
+        }
+        catch { /* sin ficha esta vez */ }
+    }
 
     /// <summary>Lo que se manda a /api/mtga-device/consejo con una mesa.</summary>
     private static object CuerpoConsejo(Contexto.Mesa mesa, bool rival) => new
@@ -1865,6 +1929,8 @@ internal static class Program
         rival = mesa.DelRival.Select(EnMesaJson),
         // Lo que el rival ha enseñado en la partida: la web adivina su mazo.
         vistasRival = Contexto.VistasRival,
+        // La partida: la web apunta cada consejo para que el plan del mazo aprenda (1.22.1).
+        partida = Contexto.PartidaActual,
         // El mazo que se juega, para su plan (la web lo guarda por persona y nombre).
         nombreMazo = Contexto.Mazo,
         lista = Contexto.CartasMazo.Select(c => new { grp = c.Grp, n = c.N }),
@@ -1883,11 +1949,16 @@ internal static class Program
             var texto = string.Join(" ", new[] { d.Jugada, d.Ataque, d.PorQue is { Length: > 0 } pq ? "— " + pq : null }.Where(t => t is { Length: > 0 }));
             // Sin IA, al menos lo que se puede jugar con el maná de este turno.
             if (texto.Length == 0 && d.Jugables is { Length: > 0 } j) texto = Textos.T("consejo_jugables", string.Join(", ", j), d.Mana);
-            // Y debajo, lo calculado (letal, peligro, mazo del rival), aunque la IA no diga nada.
+            // Y lo calculado (letal, peligro, mazo del rival), aunque la IA no diga
+            // nada: en SU PROPIO BOCADILLO debajo del consejo, como otro mensaje
+            // del entrenador (el usuario, 2026-10-09: al final del texto, en la
+            // misma letra, pasaba desapercibido).
             var calculado = LineaCalculada(d.Datos, rival);
-            if (calculado.Length > 0) texto = texto.Length > 0 ? texto + "\n\n" + calculado : calculado;
-            if (texto.Length == 0) return;
-            Superposicion.MostrarSinEsperar(Textos.T(rival ? "consejo_titulo_rival" : "consejo_titulo", mesa.Turno), texto, 25, importante: true, avatar: FiguraEntrenador());
+            if (texto.Length == 0 && calculado.Length == 0) return;
+            if (texto.Length > 0)
+                Superposicion.MostrarSinEsperar(Textos.T(rival ? "consejo_titulo_rival" : "consejo_titulo", mesa.Turno), texto, 25, importante: true, avatar: FiguraEntrenador());
+            if (calculado.Length > 0)
+                Superposicion.MostrarSinEsperar(Textos.T("consejo_cuentas"), calculado, 25, importante: true, avatar: FiguraEntrenador(), ranura: Superposicion.RANURA_CUENTAS);
         }
         catch { /* sin consejo este turno */ }
     }

@@ -349,18 +349,26 @@ internal static class Superposicion
     ///  · las alertas fijas (combos y sinergias del rival) no sustituyen a nadie:
     ///    se quedan, cada una con su X.
     /// </summary>
-    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false, bool importante = false, string? avatar = null)
+    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false, bool importante = false, string? avatar = null, string? ranura = null)
     {
         try
         {
-            var ranura = importante ? RANURA_CONSEJO : fijo ? null : RANURA_INFO;
+            ranura ??= importante ? RANURA_CONSEJO : fijo ? null : RANURA_INFO;
             if (ranura is not null) CerrarRanura(ranura);
+            // Un consejo nuevo se lleva también las cuentas del anterior: debajo
+            // del consejo de este turno no pueden quedar las del pasado.
+            if (ranura == RANURA_CONSEJO) CerrarRanura(RANURA_CUENTAS);
+            // EL TURNO EN LA PILA SE COGE AQUÍ, en el hilo de quien llama, y no en
+            // el del aviso: el consejo y sus cuentas se piden seguidos, y si cada
+            // hilo cogiera su número al arrancar, las cuentas podrían quedar ENCIMA.
+            long orden;
+            lock (pila) orden = ++ordenPila;
             var ficheros = (imagenes ?? []).Where(f => !string.IsNullOrEmpty(f) && File.Exists(f)).Take(MAX_MINIS).ToArray();
             var ent = Entrenador?.Invoke();
             var figura = avatar ?? ent?.Figura;
             var conAvatar = figura is { Length: > 0 } && File.Exists(figura) ? figura : null;
             var quien = ent is { } e ? (e.Nombre, e.Color) : ("", (245, 158, 11));
-            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos, ficheros, fijo, conAvatar, importante, ranura, quien); } catch (Exception ex) { Console.Error.WriteLine($"[aviso] {ex.GetType().Name}: {ex.Message}"); } });
+            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos, ficheros, fijo, conAvatar, importante, ranura, quien, orden); } catch (Exception ex) { Console.Error.WriteLine($"[aviso] {ex.GetType().Name}: {ex.Message}"); } });
             hilo.IsBackground = true;
             hilo.Start();
             return hilo;
@@ -374,6 +382,14 @@ internal static class Superposicion
     // ── LA PILA ────────────────────────────────────────────────────────────
 
     private const string RANURA_CONSEJO = "consejo", RANURA_INFO = "info";
+    /// <summary>
+    /// Las cuentas del consejo (letal, peligro, mazo del rival): un segundo
+    /// bocadillo del entrenador debajo del consejo, como otro mensaje suyo (el
+    /// usuario, 2026-10-09: «ponlo del estilo del bocadillo del profesor»; al
+    /// final del texto no se veía). Sustituye a sus propias cuentas y se va con
+    /// el consejo siguiente.
+    /// </summary>
+    public const string RANURA_CUENTAS = "cuentas";
     /// <summary>Entre aviso y aviso, y cuántos caben: más de cuatro ya tapan medio juego.</summary>
     private const int HUECO_PILA = 10, MAX_PILA = 4;
 
@@ -472,7 +488,7 @@ internal static class Superposicion
         lock (pila) return pila.FirstOrDefault(a => a.Ventana == ventana);
     }
 
-    private static void Correr(string titulo, string texto, int segundos, string[] ficheros, bool fijo, string? avatar, bool importante, string? ranura, (string Nombre, (int R, int G, int B) Color) quien)
+    private static void Correr(string titulo, string texto, int segundos, string[] ficheros, bool fijo, string? avatar, bool importante, string? ranura, (string Nombre, (int R, int G, int B) Color) quien, long orden)
     {
         // EN PÍXELES DE VERDAD. `GetWindowRect` devuelve píxeles físicos; sin
         // declararse consciente del DPI, Windows virtualiza las coordenadas y
@@ -531,7 +547,7 @@ internal static class Superposicion
         List<IntPtr> sobran;
         lock (pila)
         {
-            yo.Orden = ++ordenPila;
+            yo.Orden = orden;
             pila.Add(yo);
             // Más de los que caben: fuera los más antiguos que no sean un consejo.
             var fuera = pila.Where(a => a != yo && !a.Importante).OrderBy(a => a.Orden).Take(Math.Max(0, pila.Count - MAX_PILA)).ToList();
