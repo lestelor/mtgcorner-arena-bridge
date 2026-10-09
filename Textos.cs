@@ -1353,6 +1353,17 @@ internal static class Textos
             "Tier {0}", "Nivel {0}", "Stufe {0}", "Palier {0}",
             "Nível {0}", "Livello {0}", "ティア {0}", "{0} 级",
         ],
+        // El puesto en mítico, como lo escribe Arena, y el rótulo de cada franja de cien puestos en la escalera (1.22.3).
+        ["est_puesto"] =
+        [
+            "#{0}", "#{0}", "#{0}", "#{0}",
+            "#{0}", "#{0}", "#{0}", "#{0}",
+        ],
+        ["est_puesto_franja"] =
+        [
+            "#{0}-{1}", "#{0}-{1}", "#{0}-{1}", "#{0}-{1}",
+            "#{0}-{1}", "#{0}-{1}", "#{0}-{1}", "#{0}-{1}",
+        ],
         ["est_sin_rango"] =
         [
             "Unranked", "Sin rango", "Ohne Rang", "Non classé",

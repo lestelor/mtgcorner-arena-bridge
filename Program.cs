@@ -2316,7 +2316,7 @@ internal static class Program
             if (await BajarImagen(url) is { } fichero) iconos[clave] = fichero;
         var partidas = (d.Partidas ?? []).Select(q => new PanelCartas.PartidaEst(Local(q.Cuando), q.Gane, q.Mazo))
             .Where(q => q.Cuando != DateTime.MinValue).ToArray();
-        var escalera = (d.EscaleraCompleta ?? []).Select(q => new PanelCartas.PeldanoEst(q.Antes, q.Pos, q.Clase ?? "Bronze", q.Nivel, q.Gane, Local(q.Cuando), q.Mazo, q.Subio)).ToArray();
+        var escalera = (d.EscaleraCompleta ?? []).Select(q => new PanelCartas.PeldanoEst(q.Antes, q.Pos, q.Clase ?? "Bronze", q.Nivel, q.Gane, Local(q.Cuando), q.Mazo, q.Subio, q.Puesto)).ToArray();
         var mazos = (d.MazosAnalisis ?? []).Where(m => m.Nombre is { Length: > 0 }).Select(m => new PanelCartas.MazoEst(
             m.Nombre!, m.Ganadas, m.Perdidas, m.Actual,
             m.Analisis is { } a ? new PanelCartas.AnalisisMazo(a.Tierras, a.Medio, a.Mano?.Buenas ?? 0, a.LandDrops?.FirstOrDefault(l => l.Turno == 3)?.P ?? 0,
@@ -2324,11 +2324,11 @@ internal static class Program
                     (c.Tipos ?? []).Select(t => new PanelCartas.SegmentoCurva(t.Tipo ?? "other", t.N,
                         (t.Cartas ?? []).Select(x => $"{x.N}× {x.Nombre}").ToArray())).ToArray())).ToArray())
             : null)).ToArray();
-        var e = new PanelCartas.Estadisticas(total.Ganadas, total.Perdidas, partidas, mazos, d.Rango?.Clase, d.Rango?.Nivel, escalera, iconos, d.MazoArena ?? Contexto.Mazo);
+        var e = new PanelCartas.Estadisticas(total.Ganadas, total.Perdidas, partidas, mazos, d.Rango?.Clase, d.Rango?.Nivel, escalera, iconos, d.MazoArena ?? Contexto.Mazo, d.Rango?.Puesto);
         // Lo que se copia: el resumen en unas líneas.
         var jugadas = total.Ganadas + total.Perdidas;
         var plano = new List<string> { $"{Textos.T("est_total")}: {total.Ganadas}–{total.Perdidas} ({Math.Round(100.0 * total.Ganadas / jugadas)}%)" };
-        if (e.Clase is { } clase) plano.Add($"{Textos.T("est_rango")}: {Textos.T("clase_" + clase.ToLowerInvariant())}{(clase != "Mythic" && e.Nivel is { } nv ? " " + nv : "")}");
+        if (e.Clase is { } clase) plano.Add($"{Textos.T("est_rango")}: {Textos.T("clase_" + clase.ToLowerInvariant())}{(clase != "Mythic" && e.Nivel is { } nv ? " " + nv : "")}{(clase == "Mythic" && e.Puesto is { } pu ? " " + Textos.T("est_puesto", pu) : "")}");
         foreach (var m in e.Mazos) plano.Add($"• {m.Nombre}: {m.Ganadas}–{m.Perdidas}");
         PanelCartas.MostrarTexto(Textos.T("est_titulo"), [], string.Join("\r\n", plano), conEstadisticas: e);
     }
@@ -3608,7 +3608,8 @@ internal static partial class LogArena
             var raiz = JsonNode.Parse(json)?.AsObject();
             if (raiz is null || raiz["constructedSeasonOrdinal"] is null) return null;
             var foto = new JsonObject();
-            foreach (var clave in new[] { "constructedSeasonOrdinal", "constructedClass", "constructedLevel", "constructedStep", "constructedMatchesLost" })
+            // Y el puesto en mítico (1.22.3): sin él la escalera se queda plana al llegar.
+            foreach (var clave in new[] { "constructedSeasonOrdinal", "constructedClass", "constructedLevel", "constructedStep", "constructedMatchesLost", "constructedLeaderboardPlace" })
             {
                 if (raiz[clave] is JsonNode v) foto[clave] = v.DeepClone();
             }
@@ -3755,7 +3756,8 @@ internal sealed record PeldanoCompletoPuente(
     [property: JsonPropertyName("antes")] int Antes, [property: JsonPropertyName("pos")] int Pos,
     [property: JsonPropertyName("clase")] string? Clase, [property: JsonPropertyName("nivel")] int Nivel,
     [property: JsonPropertyName("gane")] bool Gane, [property: JsonPropertyName("cuando")] string? Cuando,
-    [property: JsonPropertyName("mazo")] string? Mazo, [property: JsonPropertyName("subio")] bool Subio);
+    [property: JsonPropertyName("mazo")] string? Mazo, [property: JsonPropertyName("subio")] bool Subio,
+    [property: JsonPropertyName("puesto")] int? Puesto = null);
 internal sealed record MazoAnalisisPuente(
     [property: JsonPropertyName("nombre")] string? Nombre, [property: JsonPropertyName("ganadas")] int Ganadas, [property: JsonPropertyName("perdidas")] int Perdidas,
     [property: JsonPropertyName("actual")] bool Actual, [property: JsonPropertyName("analisis")] AnalisisPuente? Analisis);
@@ -3775,7 +3777,8 @@ internal sealed record PuntoEstPuente(
 internal sealed record MazoEstPuente(
     [property: JsonPropertyName("nombre")] string? Nombre, [property: JsonPropertyName("ganadas")] int Ganadas, [property: JsonPropertyName("perdidas")] int Perdidas,
     [property: JsonPropertyName("ruta")] string? Ruta, [property: JsonPropertyName("actual")] bool Actual);
-internal sealed record RangoEst([property: JsonPropertyName("clase")] string? Clase, [property: JsonPropertyName("nivel")] int? Nivel, [property: JsonPropertyName("temporada")] int? Temporada);
+internal sealed record RangoEst([property: JsonPropertyName("clase")] string? Clase, [property: JsonPropertyName("nivel")] int? Nivel, [property: JsonPropertyName("temporada")] int? Temporada,
+    [property: JsonPropertyName("puesto")] int? Puesto = null);
 internal sealed record PeldanoEstPuente(
     [property: JsonPropertyName("posicion")] int Posicion, [property: JsonPropertyName("clase")] string? Clase,
     [property: JsonPropertyName("nivel")] int Nivel, [property: JsonPropertyName("gane")] bool Gane);

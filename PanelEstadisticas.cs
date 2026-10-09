@@ -30,7 +30,8 @@ internal static partial class PanelCartas
     // ── Los datos, ya preparados por Program ──────────────────────────────
 
     public sealed record PartidaEst(DateTime Cuando, bool Gane, string? Mazo);
-    public sealed record PeldanoEst(int Antes, int Pos, string Clase, int Nivel, bool Gane, DateTime Cuando, string? Mazo, bool Subio);
+    /// <summary>Un punto de la escalera. <c>Puesto</c>: en mítico, el número de la clasificación, si se sabe (1.22.3).</summary>
+    public sealed record PeldanoEst(int Antes, int Pos, string Clase, int Nivel, bool Gane, DateTime Cuando, string? Mazo, bool Subio, int? Puesto = null);
     public sealed record SegmentoCurva(string Tipo, int N, string[] Cartas);
     public sealed record ColumnaCurva(int Cmc, int Total, SegmentoCurva[] Tipos);
     public sealed record AnalisisMazo(int Tierras, double Medio, double ManoBuena, double TierraT3, ColumnaCurva[] Curva);
@@ -39,7 +40,7 @@ internal static partial class PanelCartas
     public sealed record Estadisticas(
         int Ganadas, int Perdidas, PartidaEst[] Partidas, MazoEst[] Mazos,
         string? Clase, int? Nivel, PeldanoEst[] Escalera,
-        IReadOnlyDictionary<string, string> Iconos, string? MazoArena);
+        IReadOnlyDictionary<string, string> Iconos, string? MazoArena, int? Puesto = null);
 
     private static Estadisticas? est;
     /// <summary>El mazo elegido en el selector: -1 es «Todos».</summary>
@@ -421,6 +422,13 @@ internal static partial class PanelCartas
         {
             var tx = X(3) + pad + 80;
             Escribir(hdc, NombreClase(c), tx, y + 38, X(3) + w - pad - tx, 30, 24, 700, BLANCO, una | DT_END_ELLIPSIS);
+            // En mítico, su puesto al lado, como lo enseña Arena (el usuario, 2026-10-09).
+            if (c == "Mythic" && e.Puesto is { } puesto)
+            {
+                var dx = Medir(hdc, NombreClase(c), 24, 700) + 10;
+                var (pr, pg, pb) = ColorClase(c);
+                Escribir(hdc, Textos.T("est_puesto", puesto), tx + dx, y + 38, Math.Max(0, X(3) + w - pad - tx - dx), 30, 24, 700, Rgb(pr, pg, pb), una);
+            }
             if (c != "Mythic" && e.Nivel is { } nivel) Escribir(hdc, Textos.T("est_nivel", nivel), tx, y + 68, X(3) + w - pad - tx, 20, 14, 400, APAGADO, una);
         }
         else Escribir(hdc, Textos.T("est_sin_rango"), X(3) + pad, y + 40, w - pad * 2, 30, 20, 600, APAGADO, una | DT_END_ELLIPSIS);
@@ -512,6 +520,18 @@ internal static partial class PanelCartas
         int Y(double pos) => gy + (int)Math.Round((techo - pos) * gh / (double)(techo - suelo));
         string ClaseDe(int pos) => pos >= 120 ? "Mythic" : new[] { "Bronze", "Silver", "Gold", "Platinum", "Diamond" }[Math.Clamp(pos / 24, 0, 4)];
         int NivelDe(int pos) => 4 - (pos % 24) / 6;
+        // MÍTICO CON SU PUESTO (1.22.3; el usuario, 2026-10-09: «al llegar a mítico la
+        // curva se queda plana; unos escalones de 100, de 1000 a 1»). La web manda
+        // la altura ya hecha (lib/escaleraArena.ts, posicionMitica): de 120 a 126
+        // es mítico sin puesto o por debajo del 1000, y encima, una franja de seis
+        // por cada cien puestos, del 1000-901 al 100-1.
+        const int FRANJA_MITICA = 126;
+        string RotuloFranja(int b)
+        {
+            if (b < FRANJA_MITICA) return NombreNivel(ClaseDe(b), NivelDe(b));
+            var mejor = 1000 - 100 * ((b - FRANJA_MITICA) / 6);
+            return Textos.T("est_puesto_franja", Math.Max(1, mejor - 99), mejor);
+        }
         var elegido = NombreElegido(e);
 
         // Las insignias: donde se SUBE de nivel, encima de ese punto; si chocan, gana la de después.
@@ -540,7 +560,7 @@ internal static partial class PanelCartas
                 var y1 = Y(b + 6); var y2 = Y(b);
                 GdipFillPolygonI(g, br, [new PuntoG { X = gx, Y = y1 }, new PuntoG { X = gx + gw, Y = y1 }, new PuntoG { X = gx + gw, Y = y2 }, new PuntoG { X = gx, Y = y2 }], 4, 0);
                 GdipDeleteBrush(br);
-                var raya = Pluma(b % 24 == 0 ? Argb(110, c) : Argb(255, 30, 41, 64), 1, false);
+                var raya = Pluma(b % 24 == 0 && b <= 120 ? Argb(110, c) : Argb(255, 30, 41, 64), 1, false);
                 GdipDrawLineI(g, raya, gx, y2, gx + gw, y2);
                 GdipDeletePen(raya);
             }
@@ -592,7 +612,7 @@ internal static partial class PanelCartas
             var clase = ClaseDe(b);
             var (r, gg, bb) = ColorClase(clase);
             var y1 = Y(b + 6); var y2 = Y(b);
-            Escribir(hdc, NombreNivel(clase, NivelDe(b)), bx + 12, Math.Min(y1, y2 - 16), anchoRotulos - 4, Math.Max(16, y2 - y1), 13, 600, Rgb(r * 8 / 10 + 40, gg * 8 / 10 + 40, bb * 8 / 10 + 40), DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+            Escribir(hdc, RotuloFranja(b), bx + 12, Math.Min(y1, y2 - 16), anchoRotulos - 4, Math.Max(16, y2 - y1), 13, 600, Rgb(r * 8 / 10 + 40, gg * 8 / 10 + 40, bb * 8 / 10 + 40), DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
         }
         var finFecha = int.MinValue;
         for (var i = 0; i < p.Length; i++)
@@ -822,7 +842,7 @@ internal static partial class PanelCartas
         {
             var i = BAJO_PELDANO_EST - bajoRaton;
             var q = e.Escalera[desdePeldano + i];
-            texto = $"{Fecha(q.Cuando).Corta} {q.Cuando:HH:mm} · {NombreNivel(q.Clase, q.Nivel)} · {(q.Gane ? "✓" : "✗")}" + (q.Mazo is { } m ? $" · {m}" : "");
+            texto = $"{Fecha(q.Cuando).Corta} {q.Cuando:HH:mm} · {NombreNivel(q.Clase, q.Nivel)}{(q.Puesto is { } pu ? " " + Textos.T("est_puesto", pu) : "")} · {(q.Gane ? "✓" : "✗")}" + (q.Mazo is { } m ? $" · {m}" : "");
             var r = rectPeldanosEst[i];
             (cx, cy) = ((r.Left + r.Right) / 2, r.Top + 10);
         }
