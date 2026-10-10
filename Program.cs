@@ -1229,7 +1229,9 @@ internal static class Program
             // El último consejo, para recuperarlo si se cerró (ver ultimoConsejo).
             if (Contexto.EnPartida && ultimoConsejo is { } uc) filas.Add((Columna.Accion.UltimoConsejo, "ultimoconsejo", Textos.T("col_ultimo_consejo", uc.Turno)));
             if (Contexto.EnPartida && mazoRivalPartida is { } mr) filas.Add((Columna.Accion.MazoRival, "mazorival", Textos.T("col_mazo_rival", mr.Nombre)));
-            if (Contexto.Mazo is { } mazo) filas.Add((Columna.Accion.Mejorar, mazo, Textos.T("col_mejorar", mazo)));
+            // «Mejorar el mazo», fuera de partida: jugando no hace falta (el usuario,
+            // 2026-10-10), y su sitio lo ocupa la biblioteca.
+            if (Contexto.Mazo is { } mazo && !Contexto.EnPartida) filas.Add((Columna.Accion.Mejorar, mazo, Textos.T("col_mejorar", mazo)));
             if (Contexto.Carta is { } grp)
             {
                 /**
@@ -2448,9 +2450,35 @@ internal static class Program
                     var piezasCombo = (a.Combo.Piezas ?? []).OrderByDescending(p => p.EnMesa).ToArray();
                     var minis = await Task.WhenAll(piezasCombo.Take(4).Select(p => BajarImagen(p.Imagen)));
                     var piezas = string.Join(" + ", piezasCombo.Select(p => p.Nombre));
-                    Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"),
-                        Textos.T(a.Lista ? "sup_amenaza" : "sup_amenaza_casi", piezas, a.Combo.Resultado ?? ""), 8,
-                        minis.Where(f => f is not null).Select(f => f!).ToArray(), fijo: true);
+                    var texto = Textos.T(a.Lista ? "sup_amenaza" : "sup_amenaza_casi", piezas, a.Combo.Resultado ?? "");
+                    var imagenes = minis.Where(f => f is not null).Select(f => f!).ToArray();
+                    // Su propia ranura: así se puede completar sin tocar a los demás avisos.
+                    var ranura = "combo:" + (a.Combo.Id ?? "");
+                    // Debajo, QUÉ HACE el combo en una frase (la web la resume de
+                    // Commander Spellbook; el usuario, 2026-10-10).
+                    void Avisar(string? resumen) => Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"),
+                        texto + (resumen is { Length: > 0 } ? "\n" + resumen : ""), 8, imagenes, fijo: true, ranura: ranura);
+                    Avisar(a.Combo.Resumen);
+                    // EL AVISO NO ESPERA A LA FRASE (el usuario, 2026-10-10: «primero que
+                    // avise rápido del combo y de mientras que se pida la explicación»). Si
+                    // no venía, se pide aparte y se añade al aviso en cuanto llega, si
+                    // sigue abierto. Si no llega nunca, no ha hecho esperar a nadie.
+                    if (a.Combo.Resumen is not { Length: > 0 } && a.Combo.Id is { } idCombo)
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var rr = await http.GetFromJsonAsync<RespuestaResumenCombo>(
+                                    $"{PuertaDevice}/combo-resumen?id={Uri.EscapeDataString(idCombo)}&idioma={Textos.Idioma}", JsonOpciones);
+                                if (rr?.Resumen is not { Length: > 0 } frase) return;
+                                // También para su panel (PanelAmenaza), si lo abren después.
+                                lock (Amenazas)
+                                    for (var k = 0; k < Amenazas.Count; k++)
+                                        if (Amenazas[k].Item1.Id == idCombo) Amenazas[k] = (Amenazas[k].Item1 with { Resumen = frase }, Amenazas[k].Item2);
+                                if (Superposicion.RanuraAbierta(ranura)) Avisar(frase);
+                            }
+                            catch { /* sin frase: el aviso ya salió */ }
+                        });
                 }
                 // Y LAS SINERGIAS entre lo que ha enseñado: una vez por regla.
                 SinergiaRivalPuente? avisarSin = null;
@@ -2487,9 +2515,10 @@ internal static class Program
         if (cartas.Length == 0) return false;
         var enMesa = string.Join(", ", piezas.Where(p => p.EnMesa).Select(p => p.Nombre));
         var faltan = string.Join(", ", piezas.Where(p => !p.EnMesa).Select(p => p.Nombre));
-        var rotulo = faltan.Length > 0
+        var rotulo = (faltan.Length > 0
             ? Textos.T("panel_mesa_falta", a.Combo.Resultado ?? "", enMesa, faltan)
-            : Textos.T("panel_mesa", a.Combo.Resultado ?? "", enMesa);
+            : Textos.T("panel_mesa", a.Combo.Resultado ?? "", enMesa))
+            + (a.Combo.Resumen is { Length: > 0 } rs ? " " + rs : "");
         PanelCartas.AlAbrir = AbrirDelPanel;
         PanelCartas.Mostrar(Textos.T(a.Lista ? "col_amenaza" : "col_amenaza_casi", a.Combo.Resultado ?? ""),
             [new PanelCartas.Seccion(rotulo, a.Combo.Url, cartas)]);
@@ -3879,11 +3908,16 @@ internal sealed record CartaSinergiaRival(
     [property: JsonPropertyName("papel")] string? Papel,
     [property: JsonPropertyName("enMesa")] bool EnMesa);
 
+/// <summary>Lo que devuelve /api/puente/combo-resumen: qué hace el combo, en una frase, o null.</summary>
+internal sealed record RespuestaResumenCombo([property: JsonPropertyName("resumen")] string? Resumen);
+
 internal sealed record AmenazaPuente(
     [property: JsonPropertyName("id")] string? Id,
     [property: JsonPropertyName("resultado")] string? Resultado,
     [property: JsonPropertyName("url")] string? Url,
-    [property: JsonPropertyName("piezas")] PiezaAmenaza[]? Piezas);
+    [property: JsonPropertyName("piezas")] PiezaAmenaza[]? Piezas,
+    // Qué hace el combo, en una frase y en tu idioma (desde la web del 2026-10-10).
+    [property: JsonPropertyName("resumen")] string? Resumen = null);
 
 internal sealed record PiezaAmenaza(
     [property: JsonPropertyName("nombre")] string? Nombre,

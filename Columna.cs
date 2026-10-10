@@ -476,6 +476,9 @@ internal static class Columna
         var arriba = new List<Fila>();
         // La mano ofrecida, lo primero: es lo único que hay que decidir YA.
         foreach (var c in contexto.Where(c => c.Accion == Accion.Mano)) arriba.Add(new Fila(c.Accion, GlifoDe(c.Accion), "", c.Dato, c.Etiqueta));
+        // Y el último consejo, justo después: antes que la biblioteca (el usuario,
+        // 2026-10-10: «que lo del último consejo salga en primera opción»).
+        foreach (var c in contexto.Where(c => c.Accion == Accion.UltimoConsejo)) arriba.Add(new Fila(c.Accion, GlifoDe(c.Accion), "", c.Dato, c.Etiqueta));
         var rast = rastreo;
         if (rast.Length > 0)
         {
@@ -495,7 +498,7 @@ internal static class Columna
                 if (despues > 0) arriba.Add(new Fila(Accion.MasCartas, "", "", "rast-abajo", Textos.T("col_cartas_despues", despues), Nivel: 1));
             }
         }
-        foreach (var c in contexto.Where(c => c.Accion != Accion.Mano))
+        foreach (var c in contexto.Where(c => c.Accion is not (Accion.Mano or Accion.UltimoConsejo)))
         {
             arriba.Add(new Fila(c.Accion, GlifoDe(c.Accion), "", c.Dato, c.Etiqueta));
             if (c.Accion != Accion.Mejorar || !desplegado) continue;

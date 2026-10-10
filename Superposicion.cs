@@ -379,6 +379,16 @@ internal static class Superposicion
     /// <summary>Quita el aviso informativo que haya («subiendo…»), si hay alguno. Desde cualquier hilo.</summary>
     public static void Ocultar() => CerrarRanura(RANURA_INFO);
 
+    /// <summary>
+    /// Si sigue en pantalla algún aviso de esa ranura. Para completar uno que ya
+    /// salió (la frase de un combo que llega después) sin volver a sacar el que
+    /// la persona ya cerró con su X.
+    /// </summary>
+    public static bool RanuraAbierta(string ranura)
+    {
+        lock (pila) return pila.Any(a => a.Ranura == ranura);
+    }
+
     // ── LA PILA ────────────────────────────────────────────────────────────
 
     private const string RANURA_CONSEJO = "consejo", RANURA_INFO = "info";
