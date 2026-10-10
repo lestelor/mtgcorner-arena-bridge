@@ -1187,7 +1187,10 @@ internal static class Program
                         else
                         {
                             Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_version_nueva", novedad.Numero, VersionPropia), 8);
-                            Abrir(PaginaDescarga);
+                            // Con la versión encontrada: la página puede ir unos minutos
+                            // por detrás de GitHub y decir «ya la tienes» (el usuario,
+                            // 2026-10-10: «tengo que hacer reload para que salga descargar»).
+                            Abrir($"{PaginaDescarga}?v={Uri.EscapeDataString(novedad.Numero)}");
                         }
                     }
                     finally { Columna.EnCurso(null); }
@@ -1231,7 +1234,7 @@ internal static class Program
             if (Contexto.EnPartida && mazoRivalPartida is { } mr) filas.Add((Columna.Accion.MazoRival, "mazorival", Textos.T("col_mazo_rival", mr.Nombre)));
             // «Mejorar el mazo», fuera de partida: jugando no hace falta (el usuario,
             // 2026-10-10), y su sitio lo ocupa la biblioteca.
-            if (Contexto.Mazo is { } mazo && !Contexto.EnPartida) filas.Add((Columna.Accion.Mejorar, mazo, Textos.T("col_mejorar", mazo)));
+            if ((Contexto.Mazo ?? mazoRecordado?.Nombre) is { } mazo && !Contexto.EnPartida) filas.Add((Columna.Accion.Mejorar, mazo, Textos.T("col_mejorar", mazo)));
             if (Contexto.Carta is { } grp)
             {
                 /**
@@ -1367,9 +1370,16 @@ internal static class Program
         refrescarColumna = ActualizarColumna;
         // Un clic en el juego cierra la ventana de cartas, estadísticas o resumen que haya.
         Columna.AlPulsarFuera = PanelCartas.CerrarPorClicFuera;
+        // El último mazo de construido, para que «Mejorar mazo» salga desde el
+        // principio (ver MazoRecordado); se guarda el nuevo cada vez que Arena lo diga.
+        mazoRecordado = LeerMazoRecordado();
+        Contexto.Cambio += RecordarMazo;
         Contexto.Cambio += ActualizarColumna;
         // Las cartas del mazo de ahora, para el desplegable «Mejorar» (ver CargarCartasMazo).
         Contexto.Cambio += () => _ = CargarCartasMazo(http);
+        // Y ya, por si Arena tarda en decir nada: la fila y su desplegable con el recordado.
+        ActualizarColumna();
+        _ = CargarCartasMazo(http);
         // Y con el ratón encima de una de ellas, sus similares, combos y sinergias,
         // para que al pulsarla la ventana salga ya llena.
         Columna.AlSenalarCarta = grp => _ = Precalentar(http, grp);
@@ -1390,6 +1400,8 @@ internal static class Program
         Contexto.PartidaAcabada += () => { mazoRivalAvisado = null; mazoRivalPorLista = false; mazoRivalPartida = null; ultimoConsejo = null; refrescarColumna?.Invoke(); };
         // Y su ficha a la web, para que el plan del mazo aprenda de la partida.
         Contexto.PartidaAcabada += () => _ = MandarFicha(http);
+        // Los avisos de combos y sinergias del rival, fuera: ya no avisan de nada.
+        Contexto.PartidaAcabada += Superposicion.CerrarAvisosDePartida;
         // Y al empezar el del rival, lo que puedas jugar a destiempo (instantáneos, destello).
         Contexto.TurnoDelRival += mesa => { if (consejoActivo) _ = ConsejoTurno(http, mesa, rival: true); };
         // Empieza tu primer turno: la fila de la mano ya no hace falta.
@@ -1750,6 +1762,45 @@ internal static class Program
     /// </summary>
     /// <summary>La lista de cartas que ya tiene la columna, para no volver a pedirla con cada cambio del juego.</summary>
     private static string firmaCartasMazo = "";
+
+    /// <summary>
+    /// EL ÚLTIMO MAZO DE CONSTRUIDO, RECORDADO ENTRE SESIONES (el usuario,
+    /// 2026-10-10: «la primera vez que entra no sale "Mejorar mazo"; ¿podría
+    /// recordar el último elegido?»). Arena sólo dice qué mazo llevas cuando lo
+    /// eliges o lo guardas, así que tras abrir el juego la fila no salía hasta
+    /// entonces. Ahora sale con el último, y en cuanto Arena diga otro, manda ése.
+    ///
+    /// SÓLO PARA ESA FILA Y SU DESPLEGABLE. No entra en Contexto: el consejo, el
+    /// plan del mazo y el rastreador siguen usando sólo lo que dice Arena. Si no,
+    /// tras reiniciar y jugar un draft, el consejo creería que juegas tu mazo de
+    /// siempre (y entrenaría su plan con el draft). Los de limitado no se recuerdan.
+    /// </summary>
+    internal sealed record MazoRecordado(string Nombre, CartaRecordada[] Cartas);
+    internal sealed record CartaRecordada(int Grp, int N);
+    private static MazoRecordado? mazoRecordado;
+    private static string FicheroMazoRecordado => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MtgCornerArenaBridge", "ultimo-mazo.json");
+
+    private static MazoRecordado? LeerMazoRecordado()
+    {
+        try { return JsonSerializer.Deserialize<MazoRecordado>(File.ReadAllText(FicheroMazoRecordado), JsonOpciones) is { Nombre.Length: > 0, Cartas.Length: > 0 } m ? m : null; }
+        catch { return null; }
+    }
+
+    /// <summary>Con cada cambio del contexto: si Arena dice un mazo de construido distinto del recordado, se guarda.</summary>
+    private static void RecordarMazo()
+    {
+        if (Contexto.Mazo is not { Length: > 0 } nombre || Contexto.CartasMazo.Length == 0) return;
+        if (Contexto.Edicion is not null || Contexto.Formato is { } f && (f.StartsWith("draft", StringComparison.OrdinalIgnoreCase) || f.StartsWith("sealed", StringComparison.OrdinalIgnoreCase))) return;
+        var cartas = Contexto.CartasMazo.Select(c => new CartaRecordada(c.Grp, c.N)).ToArray();
+        if (mazoRecordado is { } m && m.Nombre == nombre && m.Cartas.SequenceEqual(cartas)) return;
+        mazoRecordado = new MazoRecordado(nombre, cartas);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(FicheroMazoRecordado)!);
+            File.WriteAllText(FicheroMazoRecordado, JsonSerializer.Serialize(mazoRecordado, JsonOpciones));
+        }
+        catch { /* sin guardar: vale para esta sesión */ }
+    }
     /// <summary>Las cartas del mazo de ahora con nombre, coste e ilustración: las usan el rastreador y el consejo de mulligan.</summary>
     private static List<Columna.CartaMazo> cartasDelMazoActual = [];
 
@@ -2254,7 +2305,10 @@ internal static class Program
     /// </summary>
     private static async Task CargarCartasMazo(HttpClient http)
     {
-        var cartas = Contexto.CartasMazo;
+        // Sin mazo de Arena todavía, las del recordado: sólo para el desplegable,
+        // nunca para el rastreador ni el consejo (ver MazoRecordado).
+        var recordado = Contexto.Mazo is null && mazoRecordado is not null;
+        var cartas = recordado ? mazoRecordado!.Cartas.Select(c => (c.Grp, c.N)).ToArray() : Contexto.CartasMazo;
         var firma = string.Join(",", cartas.Select(c => $"{c.Grp}x{c.N}"));
         if (firma == firmaCartasMazo) return;
         firmaCartasMazo = firma;
@@ -2274,9 +2328,12 @@ internal static class Program
             // Si mientras bajaba se cambió de mazo, esto ya no es lo de ahora.
             if (firma == firmaCartasMazo)
             {
-                cartasDelMazoActual = lista;
                 Columna.CartasDelMazo(lista);
-                ActualizarRastreador();
+                if (!recordado)
+                {
+                    cartasDelMazoActual = lista;
+                    ActualizarRastreador();
+                }
             }
         }
         catch { firmaCartasMazo = ""; }
@@ -2494,8 +2551,32 @@ internal static class Program
                     var cartasSin = (g2.Cartas ?? []).OrderByDescending(c => c.EnMesa).Take(4).ToArray();
                     var minis = await Task.WhenAll(cartasSin.Select(c => BajarImagen(c.Imagen)));
                     var cartas = string.Join(" + ", cartasSin.Select(c => c.Nombre));
-                    Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_sinergia_rival", NombreRegla(g2.Regla), cartas), 8,
-                        minis.Where(f => f is not null).Select(f => f!).ToArray(), fijo: true);
+                    var textoSin = Textos.T("sup_sinergia_rival", NombreRegla(g2.Regla), cartas);
+                    var imagenesSin = minis.Where(f => f is not null).Select(f => f!).ToArray();
+                    var ranuraSin = "sinergia:" + (g2.Regla ?? "");
+                    // Debajo, CÓMO SE ALIMENTAN sus cartas en una frase, como en los combos
+                    // (el usuario, 2026-10-10: «no me ha salido el comentario de cómo
+                    // funciona la sinergia»). Sin esperarla: si no venía, se pide aparte.
+                    void AvisarSin(string? resumen) => Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"),
+                        textoSin + (resumen is { Length: > 0 } ? "\n" + resumen : ""), 8, imagenesSin, fijo: true, ranura: ranuraSin);
+                    AvisarSin(g2.Resumen);
+                    if (g2.Resumen is not { Length: > 0 } && g2.Regla is { } reglaSin && g2.Cartas is { Length: >= 2 } todas)
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                // Las mismas cartas que trajo el aviso (todas, no sólo las de la miniatura): es la clave de la frase.
+                                var param = string.Join("|", todas.Select(c => $"{c.Nombre}~{c.Papel}"));
+                                var rr = await http.GetFromJsonAsync<RespuestaResumenCombo>(
+                                    $"{PuertaDevice}/sinergia-resumen?regla={Uri.EscapeDataString(reglaSin)}&cartas={Uri.EscapeDataString(param)}&idioma={Textos.Idioma}", JsonOpciones);
+                                if (rr?.Resumen is not { Length: > 0 } frase) return;
+                                lock (Amenazas)
+                                    for (var k = 0; k < SinergiasRival.Count; k++)
+                                        if (SinergiasRival[k].Regla == reglaSin) SinergiasRival[k] = SinergiasRival[k] with { Resumen = frase };
+                                if (Superposicion.RanuraAbierta(ranuraSin)) AvisarSin(frase);
+                            }
+                            catch { /* sin frase: el aviso ya salió */ }
+                        });
                 }
                 alCambiar();
             }
@@ -2540,6 +2621,8 @@ internal static class Program
             if (suyas.Length > 0) secciones.Add(new PanelCartas.Seccion(Textos.T(papel == "da" ? "panel_rival_dan" : "panel_rival_aprovechan", NombreRegla(g.Regla)), null, suyas));
         }
         if (secciones.Count == 0) return false;
+        // Cómo se alimentan, si ya se sabe: en el rótulo de la primera sección.
+        if (g.Resumen is { Length: > 0 } rs) secciones[0] = secciones[0] with { Rotulo = secciones[0].Rotulo + " " + rs };
         PanelCartas.AlAbrir = AbrirDelPanel;
         PanelCartas.Mostrar(Textos.T("col_sinergia_rival", NombreRegla(g.Regla)), secciones);
         return true;
@@ -3898,7 +3981,9 @@ internal sealed record RespuestaAmenazas(
 /// <summary>Una sinergia entre cartas que el rival ha enseñado: la regla y sus cartas, con el papel de cada una.</summary>
 internal sealed record SinergiaRivalPuente(
     [property: JsonPropertyName("regla")] string? Regla,
-    [property: JsonPropertyName("cartas")] CartaSinergiaRival[]? Cartas);
+    [property: JsonPropertyName("cartas")] CartaSinergiaRival[]? Cartas,
+    // Cómo se alimentan sus cartas, en una frase y en tu idioma (desde la web del 2026-10-10).
+    [property: JsonPropertyName("resumen")] string? Resumen = null);
 
 internal sealed record CartaSinergiaRival(
     [property: JsonPropertyName("nombre")] string? Nombre,

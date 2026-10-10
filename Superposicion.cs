@@ -389,6 +389,25 @@ internal static class Superposicion
         lock (pila) return pila.Any(a => a.Ranura == ranura);
     }
 
+    /// <summary>
+    /// Cierra los avisos de la partida —combos y sinergias del rival, en sus
+    /// ranuras «combo:…» y «sinergia:…»— al acabar ésta. Son fijos (se quedan
+    /// hasta su X) para que no se pierdan mientras se juega, pero acabada la
+    /// partida ya no avisan de nada y tapaban la pantalla de resultados (el
+    /// usuario, 2026-10-10).
+    /// </summary>
+    public static void CerrarAvisosDePartida()
+    {
+        List<IntPtr> cerrar;
+        lock (pila)
+        {
+            var fuera = pila.Where(a => a.Ranura is { } r && (r.StartsWith("combo:", StringComparison.Ordinal) || r.StartsWith("sinergia:", StringComparison.Ordinal))).ToList();
+            foreach (var a in fuera) pila.Remove(a);
+            cerrar = fuera.Select(a => a.Ventana).Where(v => v != IntPtr.Zero).ToList();
+        }
+        foreach (var v in cerrar) PostMessage(v, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+    }
+
     // ── LA PILA ────────────────────────────────────────────────────────────
 
     private const string RANURA_CONSEJO = "consejo", RANURA_INFO = "info";
