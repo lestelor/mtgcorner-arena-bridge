@@ -1630,6 +1630,57 @@ internal static class Textos
             "The plan the coach follows with this deck, written by the AI and revised every few games. On the website you can read it, see what the last revision changed and write your own.", "El plan que sigue el entrenador con este mazo, escrito por la IA y revisado cada pocas partidas. En la web puedes leerlo, ver qué cambió la última revisión y escribir el tuyo.", "Der Plan, dem der Trainer mit diesem Deck folgt, von der KI geschrieben und alle paar Partien überarbeitet. Auf der Website kannst du ihn lesen, sehen, was die letzte Überarbeitung geändert hat, und deinen eigenen schreiben.", "Le plan que suit le coach avec ce deck, écrit par l'IA et revu toutes les quelques parties. Sur le site, vous pouvez le lire, voir ce que la dernière révision a changé et écrire le vôtre.",
             "O plano que o treinador segue com este baralho, escrito pela IA e revisto a cada poucas partidas. No site pode lê-lo, ver o que a última revisão mudou e escrever o seu.", "Il piano che l'allenatore segue con questo mazzo, scritto dall'IA e rivisto ogni poche partite. Sul sito puoi leggerlo, vedere cosa ha cambiato l'ultima revisione e scrivere il tuo.", "このデッキでコーチが従うプラン。AIが書き、数試合ごとに見直します。サイトで読んだり、前回の見直しの変更点を見たり、自分のプランを書いたりできます。", "教练使用这副套牌时遵循的计划，由AI编写，每隔几局修订一次。你可以在网站上阅读它、查看上次修订改了什么，并写下你自己的计划。",
         ],
+        // El panel del plan del entrenador (1.22.7).
+        ["plan_titulo"] =
+        [
+            "Coach's plan: {0}", "Plan del entrenador: {0}", "Plan des Trainers: {0}", "Plan du coach : {0}",
+            "Plano do treinador: {0}", "Piano dell'allenatore: {0}", "コーチのプラン：{0}", "教练计划：{0}",
+        ],
+        ["plan_de_ia"] =
+        [
+            "The plan (written by the AI, revised with your games)", "El plan (lo escribe la IA y lo revisa con tus partidas)", "Der Plan (von der KI geschrieben, mit deinen Partien überarbeitet)", "Le plan (écrit par l'IA, revu avec vos parties)",
+            "O plano (escrito pela IA, revisto com as suas partidas)", "Il piano (scritto dall'IA, rivisto con le tue partite)", "プラン（AIが作成し、あなたの試合で見直し）", "计划（由AI编写，并根据你的对局修订）",
+        ],
+        ["plan_tuyo"] =
+        [
+            "The plan (written by you)", "El plan (escrito por ti)", "Der Plan (von dir geschrieben)", "Le plan (écrit par vous)",
+            "O plano (escrito por si)", "Il piano (scritto da te)", "プラン（あなたが作成）", "计划（由你编写）",
+        ],
+        ["plan_cambios"] =
+        [
+            "What the last revision changed ({0})", "Qué cambió la última revisión ({0})", "Was die letzte Überarbeitung geändert hat ({0})", "Ce que la dernière révision a changé ({0})",
+            "O que a última revisão mudou ({0})", "Cosa ha cambiato l'ultima revisione ({0})", "前回の見直しでの変更点（{0}）", "上次修订的改动（{0}）",
+        ],
+        ["plan_partidas_titulo"] =
+        [
+            "Games it has learned from", "Partidas de las que ha aprendido", "Partien, aus denen er gelernt hat", "Parties dont il a appris",
+            "Partidas com que aprendeu", "Partite da cui ha imparato", "学習に使った試合", "已学习的对局",
+        ],
+        ["plan_partidas"] =
+        [
+            "{0} games, {1} won.", "{0} partidas, {1} ganadas.", "{0} Partien, {1} gewonnen.", "{0} parties, {1} gagnées.",
+            "{0} partidas, {1} ganhas.", "{0} partite, {1} vinte.", "{0}試合、{1}勝。", "{0} 局，赢 {1} 局。",
+        ],
+        ["plan_contra"] =
+        [
+            "Against {0}", "Contra {0}", "Gegen {0}", "Contre {0}",
+            "Contra {0}", "Contro {0}", "{0} 戦", "对阵 {0}",
+        ],
+        ["plan_editar"] =
+        [
+            "Edit the plan on the website", "Editar el plan en la web", "Plan auf der Website bearbeiten", "Modifier le plan sur le site",
+            "Editar o plano no site", "Modifica il piano sul sito", "サイトでプランを編集", "在网站上编辑计划",
+        ],
+        ["plan_ninguno"] =
+        [
+            "This deck has no plan yet: the AI writes it the first time you play the deck with the turn advice on.", "Este mazo aún no tiene plan: la IA lo escribe la primera vez que juegas el mazo con el consejo por turno encendido.", "Dieses Deck hat noch keinen Plan: Die KI schreibt ihn, wenn du das Deck zum ersten Mal mit eingeschaltetem Zugtipp spielst.", "Ce deck n'a pas encore de plan : l'IA l'écrit la première fois que vous jouez le deck avec le conseil par tour activé.",
+            "Este baralho ainda não tem plano: a IA escreve-o na primeira vez que joga o baralho com o conselho por turno ligado.", "Questo mazzo non ha ancora un piano: l'IA lo scrive la prima volta che giochi il mazzo con il consiglio per turno attivo.", "このデッキにはまだプランがありません。ターンごとの助言をオンにしてこのデッキを初めて使うと、AIが作成します。", "这副套牌还没有计划：开启每回合建议后第一次使用这副套牌时，AI会编写它。",
+        ],
+        ["plan_sin_red"] =
+        [
+            "Couldn't load the plan right now. Try again in a moment, or open it on the website.", "No se ha podido cargar el plan ahora. Vuelve a probar en un momento, o ábrelo en la web.", "Der Plan konnte gerade nicht geladen werden. Versuch es gleich noch einmal oder öffne ihn auf der Website.", "Impossible de charger le plan pour l'instant. Réessayez dans un moment ou ouvrez-le sur le site.",
+            "Não foi possível carregar o plano agora. Tente de novo daqui a pouco, ou abra-o no site.", "Non è stato possibile caricare il piano ora. Riprova tra poco, o aprilo sul sito.", "今はプランを読み込めませんでした。少ししてからもう一度試すか、サイトで開いてください。", "暂时无法加载计划。请稍后再试，或在网站上打开。",
+        ],
         ["col_cartas_antes"] =
         [
             "{0} above", "{0} más arriba", "{0} weiter oben", "{0} plus haut",

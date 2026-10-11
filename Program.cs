@@ -1114,10 +1114,16 @@ internal static class Program
                 case Columna.Accion.Creador:
                     if (dato is not null) Abrir($"{Sitio}/api/puente/mazo?nombre={Uri.EscapeDataString(dato)}&idioma={Textos.Idioma}");
                     break;
-                // El plan del entrenador de ese mazo: la web lo abre en la colección,
-                // donde se ve, se edita y se ven las revisiones (ver PlanEntrenador).
+                // El plan del entrenador de ese mazo, AQUÍ, en el panel (el usuario,
+                // 2026-10-11: «la idea es que en el exe se viese el plan»). Para
+                // editarlo, el enlace del final lleva a la web.
                 case Columna.Accion.PlanMazo:
-                    if (dato is not null) Abrir($"{Sitio}/api/puente/mazo?nombre={Uri.EscapeDataString(dato)}&idioma={Textos.Idioma}&ver=plan");
+                    if (dato is not null)
+                    {
+                        Columna.EnCurso(dato);
+                        try { await PanelPlanMazo(http, dato); }
+                        finally { Columna.EnCurso(null); }
+                    }
                     break;
                 // SIMILARES, COMBOS Y SINERGIAS: la misma ventana, cada fila en su
                 // pestaña (ver PanelRelacionadas.cs). Sale en seguida y lo que
@@ -2620,6 +2626,41 @@ internal static class Program
         return true;
     }
 
+    /// <summary>
+    /// EL PLAN DEL ENTRENADOR DE UN MAZO, en el panel de texto: el plan, qué
+    /// cambió la última revisión, cuántas partidas lleva y el plan contra cada
+    /// rival. Lo escribe la IA en inglés y así se enseña (es lo que lee el
+    /// consejo). Se edita en la web: el enlace del final.
+    /// </summary>
+    private static async Task PanelPlanMazo(HttpClient http, string mazo)
+    {
+        var editar = new PanelCartas.Enlace(Textos.T("plan_editar"), $"/api/puente/mazo?nombre={Uri.EscapeDataString(mazo)}&idioma={Textos.Idioma}&ver=plan");
+        PanelCartas.AlAbrir = AbrirDelPanel;
+        RespuestaPlanMazo? r = null;
+        try { r = await http.GetFromJsonAsync<RespuestaPlanMazo>($"{PuertaDevice}/plan?mazo={Uri.EscapeDataString(mazo)}", JsonOpciones); }
+        catch { /* sin red: se dice abajo */ }
+        if (r?.Plan is not { Length: > 0 } plan)
+        {
+            var nada = Textos.T(r is null ? "plan_sin_red" : "plan_ninguno");
+            PanelCartas.MostrarTexto(Textos.T("plan_titulo", mazo), [new PanelCartas.SeccionTexto(Textos.T("plan_titulo", mazo), [nada], false)], nada, [editar]);
+            return;
+        }
+        static string[] Lineas(string texto) => texto.Split('\n').Select(l => l.Trim().TrimStart('-', '•', ' ')).Where(l => l.Length > 0).ToArray();
+        var secciones = new List<PanelCartas.SeccionTexto>
+        {
+            new(Textos.T(r.Origen == "usuario" ? "plan_tuyo" : "plan_de_ia", mazo), Lineas(plan), true),
+        };
+        if (r.Cambios is { Length: > 0 } cambios)
+            secciones.Add(new(Textos.T("plan_cambios", r.RevisadoEn is { Length: >= 10 } f ? f[..10] : "—"), Lineas(cambios), true));
+        if (r.Partidas is { Partidas: > 0 } p)
+            secciones.Add(new(Textos.T("plan_partidas_titulo"), [Textos.T("plan_partidas", p.Partidas, p.Ganadas)], false));
+        foreach (var e in (r.Enfrentamientos ?? []).Take(6))
+            if (e.Rival is { Length: > 0 } rival && e.Plan is { Length: > 0 } pe)
+                secciones.Add(new(Textos.T("plan_contra", rival), Lineas(pe), true));
+        var plano = string.Join("\r\n\r\n", secciones.Select(s => s.Titulo + "\r\n" + string.Join("\r\n", s.Parrafos.Select(x => (s.Lista ? "- " : "") + x))));
+        PanelCartas.MostrarTexto(Textos.T("plan_titulo", mazo), secciones, plano, [editar]);
+    }
+
     /// <summary>El panel de una sinergia del rival: las cartas que dan y las que aprovechan, con lo que hay en mesa.</summary>
     private static async Task<bool> PanelSinergiaRival(int indice)
     {
@@ -4006,6 +4047,17 @@ internal sealed record CartaSinergiaRival(
     [property: JsonPropertyName("ruta")] string? Ruta,
     [property: JsonPropertyName("papel")] string? Papel,
     [property: JsonPropertyName("enMesa")] bool EnMesa);
+
+/// <summary>Lo que devuelve /api/mtga-device/plan: el plan del entrenador de un mazo, sus cambios, partidas y enfrentamientos.</summary>
+internal sealed record RespuestaPlanMazo(
+    [property: JsonPropertyName("plan")] string? Plan,
+    [property: JsonPropertyName("origen")] string? Origen,
+    [property: JsonPropertyName("cambios")] string? Cambios,
+    [property: JsonPropertyName("revisadoEn")] string? RevisadoEn,
+    [property: JsonPropertyName("partidas")] PartidasPlan? Partidas,
+    [property: JsonPropertyName("enfrentamientos")] EnfrentamientoPlan[]? Enfrentamientos);
+internal sealed record PartidasPlan([property: JsonPropertyName("partidas")] int Partidas, [property: JsonPropertyName("ganadas")] int Ganadas);
+internal sealed record EnfrentamientoPlan([property: JsonPropertyName("rival")] string? Rival, [property: JsonPropertyName("plan")] string? Plan);
 
 /// <summary>Lo que devuelve /api/puente/combo-resumen: qué hace el combo, en una frase, o null.</summary>
 internal sealed record RespuestaResumenCombo([property: JsonPropertyName("resumen")] string? Resumen);
