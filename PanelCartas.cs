@@ -914,7 +914,9 @@ internal static partial class PanelCartas
         if (rel is not null && Columna.EsquinaAbierta() is { } esquina)
         {
             var y = Math.Clamp(esquina.Y, r.Top + 12, Math.Max(r.Top + 12, r.Bottom - 12 - alto));
-            return (esquina.X + 14, y, ver);
+            // Y a lo ancho igual: con Arena en una ventana estrecha se salía por la derecha (2026-10-11).
+            var x = Math.Clamp(esquina.X + 14, r.Left + 12, Math.Max(r.Left + 12, r.Right - 12 - ANCHO_PANEL));
+            return (x, y, ver);
         }
         return (r.Left + (r.Right - r.Left - ANCHO_PANEL) / 2, r.Top + Math.Max(12, (r.Bottom - r.Top - alto) / 2), ver);
     }

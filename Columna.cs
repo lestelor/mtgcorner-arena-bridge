@@ -1409,6 +1409,9 @@ internal static class Columna
         GetWindowRect(ventana, out var rc);
         var x = rc.Right + 6;
         var y = rc.Top + ArribaDe(fila);
+        // Sin salirse de Arena por abajo: la de las últimas filas se iba fuera (2026-10-11).
+        var arena = VentanaDeArena();
+        if (arena != IntPtr.Zero && GetWindowRect(arena, out var ra) && ra.Bottom > ra.Top) y = Math.Max(ra.Top, Math.Min(y, ra.Bottom - 12 - alto));
         SetWindowPos(ayuda, HWND_TOPMOST, x, y, ANCHO_AYUDA, alto, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         InvalidateRect(ayuda, IntPtr.Zero, true);
     }

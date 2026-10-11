@@ -279,7 +279,13 @@ internal static class Superposicion
     /// <summary>La entrada: cuándo empezó y cuánto se ha movido la figura (adónde va lo dice la pila).</summary>
     [ThreadStatic] private static System.Diagnostics.Stopwatch? reloj;
     [ThreadStatic] private static int saltoFigura;
-    private const int DESLIZ = 70, MS_ENTRADA = 260, MS_BOTES = 1500;
+    /// <summary>
+    /// Cuánto se desliza al entrar: MENOS QUE EL MARGEN, para no asomar nunca
+    /// fuera de Arena. Eran 70 px, y con el margen de 28 cada aviso pasaba un
+    /// cuarto de segundo con 42 px fuera del juego: con otra pantalla a la
+    /// derecha se veían en ella (el usuario, 2026-10-11).
+    /// </summary>
+    private const int DESLIZ = MARGEN - 4, MS_ENTRADA = 260, MS_BOTES = 1500;
     /// <summary>
     /// LO QUE MIDE LA PARTE DE TEXTO: lo que pida el cuerpo, entre las dos
     /// líneas de siempre y unas ocho. Era fijo y el consejo de cada turno, que
@@ -410,22 +416,43 @@ internal static class Superposicion
             // Un consejo nuevo se lleva también las cuentas del anterior: debajo
             // del consejo de este turno no pueden quedar las del pasado.
             if (ranura == RANURA_CONSEJO) CerrarRanura(RANURA_CUENTAS);
-            // EL TURNO EN LA PILA SE COGE AQUÍ, en el hilo de quien llama, y no en
+            // SU SITIO EN LA PILA SE COGE AQUÍ, en el hilo de quien llama, y no en
             // el del aviso: el consejo y sus cuentas se piden seguidos, y si cada
             // hilo cogiera su número al arrancar, las cuentas podrían quedar ENCIMA.
-            long orden;
-            lock (pila) orden = ++ordenPila;
+            // Y SE APUNTA YA, antes de que arranque su hilo (el usuario, 2026-10-11:
+            // el aviso del mazo del rival salía desplazado a la derecha, fuera del
+            // juego). Antes se apuntaba al nacer: si otro de su ranura llegaba en
+            // ese rato (dos consejos casi juntos), o no lo veía y quedaban los dos,
+            // o lo quitaba de la pila sin poder cerrarlo, porque aún no tenía
+            // ventana; nacía huérfano y, sin sitio en la pila, se quedaba parado al
+            // principio de su entrada, a la derecha de su sitio y medio fuera.
+            // Ahora el que lo sustituye siempre lo encuentra, y su hilo, al ver que
+            // ya no está, no llega a enseñarlo (ver Correr).
+            var yo = new Apilado { Ranura = ranura, Importante = importante };
+            lock (pila) { yo.Orden = ++ordenPila; pila.Add(yo); }
             var ficheros = (imagenes ?? []).Where(f => !string.IsNullOrEmpty(f) && File.Exists(f)).Take(MAX_MINIS).ToArray();
             var ent = Entrenador?.Invoke();
             var figura = avatar ?? ent?.Figura;
             var conAvatar = figura is { Length: > 0 } && File.Exists(figura) ? figura : null;
             var quien = ent is { } e ? (e.Nombre, e.Color) : ("", (245, 158, 11));
-            var hilo = new Thread(() => { try { Correr(titulo, texto, segundos, ficheros, fijo, conAvatar, importante, ranura, quien, orden); } catch (Exception ex) { Console.Error.WriteLine($"[aviso] {ex.GetType().Name}: {ex.Message}"); } });
+            var hilo = new Thread(() =>
+            {
+                try { Correr(titulo, texto, segundos, ficheros, fijo, conAvatar, quien, yo); }
+                catch (Exception ex) { Console.Error.WriteLine($"[aviso] {ex.GetType().Name}: {ex.Message}"); Quitar(yo); }
+            });
             hilo.IsBackground = true;
-            hilo.Start();
+            try { hilo.Start(); }
+            catch { Quitar(yo); throw; }
             return hilo;
         }
         catch { return null; }
+    }
+
+    /// <summary>Un aviso que no llegó a salir: fuera de la pila, y los demás a su sitio.</summary>
+    private static void Quitar(Apilado a)
+    {
+        lock (pila) pila.Remove(a);
+        Recolocar();
     }
 
     /// <summary>Quita el aviso informativo que haya («subiendo…»), si hay alguno. Desde cualquier hilo.</summary>
@@ -521,7 +548,8 @@ internal static class Superposicion
         {
             var y = arriba;
             Apilado? anterior = null;
-            foreach (var a in pila.OrderBy(a => a.Importante ? 0 : 1).ThenBy(a => a.Orden))
+            // Los que aún están naciendo (sin medidas) no ocupan sitio todavía.
+            foreach (var a in pila.Where(a => a.Ancho > 0).OrderBy(a => a.Importante ? 0 : 1).ThenBy(a => a.Orden))
             {
                 // Dos bocadillos seguidos se separan con su propio margen; con un aviso sin figura, aire de por medio.
                 if (anterior is not null) y += anterior.ConFigura && a.ConFigura ? 0 : HUECO_PILA;
@@ -577,7 +605,7 @@ internal static class Superposicion
         lock (pila) return pila.FirstOrDefault(a => a.Ventana == ventana);
     }
 
-    private static void Correr(string titulo, string texto, int segundos, string[] ficheros, bool fijo, string? avatar, bool importante, string? ranura, (string Nombre, (int R, int G, int B) Color) quien, long orden)
+    private static void Correr(string titulo, string texto, int segundos, string[] ficheros, bool fijo, string? avatar, (string Nombre, (int R, int G, int B) Color) quien, Apilado yo)
     {
         // EN PÍXELES DE VERDAD. `GetWindowRect` devuelve píxeles físicos; sin
         // declararse consciente del DPI, Windows virtualiza las coordenadas y
@@ -626,20 +654,21 @@ internal static class Superposicion
         };
         if (RegisterClassEx(ref clase) == 0) { var err = Marshal.GetLastWin32Error(); if (err != 1410 /* ERROR_CLASS_ALREADY_EXISTS */) Console.Error.WriteLine($"[aviso] RegisterClassEx falló: error {err}"); }
 
-        // Su sitio en la pila: se apunta antes de crear la ventana para nacer ya
-        // donde le toca (y empujar a los de debajo si es un consejo).
+        // Sus medidas en la pila (donde ya está apuntado, ver MostrarSinEsperar):
+        // antes de crear la ventana, para nacer ya donde le toca (y empujar a los
+        // de debajo si es un consejo).
         var animada = avatar is not null;
         var extraMinis = ficheros.Length > 0 ? ALTO_MINI + AIRE_MINI : 0;
-        var yo = new Apilado
-        {
-            Ranura = ranura, Importante = importante, Ancho = ANCHO, Animando = animada, ConFigura = avatar is not null,
-            AltoPrimera = altoTextoPrimera + extraMinis, AltoSeguida = altoTextoSeguida + extraMinis,
-        };
         List<IntPtr> sobran;
         lock (pila)
         {
-            yo.Orden = orden;
-            pila.Add(yo);
+            // Lo quitaron mientras arrancaba (otro de su ranura, el fin de la partida): no sale.
+            if (!pila.Contains(yo)) return;
+            yo.Ancho = ANCHO;
+            yo.Animando = animada;
+            yo.ConFigura = avatar is not null;
+            yo.AltoPrimera = altoTextoPrimera + extraMinis;
+            yo.AltoSeguida = altoTextoSeguida + extraMinis;
             // Más de los que caben: fuera los más antiguos que no sean un consejo.
             var fuera = pila.Where(a => a != yo && !a.Importante).OrderBy(a => a.Orden).Take(Math.Max(0, pila.Count - MAX_PILA)).ToList();
             foreach (var a in fuera) pila.Remove(a);
@@ -665,7 +694,11 @@ internal static class Superposicion
             Recolocar();
             return;
         }
-        lock (pila) yo.Ventana = ventana;
+        // Y si lo quitaron mientras se creaba la ventana, se va sin llegar a verse:
+        // quien lo quitó no podía cerrarlo, aún no tenía ventana.
+        bool sigue;
+        lock (pila) { sigue = pila.Contains(yo); if (sigue) yo.Ventana = ventana; }
+        if (!sigue) { DestroyWindow(ventana); return; }
 
         // Esquinas redondeadas y un punto de transparencia, para que no parezca
         // un cuadro de diálogo de 1998 (o sólo el globo, si es un bocadillo de seguida).

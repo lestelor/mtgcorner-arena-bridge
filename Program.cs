@@ -580,6 +580,21 @@ internal static class Program
             await Task.Delay(20000);
             return 0;
         }
+        // --probar-carrera [ms]: dos consejos casi a la vez (2026-10-11), como dos
+        // respuestas de la web que llegan juntas: el segundo sustituye al primero,
+        // con sus cuentas (el mazo del rival), mientras aún nacen. Antes las cuentas
+        // nacían huérfanas, desplazadas a la derecha y medio fuera de Arena.
+        if (args.Length > 0 && args[0] == "--probar-carrera")
+        {
+            var msC = args.Length > 1 && int.TryParse(args[1], out var m) ? m : 30;
+            await PrecargarEntrenadores();
+            Superposicion.Entrenador = DatosEntrenador;
+            MostrarConsejo(Textos.T("consejo_titulo_rival", 2), "Keep mana open for your instant.", Textos.T("cons_rival_colores", "Izzet Prowess"));
+            await Task.Delay(msC);
+            MostrarConsejo(Textos.T("consejo_titulo", 3), "Play Plains, then cast Skyward Spider.", "");
+            await Task.Delay(15000);
+            return 0;
+        }
         // --probar-mesa [registro]: repasa un registro de Arena (por defecto el
         // Player-prev.log) y escribe la mesa de cada aviso de fase con lo que
         // manda el consejo: instancia, fuerza/resistencia de ahora, mareo, a qué
