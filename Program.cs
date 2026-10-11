@@ -1114,6 +1114,11 @@ internal static class Program
                 case Columna.Accion.Creador:
                     if (dato is not null) Abrir($"{Sitio}/api/puente/mazo?nombre={Uri.EscapeDataString(dato)}&idioma={Textos.Idioma}");
                     break;
+                // El plan del entrenador de ese mazo: la web lo abre en la colección,
+                // donde se ve, se edita y se ven las revisiones (ver PlanEntrenador).
+                case Columna.Accion.PlanMazo:
+                    if (dato is not null) Abrir($"{Sitio}/api/puente/mazo?nombre={Uri.EscapeDataString(dato)}&idioma={Textos.Idioma}&ver=plan");
+                    break;
                 // SIMILARES, COMBOS Y SINERGIAS: la misma ventana, cada fila en su
                 // pestaña (ver PanelRelacionadas.cs). Sale en seguida y lo que
                 // falte se carga dentro; si ni la ventana puede salir, la web.
@@ -2474,7 +2479,12 @@ internal static class Program
         if (clave == mesaRevisada) return;
         if (!Contexto.EnPartida || (Contexto.MesaRival.Length == 0 && Contexto.VistasRival.Length < 2))
         {
-            // Partida acabada o nada visto: se olvida todo para la siguiente.
+            // Partida acabada o nada visto: se olvida todo para la siguiente. Y
+            // la consulta que hubiera en marcha, fuera: si no, sus dos segundos
+            // de espera y la respuesta de la web caían después del final y su
+            // aviso salía con la partida ya acabada, cuando nadie lo iba a cerrar
+            // (el usuario, 2026-10-11, con un combo encima de la pantalla de inicio).
+            esperaAmenazas?.Cancel();
             mesaRevisada = clave;
             lock (Amenazas) { Amenazas.Clear(); Avisadas.Clear(); SinergiasRival.Clear(); AvisadasSinergias.Clear(); }
             alCambiar();
@@ -2490,6 +2500,8 @@ internal static class Program
                 mesaRevisada = clave;
                 var r = await http.GetFromJsonAsync<RespuestaAmenazas>(
                     $"{PuertaDevice}/amenazas?ids={Uri.EscapeDataString(mesa)}&vistas={Uri.EscapeDataString(vistas)}&idioma={Textos.Idioma}{Juego()}", JsonOpciones, cts.Token);
+                // Si la partida acabó mientras se preguntaba, ya no se avisa de nada.
+                if (!Contexto.EnPartida || cts.IsCancellationRequested) return;
                 var nuevas = new List<(AmenazaPuente, bool)>();
                 foreach (var c in r?.Listos ?? []) nuevas.Add((c, true));
                 foreach (var c in (r?.Casi ?? []).Take(2)) nuevas.Add((c, false));
@@ -2506,6 +2518,7 @@ internal static class Program
                     // Con las cartas del combo en miniatura, las de la mesa primero.
                     var piezasCombo = (a.Combo.Piezas ?? []).OrderByDescending(p => p.EnMesa).ToArray();
                     var minis = await Task.WhenAll(piezasCombo.Take(4).Select(p => BajarImagen(p.Imagen)));
+                    if (!Contexto.EnPartida || cts.IsCancellationRequested) return;
                     var piezas = string.Join(" + ", piezasCombo.Select(p => p.Nombre));
                     var texto = Textos.T(a.Lista ? "sup_amenaza" : "sup_amenaza_casi", piezas, a.Combo.Resultado ?? "");
                     var imagenes = minis.Where(f => f is not null).Select(f => f!).ToArray();
@@ -2550,6 +2563,7 @@ internal static class Program
                 {
                     var cartasSin = (g2.Cartas ?? []).OrderByDescending(c => c.EnMesa).Take(4).ToArray();
                     var minis = await Task.WhenAll(cartasSin.Select(c => BajarImagen(c.Imagen)));
+                    if (!Contexto.EnPartida || cts.IsCancellationRequested) return;
                     var cartas = string.Join(" + ", cartasSin.Select(c => c.Nombre));
                     var textoSin = Textos.T("sup_sinergia_rival", NombreRegla(g2.Regla), cartas);
                     var imagenesSin = minis.Where(f => f is not null).Select(f => f!).ToArray();

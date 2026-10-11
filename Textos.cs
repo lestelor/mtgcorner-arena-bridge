@@ -1619,6 +1619,17 @@ internal static class Textos
             "Open in the smart deck builder", "Abrir en el creador de mazos inteligente", "Im smarten Deckbauer öffnen", "Ouvrir dans le créateur de decks intelligent",
             "Abrir no criador de baralhos inteligente", "Apri nel creatore di mazzi intelligente", "スマートデッキビルダーで開く", "在智能组牌器中打开",
         ],
+        // La fila del plan del entrenador en el desplegable del mazo (1.22.6).
+        ["col_plan_mazo"] =
+        [
+            "See or edit the coach's plan", "Ver o editar el plan del entrenador", "Plan des Trainers ansehen oder bearbeiten", "Voir ou modifier le plan du coach",
+            "Ver ou editar o plano do treinador", "Vedi o modifica il piano dell'allenatore", "コーチのプランを見る・編集する", "查看或编辑教练的计划",
+        ],
+        ["ayuda_planmazo"] =
+        [
+            "The plan the coach follows with this deck, written by the AI and revised every few games. On the website you can read it, see what the last revision changed and write your own.", "El plan que sigue el entrenador con este mazo, escrito por la IA y revisado cada pocas partidas. En la web puedes leerlo, ver qué cambió la última revisión y escribir el tuyo.", "Der Plan, dem der Trainer mit diesem Deck folgt, von der KI geschrieben und alle paar Partien überarbeitet. Auf der Website kannst du ihn lesen, sehen, was die letzte Überarbeitung geändert hat, und deinen eigenen schreiben.", "Le plan que suit le coach avec ce deck, écrit par l'IA et revu toutes les quelques parties. Sur le site, vous pouvez le lire, voir ce que la dernière révision a changé et écrire le vôtre.",
+            "O plano que o treinador segue com este baralho, escrito pela IA e revisto a cada poucas partidas. No site pode lê-lo, ver o que a última revisão mudou e escrever o seu.", "Il piano che l'allenatore segue con questo mazzo, scritto dall'IA e rivisto ogni poche partite. Sul sito puoi leggerlo, vedere cosa ha cambiato l'ultima revisione e scrivere il tuo.", "このデッキでコーチが従うプラン。AIが書き、数試合ごとに見直します。サイトで読んだり、前回の見直しの変更点を見たり、自分のプランを書いたりできます。", "教练使用这副套牌时遵循的计划，由AI编写，每隔几局修订一次。你可以在网站上阅读它、查看上次修订改了什么，并写下你自己的计划。",
+        ],
         ["col_cartas_antes"] =
         [
             "{0} above", "{0} más arriba", "{0} weiter oben", "{0} plus haut",

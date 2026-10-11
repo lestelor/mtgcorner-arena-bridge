@@ -36,7 +36,7 @@ namespace MtgCornerArenaBridge;
 /// </summary>
 internal static class Columna
 {
-    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival, Inicio, Estadisticas, Creador, CartaMazo, MasCartas, Consejo, Biblioteca, Rastreo, Mano, MazoRival, UltimoConsejo, Programa }
+    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival, Inicio, Estadisticas, Creador, CartaMazo, MasCartas, Consejo, Biblioteca, Rastreo, Mano, MazoRival, UltimoConsejo, Programa, PlanMazo }
 
     /// <summary>
     /// Una fila. Las de contexto traen su etiqueta hecha y un dato (nombre del
@@ -503,6 +503,10 @@ internal static class Columna
             arriba.Add(new Fila(c.Accion, GlifoDe(c.Accion), "", c.Dato, c.Etiqueta));
             if (c.Accion != Accion.Mejorar || !desplegado) continue;
             arriba.Add(new Fila(Accion.Creador, "", "col_creador", c.Dato, Nivel: 1));
+            // El plan del entrenador de este mazo, para verlo y corregirlo en la web
+            // (el usuario, 2026-10-11: «en el desplegable de mejorar el mazo debería
+            // haber una opción para ver el prompt y en su caso editarlo»).
+            arriba.Add(new Fila(Accion.PlanMazo, "", "col_plan_mazo", c.Dato, Nivel: 1));
             var cartas = cartasMazo;
             // Lo que ocupa lo demás, para saber cuántas cartas caben.
             var resto = ALTO_CABECERA + AIRE_ABAJO + contexto.Length * ALTO_FILA + ALTO_CARTA * 3;
@@ -1248,10 +1252,11 @@ internal static class Columna
             switch (f.Accion)
             {
                 case Accion.Creador:
+                case Accion.PlanMazo:
                 case Accion.MasCartas:
                 {
                     if (sobre) { var pincel = CreateSolidBrush(Rgb(26, 34, 54)); var r = new RECT { Left = 4, Top = arriba + 1, Right = ancho - 4, Bottom = arriba + alto - 1 }; FillRect(hdc, ref r, pincel); DeleteObject(pincel); }
-                    var creador = f.Accion == Accion.Creador;
+                    var creador = f.Accion is Accion.Creador or Accion.PlanMazo;
                     SelectObject(hdc, fGlifoChico);
                     SetTextColor(hdc, creador ? Rgb(56, 189, 248) : Rgb(148, 163, 184));
                     var rG = new RECT { Left = 0, Top = arriba, Right = ANCHO_CERRADA, Bottom = arriba + alto };
