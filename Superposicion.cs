@@ -157,6 +157,14 @@ internal static class Superposicion
     [DllImport("gdiplus.dll")] private static extern int GdipSetInterpolationMode(IntPtr grafico, int modo);
     [DllImport("gdiplus.dll")] private static extern int GdipDrawImageRectI(IntPtr grafico, IntPtr imagen, int x, int y, int ancho, int alto);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateRoundRectRgn(int izq, int arriba, int der, int abajo, int anchoElipse, int altoElipse);
+    [DllImport("gdi32.dll")] private static extern int CombineRgn(IntPtr destino, IntPtr uno, IntPtr otro, int modo);
+    private const int RGN_OR = 2;
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateRectRgn(int izq, int arriba, int der, int abajo);
+    [DllImport("gdiplus.dll")] private static extern int GdipCreateBitmapFromScan0(int ancho, int alto, int paso, int formato, IntPtr datos, out IntPtr mapa);
+    [DllImport("gdiplus.dll")] private static extern int GdipGetImageGraphicsContext(IntPtr imagen, out IntPtr grafico);
+    [DllImport("gdiplus.dll")] private static extern int GdipBitmapGetPixel(IntPtr mapa, int x, int y, out uint color);
+    [DllImport("gdiplus.dll")] private static extern int GdipFillEllipseI(IntPtr g, IntPtr brocha, int x, int y, int ancho, int alto);
+    [DllImport("gdiplus.dll")] private static extern int GdipDrawEllipseI(IntPtr g, IntPtr pluma, int x, int y, int ancho, int alto);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateFont(int alto, int ancho, int escape, int orientacion, int grosor,
         uint cursiva, uint subrayado, uint tachado, uint juego, uint precision, uint recorte,
@@ -196,6 +204,35 @@ internal static class Superposicion
     /// aviso es más ancho y el texto empieza a su derecha.
     /// </summary>
     private const int ANCHO_AVATAR = 76;
+    /// <summary>
+    /// LA FIGURA Y EL NOMBRE, ARRIBA (el usuario, 2026-10-11: «el icono del
+    /// entrenador y el nombre deberían ir arriba y no a la izquierda del primer
+    /// comentario, para que no tapen partes importantes de la pantalla»). Antes
+    /// la figura ocupaba una columna de 76 px a la izquierda del globo y el
+    /// aviso medía 468 de ancho; ahora va en una franja encima, que sólo ocupa
+    /// lo que miden la figura y su nombre, y el aviso mide lo mismo que sin ella.
+    /// Lo de alrededor no se pinta y deja ver el juego (ver AplicarForma).
+    /// </summary>
+    ///
+    /// UNA FRANJA DE SU COLOR, NO UNA TARJETA (el usuario, 2026-10-11: «no me
+    /// acaba de convencer la tarjeta; más espacio para que la figura no quede
+    /// tan pegada, y quizás la franja azul de antes, arriba»; se probó también la
+    /// figura suelta sobre el globo y eligió ésta). El primer globo lleva arriba
+    /// una franja de su color con «EL PROFESOR DICE» en blanco, y la figura, de
+    /// pie sobre ella, asoma por encima del globo. Alrededor de la figura se ve el
+    /// juego: la ventana tiene su silueta (ver RegionFigura).
+    /// </summary>
+    private const int ANCHO_FIGURA = 62, ALTO_FIGURA = 72, BANDA = 36, SALTO_MAX = 5;
+    /// <summary>Lo que hay encima del globo con figura: lo que ella asoma, y su bote.</summary>
+    private static int ArribaConFigura => ALTO_FIGURA - BANDA + 2 + SALTO_MAX;
+    /// <summary>Cuánto baja el texto con figura, respecto a un bocadillo de seguida (título a 14): la franja y un margen.</summary>
+    private static int BajaConFigura => ArribaConFigura + BANDA + 2;
+    /// <summary>Lo que baja el globo: lo de encima, sólo en el primero con entrenador.</summary>
+    private static int Arriba => avatarFichero is not null && !DeSeguida ? ArribaConFigura : 0;
+    /// <summary>Dónde empieza el globo, su borde de arriba.</summary>
+    private static int ArribaGlobo => 8 + Arriba;
+    /// <summary>Lo que baja el texto: el título va a 14 + esto, el cuerpo a 42 + esto.</summary>
+    private static int BajaTexto => avatarFichero is null ? SUBE_SEGUIDA : DeSeguida ? 0 : BajaConFigura;
     /*
      * CADA AVISO, SU ESTADO (2026-10-04). Desde que se apilan pueden estar varios
      * en pantalla, y cada uno vive en su propio hilo con su propia ventana y su
@@ -220,6 +257,21 @@ internal static class Superposicion
     /// siempre. Lo pone Program.
     /// </summary>
     public static Func<(string? Figura, string Nombre, (int R, int G, int B) Color)>? Entrenador { get; set; }
+
+    /// <summary>
+    /// EL BOTÓN DE CAMBIAR DE ENTRENADOR (el usuario, 2026-10-11: «al lado del
+    /// icono del profesor, un pequeño botón circular para cambiar el avatar y el
+    /// tipo de consejo, con un hover que lo explique»; «abajo a la derecha,
+    /// dentro de la franja», «oscuro, como negro»). Pulsarlo pasa al siguiente
+    /// entrenador —su figura, su color y su tono— y el aviso se repinta con él;
+    /// al pasar por encima, la franja dice a cuál. Lo ponen Program: el cambio
+    /// (que además se recuerda) y el nombre del siguiente. Cambian TODOS los
+    /// avisos abiertos (WM_ENTRENADOR): los de debajo llevan su color en el
+    /// borde, y si se cierra el de arriba, el siguiente saca la figura.
+    /// </summary>
+    public static Action? CambiarEntrenador { get; set; }
+    public static Func<string>? SiguienteEntrenador { get; set; }
+    private const int BAJO_ENTRENADOR = -3, LADO_BOTON_ENTRENADOR = 22;
     [ThreadStatic] private static string? nombreEntrenador;
     [ThreadStatic] private static uint colorEntrenador;
     [ThreadStatic] private static (int R, int G, int B) colorEntrenadorRgb;
@@ -266,7 +318,7 @@ internal static class Superposicion
     /// (la pila se lo dice con WM_PRIMERA, cada ventana vive en su hilo).
     /// </summary>
     [ThreadStatic] private static bool esPrimera;
-    private const uint WM_PRIMERA = 0x8001; // WM_APP + 1
+    private const uint WM_PRIMERA = 0x8001, WM_ENTRENADOR = 0x8002; // WM_APP + 1, + 2
     /// <summary>
     /// LAS DOS ALTURAS de la parte de texto: como primero (con sitio para la
     /// figura) y de seguida (sólo su texto, y sin la línea de «… DICE», que no
@@ -506,9 +558,17 @@ internal static class Superposicion
         // El globo va de (izq-10, 8) a (ANCHO-12, ALTO_TEXTO-8) (ver PintarBocadillo):
         // un píxel más por cada lado, para no cortar la mitad de fuera de su borde.
         var abajo = ficherosMini is { Length: > 0 } ? ALTO - 3 : ALTO_TEXTO - 6;
-        var forma = DeSeguida
-            ? CreateRoundRectRgn(izq - 11, 7, ANCHO - 10, abajo, 26, 26)
-            : CreateRoundRectRgn(0, 0, ANCHO + 1, ALTO + 1, 18, 18);
+        IntPtr forma;
+        if (DeSeguida) forma = CreateRoundRectRgn(izq - 11, 7, ANCHO - 10, abajo, 26, 26);
+        else if (avatarFichero is not null)
+        {
+            // El globo y la silueta de la figura: lo de su alrededor deja ver el juego.
+            forma = CreateRoundRectRgn(izq - 11, ArribaGlobo - 1, ANCHO - 10, abajo, 26, 26);
+            var figura = RegionFigura(RectFigura());
+            CombineRgn(forma, forma, figura, RGN_OR);
+            DeleteObject(figura);
+        }
+        else forma = CreateRoundRectRgn(0, 0, ANCHO + 1, ALTO + 1, 18, 18);
         SetWindowRgn(ventana, forma, true);
     }
 
@@ -544,12 +604,14 @@ internal static class Superposicion
         miniZoom = -1;
         avatarFichero = avatar;
         avatarImg = IntPtr.Zero;
-        ANCHO = ANCHO_BASE + (avatar is null ? 0 : ANCHO_AVATAR + 12);
-        izq = avatar is null ? 18 : 18 + ANCHO_AVATAR + 12;
+        ANCHO = ANCHO_BASE;
+        izq = 18;
         var alto = AltoDelCuerpo(texto);
-        // Con la figura, al menos lo que ella mide (retratos: algo más altos que anchos).
-        altoTextoPrimera = avatar is null ? alto : Math.Max(alto, 14 + ANCHO_AVATAR * 4 / 3 + 14);
+        // Con la figura, la franja de arriba más el globo, que ya no repite quién
+        // habla (va en la franja) y por eso sube como uno de seguida.
+        altoTextoPrimera = avatar is null ? alto : alto - SUBE_SEGUIDA + BajaConFigura;
         altoTextoSeguida = avatar is null ? alto : alto - SUBE_SEGUIDA;
+
         esPrimera = true;
         AjustarAlto();
         procedimiento = Procedimiento;
@@ -659,7 +721,7 @@ internal static class Superposicion
                 return new IntPtr(MA_NOACTIVATE);
 
             case WM_SETCURSOR:
-                SetCursor(LoadCursor(IntPtr.Zero, bajoRaton == BAJO_X ? IDC_HAND : IDC_ARROW));
+                SetCursor(LoadCursor(IntPtr.Zero, bajoRaton is BAJO_X or BAJO_ENTRENADOR ? IDC_HAND : IDC_ARROW));
                 return new IntPtr(1);
 
             case WM_MOUSEMOVE:
@@ -678,7 +740,33 @@ internal static class Superposicion
                 return IntPtr.Zero;
 
             case WM_LBUTTONUP:
-                if (conCierre && QueHayEn(lParam) == BAJO_X) PostMessage(ventana, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+            {
+                var donde = conCierre ? QueHayEn(lParam) : -1;
+                if (donde == BAJO_X) PostMessage(ventana, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                else if (donde == BAJO_ENTRENADOR && CambiarEntrenador is { } cambiar)
+                {
+                    // El siguiente entrenador, en todos los bocadillos abiertos (cada uno en su hilo).
+                    cambiar();
+                    List<IntPtr> bocadillos;
+                    lock (pila) bocadillos = pila.Where(a => a.ConFigura && a.Ventana != IntPtr.Zero).Select(a => a.Ventana).ToList();
+                    foreach (var v in bocadillos) PostMessage(v, WM_ENTRENADOR, IntPtr.Zero, IntPtr.Zero);
+                }
+                return IntPtr.Zero;
+            }
+
+            case WM_ENTRENADOR when avatarFichero is not null && Entrenador?.Invoke() is { } nuevo:
+                // El entrenador nuevo en este aviso: su figura (y su silueta), su
+                // nombre y su color. El texto del consejo no cambia.
+                if (nuevo.Figura is { Length: > 0 } fig && File.Exists(fig))
+                {
+                    avatarFichero = fig;
+                    if (avatarImg != IntPtr.Zero) { GdipDisposeImage(avatarImg); avatarImg = IntPtr.Zero; }
+                }
+                nombreEntrenador = nuevo.Nombre;
+                colorEntrenadorRgb = nuevo.Color;
+                colorEntrenador = Rgb(nuevo.Color.R, nuevo.Color.G, nuevo.Color.B);
+                AplicarForma(ventana);
+                InvalidateRect(ventana, IntPtr.Zero, false);
                 return IntPtr.Zero;
 
             case WM_TIMER when wParam.ToInt64() == 2:
@@ -725,41 +813,149 @@ internal static class Superposicion
 
     /// <summary>Dónde está la X, en la ventana: arriba a la derecha; con el bocadillo, dentro de él (su borde acaba a 12 del filo).</summary>
     private static RECT RectX() => avatarFichero is not null
-        ? new() { Left = ANCHO - LADO_X - 18, Top = 12, Right = ANCHO - 18, Bottom = 12 + LADO_X }
+        ? new() { Left = ANCHO - LADO_X - 18, Top = ArribaGlobo + 4, Right = ANCHO - 18, Bottom = ArribaGlobo + 4 + LADO_X }
         : new() { Left = ANCHO - LADO_X - 8, Top = 8, Right = ANCHO - 8, Bottom = 8 + LADO_X };
 
     /// <summary>Dónde está la miniatura i, en la ventana.</summary>
     /// <summary>
     /// EL BOCADILLO: un globo redondeado detrás del título y del texto, con el
-    /// borde del color del entrenador y un pico que apunta a su cara.
+    /// borde del color del entrenador. En el primero, arriba, la franja de su color (con su nombre).
     /// </summary>
-    private static void PintarBocadillo(IntPtr hdc, bool conPico = true)
+    private static void PintarBocadillo(IntPtr hdc, bool primero)
     {
         ArrancarGdiplus();
         if (GdipCreateFromHDC(hdc, out var g) != 0 || g == IntPtr.Zero) return;
         GdipSetSmoothingMode(g, 4);
-        int x = izq - 10, y = 8, w = ANCHO - 12 - x, h = ALTO_TEXTO - 8 - y, r = 12, d = r * 2;
-        int picoY = 30, picoX = x - 12;
+        int x = izq - 10, y = ArribaGlobo, w = ANCHO - 12 - x, h = ALTO_TEXTO - 8 - y, r = 12, d = r * 2;
         GdipCreatePath(0, out var c);
         GdipAddPathArcI(c, x, y, d, d, 180, 90);
         GdipAddPathArcI(c, x + w - d, y, d, d, 270, 90);
         GdipAddPathArcI(c, x + w - d, y + h - d, d, d, 0, 90);
         GdipAddPathArcI(c, x, y + h - d, d, d, 90, 90);
-        // El pico, en el lado izquierdo, hacia la figura (un bocadillo de seguida no lo lleva).
-        if (conPico)
-        {
-            GdipAddPathLineI(c, x, y + h - r, x, picoY + 14);
-            GdipAddPathLineI(c, x, picoY + 14, picoX, picoY + 4);
-            GdipAddPathLineI(c, picoX, picoY + 4, x, picoY);
-        }
         GdipClosePathFigure(c);
         var (cr, cg, cb) = colorEntrenadorRgb;
+        var color = (uint)((255 << 24) | (cr << 16) | (cg << 8) | cb);
         GdipCreateSolidFill(0xFF141C2E, out var relleno);
         GdipFillPath(g, relleno, c);
-        GdipCreatePen1((uint)((255 << 24) | (cr << 16) | (cg << 8) | cb), 1.6f, 2, out var pluma);
+        if (primero)
+        {
+            // La parte de arriba del globo, de su color: con las esquinas del globo y recta por abajo.
+            var alto = BANDA;
+            GdipCreatePath(0, out var arriba);
+            GdipAddPathArcI(arriba, x, y, d, d, 180, 90);
+            GdipAddPathArcI(arriba, x + w - d, y, d, d, 270, 90);
+            GdipAddPathLineI(arriba, x + w, y + r, x + w, y + alto);
+            GdipAddPathLineI(arriba, x + w, y + alto, x, y + alto);
+            GdipClosePathFigure(arriba);
+            GdipCreateSolidFill(color, out var tinta);
+            GdipFillPath(g, tinta, arriba);
+            GdipDeleteBrush(tinta); GdipDeletePath(arriba);
+        }
+        GdipCreatePen1(color, 1.6f, 2, out var pluma);
         GdipDrawPath(g, pluma, c);
         GdipDeleteBrush(relleno); GdipDeletePen(pluma); GdipDeletePath(c); GdipDeleteGraphics(g);
     }
+
+    /// <summary>La figura, cargada la primera vez que hace falta (para pintarla y para su silueta).</summary>
+    private static void CargarFigura()
+    {
+        if (avatarImg != IntPtr.Zero || avatarFichero is null) return;
+        ArrancarGdiplus();
+        if (GdipLoadImageFromFile(avatarFichero, out var cargada) == 0) avatarImg = cargada;
+    }
+
+    /// <summary>El botón de cambiar de entrenador: un círculo abajo a la derecha de la figura, dentro de la franja.</summary>
+    private static RECT RectBotonEntrenador()
+    {
+        var f = RectFigura();
+        int cx = f.Right - 2, cy = ArribaGlobo + BANDA - 13, r = LADO_BOTON_ENTRENADOR / 2;
+        return new RECT { Left = cx - r, Top = cy - r, Right = cx + r, Bottom = cy + r };
+    }
+
+    /// <summary>Con el botón: sólo en el primero con entrenador, y si Program sabe cambiarlo.</summary>
+    private static bool ConBotonEntrenador => avatarFichero is not null && !DeSeguida && CambiarEntrenador is not null;
+
+    /// <summary>Dónde va la figura (sin el bote): con su proporción, de pie sobre la franja, con aire a la izquierda.</summary>
+    private static RECT RectFigura()
+    {
+        CargarFigura();
+        uint aw = 0, ah = 0;
+        if (avatarImg != IntPtr.Zero) { GdipGetImageWidth(avatarImg, out aw); GdipGetImageHeight(avatarImg, out ah); }
+        var escala = aw > 0 && ah > 0 ? Math.Min(ANCHO_FIGURA / (double)aw, ALTO_FIGURA / (double)ah) : 1;
+        int w = aw > 0 ? (int)(aw * escala) : ANCHO_FIGURA, h = ah > 0 ? (int)(ah * escala) : ALTO_FIGURA;
+        var x = izq + 6;
+        var pie = ArribaGlobo + BANDA - 3;
+        return new RECT { Left = x, Top = pie - h, Right = x + w, Bottom = pie };
+    }
+
+    private static string TextoNombre() =>
+        nombreEntrenador is { Length: > 0 } ? Textos.T("aviso_dice", nombreEntrenador).ToUpperInvariant() : "MTG CORNER";
+
+    /// <summary>El botón de cambiar de entrenador: un círculo casi negro con el icono en blanco; al pasar, con el borde blanco.</summary>
+    private static void PintarBotonEntrenador(IntPtr hdc)
+    {
+        var b = RectBotonEntrenador();
+        var sobre = bajoRaton == BAJO_ENTRENADOR;
+        ArrancarGdiplus();
+        if (GdipCreateFromHDC(hdc, out var g) == 0 && g != IntPtr.Zero)
+        {
+            GdipSetSmoothingMode(g, 4);
+            GdipCreateSolidFill(sobre ? 0xFF1E2433 : 0xFF0B0D12, out var fondo);
+            GdipFillEllipseI(g, fondo, b.Left, b.Top, b.Right - b.Left - 1, b.Bottom - b.Top - 1);
+            GdipCreatePen1(sobre ? 0xFFFFFFFF : 0xFF5B6478, 1.3f, 2, out var borde);
+            GdipDrawEllipseI(g, borde, b.Left, b.Top, b.Right - b.Left - 1, b.Bottom - b.Top - 1);
+            GdipDeleteBrush(fondo); GdipDeletePen(borde); GdipDeleteGraphics(g);
+        }
+        var icono = CreateFont(12, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe MDL2 Assets");
+        var anterior = SelectObject(hdc, icono);
+        SetBkMode(hdc, TRANSPARENT_BK);
+        SetTextColor(hdc, Rgb(255, 255, 255));
+        DrawText(hdc, "\uE8AB", -1, ref b, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        SelectObject(hdc, anterior);
+        DeleteObject(icono);
+    }
+
+    /// <summary>
+    /// LA SILUETA DE LA FIGURA como región de la ventana: sólo sus píxeles (por
+    /// la transparencia de su imagen), cada fila alargada hacia arriba lo que
+    /// sube en sus botes. Así alrededor de la figura se ve el juego y no un
+    /// recuadro oscuro.
+    /// </summary>
+    private static IntPtr RegionFigura(RECT r)
+    {
+        var region = CreateRectRgn(0, 0, 0, 0);
+        int w = r.Right - r.Left, h = r.Bottom - r.Top;
+        if (avatarImg == IntPtr.Zero || w <= 0 || h <= 0) return region;
+        if (GdipCreateBitmapFromScan0(w, h, 0, 0x26200A /* 32bpp ARGB */, IntPtr.Zero, out var mapa) != 0) return region;
+        try
+        {
+            if (GdipGetImageGraphicsContext(mapa, out var gm) == 0)
+            {
+                GdipSetInterpolationMode(gm, 7);
+                GdipDrawImageRectI(gm, avatarImg, 0, 0, w, h);
+                GdipDeleteGraphics(gm);
+            }
+            for (var y = 0; y < h; y++)
+            {
+                var desde = -1;
+                for (var x = 0; x <= w; x++)
+                {
+                    var opaco = x < w && GdipBitmapGetPixel(mapa, x, y, out var px) == 0 && (px >> 24) > 60;
+                    if (opaco && desde < 0) desde = x;
+                    else if (!opaco && desde >= 0)
+                    {
+                        var tramo = CreateRectRgn(r.Left + desde, r.Top + y - SALTO_MAX, r.Left + x, r.Top + y + 1);
+                        CombineRgn(region, region, tramo, RGN_OR);
+                        DeleteObject(tramo);
+                        desde = -1;
+                    }
+                }
+            }
+        }
+        finally { GdipDisposeImage(mapa); }
+        return region;
+    }
+
 
     /// <summary>El alto de la parte de texto para este cuerpo, medido con la letra con que se pinta.</summary>
     private static int AltoDelCuerpo(string cuerpo)
@@ -786,6 +982,7 @@ internal static class Superposicion
         var x = (short)(lParam.ToInt64() & 0xFFFF);
         var y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
         bool Dentro(RECT r) => x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
+        if (ConBotonEntrenador && Dentro(RectBotonEntrenador())) return BAJO_ENTRENADOR;
         if (Dentro(RectX())) return BAJO_X;
         for (var i = 0; i < ficherosMini.Length; i++) if (Dentro(RectMini(i))) return i;
         return -1;
@@ -859,26 +1056,49 @@ internal static class Superposicion
             var todo = new RECT { Left = 0, Top = 0, Right = ANCHO, Bottom = ALTO };
             FillRect(hdc, ref todo, fondo);
             var banda = new RECT { Left = 0, Top = 0, Right = 4, Bottom = ALTO };
-            if (DeSeguida) { /* sin banda: es sólo el globo */ }
-            else if (avatarFichero is not null) { var pincelBanda = CreateSolidBrush(colorEntrenador); FillRect(hdc, ref banda, pincelBanda); DeleteObject(pincelBanda); }
-            else FillRect(hdc, ref banda, filo);
-            if (avatarFichero is not null) PintarBocadillo(hdc, conPico: !DeSeguida);
+            // La banda de color, sólo en el aviso sin entrenador: con él, la franja y el globo ya llevan su color.
+            if (avatarFichero is null) FillRect(hdc, ref banda, filo);
+            if (avatarFichero is not null) PintarBocadillo(hdc, primero: !DeSeguida);
 
             SetBkMode(hdc, TRANSPARENT_BK);
 
             SelectObject(hdc, marca);
             SetTextColor(hdc, Rgb(252, 211, 77));
-            var rMarca = new RECT { Left = izq, Top = 12, Right = ANCHO - 18, Bottom = 28 };
-            // Con el entrenador, quién habla y en su color; sin él, la marca.
+            // Con el entrenador, quién habla, en su color y en la franja de arriba,
+            // junto a la figura; sin él, la marca dentro del aviso.
             if (avatarFichero is not null && nombreEntrenador is { Length: > 0 }) SetTextColor(hdc, colorEntrenador);
+            if (avatarFichero is null)
+            {
+                var rMarca = new RECT { Left = izq, Top = 12, Right = ANCHO - 18, Bottom = 28 };
+                DrawText(hdc, "MTG CORNER", -1, ref rMarca, DT_LEFT | DT_SINGLELINE);
+            }
             // De seguida no repite quién habla: es el mismo entrenador de arriba.
-            if (!DeSeguida)
-                DrawText(hdc, avatarFichero is not null && nombreEntrenador is { Length: > 0 } ? Textos.T("aviso_dice", nombreEntrenador).ToUpperInvariant() : "MTG CORNER", -1, ref rMarca, DT_LEFT | DT_SINGLELINE);
+            else if (!DeSeguida)
+            {
+                // En la franja, en blanco sobre su color, centrado en lo que deja la figura.
+                SetTextColor(hdc, Rgb(255, 255, 255));
+                var rNombre = new RECT { Left = RectFigura().Right + 14, Top = ArribaGlobo, Right = RectX().Left - 6, Bottom = ArribaGlobo + BANDA };
+                if (bajoRaton == BAJO_ENTRENADOR && SiguienteEntrenador?.Invoke() is { Length: > 0 } siguiente)
+                {
+                    // Al pasar por el botón, a quién se cambia: en dos renglones si no cabe en uno, centrado en la franja.
+                    var explica = Textos.T("aviso_cambiar_entrenador", siguiente);
+                    var medida = rNombre;
+                    DrawText(hdc, explica, -1, ref medida, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
+                    var altoExplica = Math.Min(medida.Bottom - medida.Top, BANDA);
+                    var rExplica = rNombre;
+                    rExplica.Top = ArribaGlobo + (BANDA - altoExplica) / 2;
+                    rExplica.Bottom = rExplica.Top + altoExplica;
+                    DrawText(hdc, explica, -1, ref rExplica, DT_CENTER | DT_WORDBREAK);
+                }
+                else DrawText(hdc, TextoNombre(), -1, ref rNombre, DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+            }
 
             SelectObject(hdc, fuerte);
             SetTextColor(hdc, Rgb(255, 255, 255));
-            var sube = DeSeguida ? SUBE_SEGUIDA : 0;
-            var rTitulo = new RECT { Left = izq, Top = 30 - sube, Right = conCierre ? RectX().Left - 6 : ANCHO - 18, Bottom = 56 - sube };
+            // Con entrenador el globo no repite quién habla dentro del texto: el título
+            // va donde en uno de seguida, más lo que haya encima (ver BajaTexto).
+            var sube = 16 - BajaTexto;
+            var rTitulo = new RECT { Left = izq, Top = 30 - sube, Right = conCierre && !(avatarFichero is not null && !DeSeguida) ? RectX().Left - 6 : ANCHO - 18, Bottom = 56 - sube };
             DrawText(hdc, textoTitulo, -1, ref rTitulo, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 
             // LA X de las fijas y de los consejos, arriba a la derecha; se ilumina al pasar.
@@ -888,7 +1108,7 @@ internal static class Superposicion
                 if (bajoRaton == BAJO_X) { var resalte = CreateSolidBrush(Rgb(51, 65, 85)); FillRect(hdc, ref rx, resalte); DeleteObject(resalte); }
                 var fx = CreateFont(15, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe MDL2 Assets");
                 SelectObject(hdc, fx);
-                SetTextColor(hdc, bajoRaton == BAJO_X ? Rgb(255, 255, 255) : Rgb(186, 196, 214));
+                SetTextColor(hdc, bajoRaton == BAJO_X || (avatarFichero is not null && !DeSeguida) ? Rgb(255, 255, 255) : Rgb(186, 196, 214));
                 DrawText(hdc, "\uE711", -1, ref rx, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 DeleteObject(fx);
             }
@@ -902,18 +1122,15 @@ internal static class Superposicion
             // que se pinta y se sueltan al cerrar.
             if (avatarFichero is { } fichAvatar && !DeSeguida)
             {
-                ArrancarGdiplus();
-                if (avatarImg == IntPtr.Zero && GdipLoadImageFromFile(fichAvatar, out var cargada) == 0) avatarImg = cargada;
+                var rf = RectFigura();
                 if (avatarImg != IntPtr.Zero && GdipCreateFromHDC(hdc, out var gA) == 0 && gA != IntPtr.Zero)
                 {
+                    // De pie sobre la franja o el globo; con su bote, hacia arriba.
                     GdipSetInterpolationMode(gA, 7);
-                    GdipGetImageWidth(avatarImg, out var aw); GdipGetImageHeight(avatarImg, out var ah);
-                    // Con su proporción, del ancho de su hueco y sin pasarse del alto del aviso.
-                    var altoA = aw > 0 ? Math.Min(ALTO_TEXTO - 28, (int)(ANCHO_AVATAR * (double)ah / aw)) : ANCHO_AVATAR;
-                    var anchoA = ah > 0 ? (int)(altoA * (double)aw / ah) : ANCHO_AVATAR;
-                    GdipDrawImageRectI(gA, avatarImg, 18 + (ANCHO_AVATAR - anchoA) / 2, 14 - saltoFigura, anchoA, altoA);
+                    GdipDrawImageRectI(gA, avatarImg, rf.Left, rf.Top - saltoFigura, rf.Right - rf.Left, rf.Bottom - rf.Top);
                     GdipDeleteGraphics(gA);
                 }
+                if (ConBotonEntrenador) PintarBotonEntrenador(hdc);
             }
             if (ficherosMini.Length > 0)
             {

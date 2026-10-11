@@ -571,6 +571,7 @@ internal static class Program
             if (args.FirstOrDefault(a => a.StartsWith("--tono=")) is { } tonoP && TONOS.Contains(tonoP[7..])) tonoActual = tonoP[7..];
             await PrecargarEntrenadores();
             Superposicion.Entrenador = DatosEntrenador;
+            ConectarCambioDeEntrenador();
             Superposicion.MostrarSinEsperar(Textos.T("consejo_titulo", 4), "Play Plains, then cast Skyward Spider: you need a creature to hang your auras on, and it has ward 2.", 14, importante: true);
             await Task.Delay(1200);
             Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_amenaza", "Kiora, the Rising Tide + Bringer of the Last Gift", "reanimate everything"), 30, fijo: true);
@@ -1405,6 +1406,7 @@ internal static class Program
         if (ajustes.Tono is { } tonoGuardado && TONOS.Contains(tonoGuardado)) tonoActual = tonoGuardado;
         _ = PrecargarEntrenadores();
         Superposicion.Entrenador = DatosEntrenador;
+        ConectarCambioDeEntrenador();
         Columna.ConsejoActivo = () => consejoActivo;
         Contexto.MiFasePrincipal += mesa => { if (consejoActivo) _ = ConsejoTurno(http, mesa); };
         // El mazo del rival se avisa una vez por partida: al acabar, a cero.
@@ -2115,6 +2117,22 @@ internal static class Program
     private static (string? Figura, string Nombre, (int R, int G, int B) Color) DatosEntrenador() =>
         (FiguraEntrenador(), Textos.T("tono_" + tonoActual),
          tonoActual == "sargento" ? (132, 204, 22) : tonoActual == "amable" ? (244, 114, 182) : (56, 189, 248));
+
+    /// <summary>
+    /// El botón de los avisos que cambia de entrenador (ver Superposicion): pasa
+    /// al siguiente de TONOS y lo recuerda como el del resumen; los avisos leen
+    /// sus datos de DatosEntrenador.
+    /// </summary>
+    private static void ConectarCambioDeEntrenador()
+    {
+        static string Siguiente() => TONOS[(Array.IndexOf(TONOS, tonoActual) + 1) % TONOS.Length];
+        Superposicion.SiguienteEntrenador = () => Textos.T("tono_" + Siguiente());
+        Superposicion.CambiarEntrenador = () =>
+        {
+            tonoActual = Siguiente();
+            GuardarAjustes();
+        };
+    }
 
     /// <summary>La figura del entrenador elegido, o null si aún no ha bajado.</summary>
     private static string? FiguraEntrenador()

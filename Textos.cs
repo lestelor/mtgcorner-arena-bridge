@@ -1681,6 +1681,12 @@ internal static class Textos
             "Couldn't load the plan right now. Try again in a moment, or open it on the website.", "No se ha podido cargar el plan ahora. Vuelve a probar en un momento, o ábrelo en la web.", "Der Plan konnte gerade nicht geladen werden. Versuch es gleich noch einmal oder öffne ihn auf der Website.", "Impossible de charger le plan pour l'instant. Réessayez dans un moment ou ouvrez-le sur le site.",
             "Não foi possível carregar o plano agora. Tente de novo daqui a pouco, ou abra-o no site.", "Non è stato possibile caricare il piano ora. Riprova tra poco, o aprilo sul sito.", "今はプランを読み込めませんでした。少ししてからもう一度試すか、サイトで開いてください。", "暂时无法加载计划。请稍后再试，或在网站上打开。",
         ],
+        // Al pasar por el botón de cambiar de entrenador del aviso (1.22.8).
+        ["aviso_cambiar_entrenador"] =
+        [
+            "Switch to {0}: another figure and tone", "Cambiar a {0}: otra figura y otro tono", "Zu {0} wechseln: andere Figur, anderer Ton", "Passer à {0} : autre figure, autre ton",
+            "Mudar para {0}: outra figura e outro tom", "Passa a {0}: altra figura e altro tono", "{0}に切り替え（見た目と口調）", "切换为{0}：换形象和语气",
+        ],
         ["col_cartas_antes"] =
         [
             "{0} above", "{0} más arriba", "{0} weiter oben", "{0} plus haut",
