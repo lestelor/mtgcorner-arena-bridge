@@ -406,6 +406,7 @@ internal static class Program
         {
             Columna.SiempreVisible = true;
             Columna.ForzarAbierta = args.Contains("--abierta");
+            Columna.BajarImagenCarta = BajarImagen;
             Columna.Iniciar((a, d) => { Console.WriteLine($"pulsado: {a} {d}"); return Task.CompletedTask; }, ArrancaSolo);
             // --novedad: como si hubiera versión nueva (su fila, sola y destacada).
             if (args.Contains("--novedad")) Columna.Destacar("version");
@@ -443,7 +444,7 @@ internal static class Program
                     var dm = await resp.Content.ReadFromJsonAsync<RespuestaCartasMazo>(JsonOpciones);
                     var lista = new List<Columna.CartaMazo>();
                     foreach (var c in dm?.Cartas ?? [])
-                        lista.Add(new Columna.CartaMazo(c.Arena, deLinea.First(x => x.Grp == c.Arena).N, c.Nombre ?? "?", c.Coste ?? "", c.Cmc, c.Tierra, await BajarImagen(c.Arte)));
+                        lista.Add(new Columna.CartaMazo(c.Arena, deLinea.First(x => x.Grp == c.Arena).N, c.Nombre ?? "?", c.Coste ?? "", c.Cmc, c.Tierra, await BajarImagen(c.Arte), CartaEntera(c.Arte)));
                     Columna.CartasDelMazo(lista);
                     Console.WriteLine($"mazo de prueba: {lista.Count} cartas");
                 }
@@ -672,7 +673,7 @@ internal static class Program
             var mazoP = lineaP is null ? [] : Contexto.CartasDe(lineaP);
             var dp = await (await httpP.GetAsync($"{PuertaDevice}/cartas?ids={string.Join(",", mazoP.Select(c => c.Grp))}")).Content.ReadFromJsonAsync<RespuestaCartasMazo>(JsonOpciones);
             var listaP = new List<Columna.CartaMazo>();
-            foreach (var c in dp?.Cartas ?? []) listaP.Add(new Columna.CartaMazo(c.Arena, mazoP.First(x => x.Grp == c.Arena).N, c.Nombre ?? "?", c.Coste ?? "", c.Cmc, c.Tierra, await BajarImagen(c.Arte)));
+            foreach (var c in dp?.Cartas ?? []) listaP.Add(new Columna.CartaMazo(c.Arena, mazoP.First(x => x.Grp == c.Arena).N, c.Nombre ?? "?", c.Coste ?? "", c.Cmc, c.Tierra, await BajarImagen(c.Arte), CartaEntera(c.Arte)));
             cartasDelMazoActual = listaP;
             Console.WriteLine($"mazo de prueba: {listaP.Count} cartas distintas, {mazoP.Sum(c => c.N)} en total");
             if (args[0] == "--probar-mulligan")
@@ -739,6 +740,8 @@ internal static class Program
             Console.WriteLine($"Panel de similares de {cual}...");
             // --zoom: la carta de la cabecera, grande, sin tener que poner el ratón encima.
             PanelCartas.ZoomDePrueba = args.Contains("--zoom");
+            // --copias: copias inventadas (una de cada dos cartas), para ver las marcas sin la web.
+            copiasDePrueba = args.Contains("--copias");
             Console.WriteLine(await PanelRelacionadas(httpPanel, cual, args.Length > 2 && !args[2].StartsWith("--") ? args[2] : "similares") ? "ensenado" : "no se pudo");
             await Task.Delay(TimeSpan.FromSeconds(40));
             PanelCartas.Cerrar();
@@ -1410,6 +1413,8 @@ internal static class Program
         // Y con el ratón encima de una de ellas, sus similares, combos y sinergias,
         // para que al pulsarla la ventana salga ya llena.
         Columna.AlSenalarCarta = grp => _ = Precalentar(http, grp);
+        // Las cartas del mazo en grande, al pasar el ratón por el desplegable.
+        Columna.BajarImagenCarta = BajarImagen;
         // El rastreador sigue a la biblioteca y aparece y desaparece con la partida;
         // el consejo de mulligan, con cada mano ofrecida; y al acabar, la mano al historial.
         Contexto.BibliotecaCambio += ActualizarRastreador;
@@ -1591,22 +1596,24 @@ internal static class Program
     private static async Task Precalentar(HttpClient http, string arena)
     {
         lock (Calentando) { if (!Calentando.Add(arena)) return; }
+        // Con el formato con que se abrirá la ventana, para que al pulsar ya esté.
+        var juego = JuegoCon(PanelCartas.FormatoInicial(Contexto.Formato));
         try
         {
             await Task.WhenAll(
                 Task.Run(async () =>
                 {
-                    var d = await Similares(http, arena);
+                    var d = await Similares(http, arena, juego);
                     if (d?.Cartas is { } c) await Task.WhenAll(c.Select(x => BajarImagen(x.Imagen)));
                 }),
                 Task.Run(async () =>
                 {
-                    var d = await Combos(http, arena);
+                    var d = await Combos(http, arena, juego);
                     if (d?.Combos is { } cs) await Task.WhenAll(cs.SelectMany(x => x.Piezas ?? []).Select(p => BajarImagen(p.Imagen)));
                 }),
                 Task.Run(async () =>
                 {
-                    var d = await Sinergias(http, arena);
+                    var d = await Sinergias(http, arena, juego);
                     if (d?.Grupos is { } gs) await Task.WhenAll(gs.SelectMany(x => x.Cartas ?? []).Select(c => BajarImagen(c.Imagen)));
                 }));
         }
@@ -1627,45 +1634,50 @@ internal static class Program
     /// Con esto las parecidas, los combos y las amenazas son del juego que hay,
     /// no de todo Magic (pedido del usuario el 2026-09-26).
     /// </summary>
-    private static string Juego()
+    private static string Juego() => JuegoCon(Contexto.Formato);
+
+    /// <summary>Lo mismo, con el formato elegido en la ventana (null: todos) en vez del de la partida.</summary>
+    private static string JuegoCon(string? formato)
     {
         var p = "";
-        if (Contexto.Formato is { Length: > 0 } f) p += $"&formato={Uri.EscapeDataString(f)}";
+        if (formato is { Length: > 0 } f) p += $"&formato={Uri.EscapeDataString(f)}";
         if (Contexto.Edicion is { Length: > 0 } e) p += $"&edicion={Uri.EscapeDataString(e)}";
         return p;
     }
 
-    private static async Task<RespuestaSimilares?> Similares(HttpClient http, string arena)
+    private static async Task<RespuestaSimilares?> Similares(HttpClient http, string arena, string juego)
     {
-        var clave = arena + Colores() + Juego();
+        var clave = arena + Colores() + juego;
         lock (SimilaresListos) { if (SimilaresListos.TryGetValue(clave, out var ya)) return ya; }
         var (cara, otra) = Caras(arena);
         var d = await http.GetFromJsonAsync<RespuestaSimilares>(
-            $"{PuertaDevice}/similares?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}{Colores()}{Juego()}", JsonOpciones);
+            $"{PuertaDevice}/similares?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}{Colores()}{juego}", JsonOpciones);
         if (d is not null) lock (SimilaresListos) SimilaresListos[clave] = d;
         return d;
     }
 
-    private static async Task<RespuestaCombos?> Combos(HttpClient http, string arena)
+    private static async Task<RespuestaCombos?> Combos(HttpClient http, string arena, string juego)
     {
-        var clave = arena + Juego();
+        var clave = arena + juego;
         lock (CombosListos) { if (CombosListos.TryGetValue(clave, out var ya)) return ya; }
         var (cara, otra) = Caras(arena);
         var d = await http.GetFromJsonAsync<RespuestaCombos>(
-            $"{PuertaDevice}/combos?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}{Juego()}", JsonOpciones);
+            $"{PuertaDevice}/combos?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}{juego}", JsonOpciones);
         if (d is not null) lock (CombosListos) CombosListos[clave] = d;
         return d;
     }
 
     private static readonly Dictionary<string, RespuestaSinergias> SinergiasListas = new();
 
-    private static async Task<RespuestaSinergias?> Sinergias(HttpClient http, string arena)
+    private static async Task<RespuestaSinergias?> Sinergias(HttpClient http, string arena, string juego)
     {
-        lock (SinergiasListas) { if (SinergiasListas.TryGetValue(arena, out var ya)) return ya; }
+        // Con el formato: la web sólo da cartas legales en él (desde la 1.23.0).
+        var clave = arena + juego;
+        lock (SinergiasListas) { if (SinergiasListas.TryGetValue(clave, out var ya)) return ya; }
         var (cara, otra) = Caras(arena);
         var d = await http.GetFromJsonAsync<RespuestaSinergias>(
-            $"{PuertaDevice}/sinergias?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}", JsonOpciones);
-        if (d is not null) lock (SinergiasListas) SinergiasListas[arena] = d;
+            $"{PuertaDevice}/sinergias?arena={Uri.EscapeDataString(cara)}&idioma={Textos.Idioma}{otra}{juego}", JsonOpciones);
+        if (d is not null) lock (SinergiasListas) SinergiasListas[clave] = d;
         return d;
     }
 
@@ -2367,7 +2379,7 @@ internal static class Program
             foreach (var c in d?.Cartas ?? [])
             {
                 if (c.Nombre is not { Length: > 0 } nombre || !cuantas.TryGetValue(c.Arena, out var n)) continue;
-                lista.Add(new Columna.CartaMazo(c.Arena, n, nombre, c.Coste ?? "", c.Cmc, c.Tierra, await BajarImagen(c.Arte)));
+                lista.Add(new Columna.CartaMazo(c.Arena, n, nombre, c.Coste ?? "", c.Cmc, c.Tierra, await BajarImagen(c.Arte), CartaEntera(c.Arte)));
             }
             // Si mientras bajaba se cambió de mazo, esto ya no es lo de ahora.
             if (firma == firmaCartasMazo)
@@ -2727,7 +2739,7 @@ internal static class Program
     /// otras piezas; cada sinergia con su regla de rótulo. Vacía si no hay
     /// nada; null si falló, y entonces la ventana ofrece la web.
     /// </summary>
-    private static async Task<IReadOnlyList<PanelCartas.Seccion>?> SeccionesDe(HttpClient http, string arena, string pestana)
+    private static async Task<IReadOnlyList<PanelCartas.Seccion>?> SeccionesDe(HttpClient http, string arena, string pestana, string? formato)
     {
         try
         {
@@ -2738,18 +2750,23 @@ internal static class Program
                     .Select(b => new PanelCartas.Carta(b.c.Nombre ?? "", b.Fichero!, b.c.Ruta, b.c.Precio)).ToArray();
             }
             var secciones = new List<PanelCartas.Seccion>();
+            // Cuántas tienes de cada una (el «×2» sobre la carta), pedido en cuanto
+            // se saben los nombres, mientras bajan las imágenes.
+            var copiasT = Task.FromResult(new Dictionary<string, int>());
             switch (pestana)
             {
                 case "similares":
                 {
-                    var d = await Similares(http, arena);
+                    var d = await Similares(http, arena, JuegoCon(formato));
+                    copiasT = CopiasDe(http, (d?.Cartas ?? []).Select(c => c.Nombre));
                     var cartas = await Bajar((d?.Cartas ?? []).Select(c => (c.Nombre, c.Imagen, c.Ruta, c.PrecioUsd)));
                     if (cartas.Length > 0) secciones.Add(new PanelCartas.Seccion(null, null, cartas));
                     break;
                 }
                 case "combos":
                 {
-                    var d = await Combos(http, arena);
+                    var d = await Combos(http, arena, JuegoCon(formato));
+                    copiasT = CopiasDe(http, (d?.Combos ?? []).SelectMany(c => c.Piezas ?? []).Select(p => p.Nombre));
                     foreach (var combo in d?.Combos ?? [])
                     {
                         var cartas = await Bajar((combo.Piezas ?? []).Select(p => (p.Nombre, p.Imagen, p.Ruta, p.PrecioUsd)));
@@ -2759,7 +2776,8 @@ internal static class Program
                 }
                 default:
                 {
-                    var d = await Sinergias(http, arena);
+                    var d = await Sinergias(http, arena, JuegoCon(formato));
+                    copiasT = CopiasDe(http, (d?.Grupos ?? []).SelectMany(g => g.Cartas ?? []).Select(c => c.Nombre));
                     foreach (var g in d?.Grupos ?? [])
                     {
                         var cartas = await Bajar((g.Cartas ?? []).Select(c => (c.Nombre, c.Imagen, c.Ruta, c.PrecioUsd)));
@@ -2768,9 +2786,35 @@ internal static class Program
                     break;
                 }
             }
-            return secciones;
+            var copias = await copiasT;
+            if (copias.Count == 0) return secciones;
+            return secciones.Select(s => s with { Cartas = s.Cartas.Select(c => copias.TryGetValue(c.Nombre, out var n) ? c with { Copias = n } : c).ToArray() }).ToList();
         }
         catch { return null; }
+    }
+
+    /// <summary>Modo de taller (--probar-panel … --copias): copias inventadas, sin preguntar a la web.</summary>
+    private static bool copiasDePrueba;
+
+    /// <summary>
+    /// CUÁNTAS TIENES de cada carta, por su nombre (sólo las que tienes): las
+    /// copias de tu colección en la web, como las marca ella. Aparte de lo de
+    /// las pestañas, que se guarda en la caché pública y no lleva nada tuyo.
+    /// Vacío sin cuenta o si falla: la ventana sale igual, sin las marcas.
+    /// </summary>
+    private static async Task<Dictionary<string, int>> CopiasDe(HttpClient http, IEnumerable<string?> nombres)
+    {
+        var lista = nombres.OfType<string>().Where(n => n.Length > 0).Distinct().ToArray();
+        if (lista.Length == 0) return new();
+        if (copiasDePrueba) return lista.Where((_, i) => i % 2 == 0).Select((n, i) => (n, i % 4 + 1)).ToDictionary(x => x.n, x => x.Item2);
+        try
+        {
+            using var r = await http.PostAsJsonAsync($"{PuertaDevice}/copias", new { nombres = lista }, JsonOpciones);
+            if (!r.IsSuccessStatusCode) return new();
+            var d = await r.Content.ReadFromJsonAsync<RespuestaCopias>(JsonOpciones);
+            return d?.Copias ?? new();
+        }
+        catch { return new(); }
     }
 
     /// <summary>
@@ -2792,13 +2836,21 @@ internal static class Program
             PanelCartas.AlAbrir = AbrirDelPanel;
             PanelCartas.MostrarRelacionadas(new PanelCartas.Relacionadas(
                 carta?.Nombre ?? Textos.T("col_esta_carta"), imagen, carta?.Ruta, pestana,
-                p => SeccionesDe(http, arena, p),
+                (p, formato) => SeccionesDe(http, arena, p, formato),
                 p => Textos.T(p == "similares" ? "panel_nada" : p == "combos" ? "panel_sin_combos" : "panel_sin_sinergias"),
-                p => Abrir($"{Sitio}/api/puente/carta/{cara}?abrir={p}&idioma={Textos.Idioma}{otra}")));
+                p => Abrir($"{Sitio}/api/puente/carta/{cara}?abrir={p}&idioma={Textos.Idioma}{otra}"),
+                Contexto.Formato));
             return true;
         }
         catch { return false; }
     }
+
+    /// <summary>
+    /// La carta entera a partir de su ilustración: en Scryfall sólo cambia el
+    /// tamaño en la dirección (art_crop → normal, que mide 488×680).
+    /// </summary>
+    private static string? CartaEntera(string? arte) =>
+        arte is { Length: > 0 } && arte.Contains("/art_crop/", StringComparison.Ordinal) ? arte.Replace("/art_crop/", "/normal/") : null;
 
     /// <summary>
     /// La ilustración de una carta, en disco. Ya bajada, se reutiliza: el
@@ -4147,6 +4199,9 @@ internal sealed record RespuestaImportar(
     [property: JsonPropertyName("sinTraducir")] int? SinTraducir,
     [property: JsonPropertyName("comodinesGuardados")] bool? ComodinesGuardados,
     [property: JsonPropertyName("mazosGuardados")] string[]? MazosGuardados);
+
+/// <summary>Lo que devuelve POST /api/mtga-device/copias: cuántas tienes de cada nombre pedido (sólo las que tienes).</summary>
+internal sealed record RespuestaCopias([property: JsonPropertyName("copias")] Dictionary<string, int>? Copias);
 
 /// <summary>Lo que devuelve /api/mtga-device/cartas: las cartas del mazo, con coste e ilustración.</summary>
 internal sealed record RespuestaCartasMazo([property: JsonPropertyName("cartas")] CartaMazoPuente[]? Cartas);

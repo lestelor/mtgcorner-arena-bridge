@@ -39,7 +39,8 @@ namespace MtgCornerArenaBridge;
 internal static partial class PanelCartas
 {
     /// <summary>Una carta del panel: su imagen en disco y a dónde lleva en la web.</summary>
-    public sealed record Carta(string Nombre, string Fichero, string? Ruta, double? PrecioUsd);
+    /// <summary>Una carta de la rejilla; <paramref name="Copias"/>, las que ya tienes (0: ninguna, o no se sabe).</summary>
+    public sealed record Carta(string Nombre, string Fichero, string? Ruta, double? PrecioUsd, int Copias = 0);
 
     /// <summary>Un grupo de cartas con rótulo opcional (pulsable si lleva ruta): un combo, o la rejilla de similares.</summary>
     public sealed record Seccion(string? Rotulo, string? Ruta, IReadOnlyList<Carta> Cartas);
@@ -1496,6 +1497,9 @@ internal static partial class PanelCartas
                 }
             }
 
+            // «×2»: las que ya tienes, encima de su carta.
+            foreach (var h in lista) if (h.Carta is { Copias: > 0 } tuya) PintarCopias(hdc, tuya.Copias, h.X, h.Y, h.Ancho, h.Alto);
+
             // La carta de la que se parte, grande, si el ratón está en su miniatura: encima de la rejilla.
             if (rel is { } relGrande) PintarCartaGrande(hdc, relGrande);
 
@@ -1506,7 +1510,8 @@ internal static partial class PanelCartas
             if (texto is null)
             {
                 var sobre = bajoRaton >= 0 && bajoRaton < lista.Length ? lista[bajoRaton].Carta : null;
-                var pie = sobre?.PrecioUsd is { } p ? $"{sobre.Nombre} · ${p:0.00}" : Textos.T("panel_pie");
+                var pie = sobre is null || (sobre.PrecioUsd is null && sobre.Copias <= 0) ? Textos.T("panel_pie")
+                    : string.Join(" · ", new[] { sobre.Nombre, sobre.PrecioUsd is { } p ? $"${p:0.00}" : null, sobre.Copias > 0 ? Textos.T("panel_en_coleccion", sobre.Copias) : null }.Where(t => t is not null));
                 DrawText(hdc, pie, -1, ref rPie, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
             }
         }

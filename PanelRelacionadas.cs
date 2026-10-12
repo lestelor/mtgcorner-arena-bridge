@@ -27,23 +27,42 @@ internal static partial class PanelCartas
 {
     /// <summary>
     /// Lo que enseña la ventana. <paramref name="Cargar"/> trae las secciones de
-    /// una pestaña ya con las imágenes en disco (vacía si no hay nada; null si
-    /// falló); <paramref name="Vacio"/>, el texto de «no hay»; <paramref name="AbrirWeb"/>,
-    /// qué hacer al pulsar el mensaje de error.
+    /// una pestaña en un formato (null: todos) ya con las imágenes en disco
+    /// (vacía si no hay nada; null si falló); <paramref name="Vacio"/>, el texto
+    /// de «no hay»; <paramref name="AbrirWeb"/>, qué hacer al pulsar el mensaje
+    /// de error; <paramref name="Formato"/>, el de la partida, si se sabe.
     /// </summary>
     public sealed record Relacionadas(
         string Nombre, string? Imagen, string? Ruta, string Pestana,
-        Func<string, Task<IReadOnlyList<Seccion>?>> Cargar,
-        Func<string, string> Vacio, Action<string>? AbrirWeb);
+        Func<string, string?, Task<IReadOnlyList<Seccion>?>> Cargar,
+        Func<string, string> Vacio, Action<string>? AbrirWeb, string? Formato = null);
 
     public static readonly string[] PESTANAS = ["similares", "combos", "sinergias"];
     private static readonly string[] ClavePestana = ["col_boton_similares", "col_boton_combos", "col_boton_sinergias"];
 
     private static Relacionadas? rel;
     private static string pestanaRel = "similares";
-    /// <summary>Lo ya traído por pestaña. Sin clave: no ha llegado; null: falló.</summary>
+    /// <summary>Lo ya traído por pestaña y formato (ver Clave). Sin clave: no ha llegado; null: falló.</summary>
     private static readonly Dictionary<string, IReadOnlyList<Seccion>?> contenidoRel = new();
     private static readonly HashSet<string> cargandoRel = new();
+
+    /// <summary>
+    /// EL FORMATO, ARRIBA A LA DERECHA (el usuario, 2026-10-12: «debería poder
+    /// filtrar entre los tipos de juego, porque Sram, Senior Edificer no lo
+    /// puedo jugar en Standard»; «en el menú de arriba»). Unos botones con los
+    /// formatos de Arena y «Todos»; vale para las tres pestañas. Sale marcado el
+    /// de la partida, si es uno de ellos; si no, el último elegido (Standard la
+    /// primera vez): fuera de partida no se sabe qué juegas.
+    /// </summary>
+    private static readonly string?[] FORMATOS_REL = ["standard", "alchemy", "historic", "timeless", "brawl", null];
+    private static string? formatoRel = "standard", ultimoFormato = "standard";
+    private static readonly RECT[] rectFormatos = new RECT[FORMATOS_REL.Length];
+    private const int BAJO_FORMATO = -8300;
+    /// <summary>Con qué formato se abre: el de la partida si es uno de los botones; si no, el último elegido.</summary>
+    internal static string? FormatoInicial(string? partida) => partida is { } f && FORMATOS_REL.Contains(f) ? f : ultimoFormato;
+
+    /// <summary>Lo de una pestaña en el formato elegido: cada formato es otra búsqueda.</summary>
+    private static string Clave(string pestana) => pestana + "|" + (formatoRel ?? "*");
     /// <summary>Lo más alto que ha sido la ventana: al cambiar de pestaña no encoge (daba saltos).</summary>
     private static int altoRel;
 
@@ -69,12 +88,14 @@ internal static partial class PanelCartas
         lock (contenidoRel) { contenidoRel.Clear(); cargandoRel.Clear(); }
         altoRel = 0;
         rel = r;
+        formatoRel = FormatoInicial(r.Formato);
         texto = null;
         titulo = r.Nombre;
         pestanaRel = PESTANAS.Contains(r.Pestana) ? r.Pestana : PESTANAS[0];
         bajoRaton = -1;
         rectOrigen = rectMensaje = default;
         for (var k = 0; k < rectPestanas.Length; k++) rectPestanas[k] = default;
+        for (var k = 0; k < rectFormatos.Length; k++) rectFormatos[k] = default;
         DisponerRel();
         hilo = new Thread(Correr) { IsBackground = true, Name = "panel" };
         hilo.Start();
@@ -85,7 +106,7 @@ internal static partial class PanelCartas
     private static void DisponerRel()
     {
         IReadOnlyList<Seccion> secciones;
-        lock (contenidoRel) secciones = contenidoRel.TryGetValue(pestanaRel, out var s) && s is not null ? s : [];
+        lock (contenidoRel) secciones = contenidoRel.TryGetValue(Clave(pestanaRel), out var s) && s is not null ? s : [];
         var (anchoArena, altoArena) = MedidasDeArena();
         // El ancho que queda a la derecha de la columna abierta, que es donde va.
         var libre = anchoArena - 40;
@@ -110,13 +131,15 @@ internal static partial class PanelCartas
     private static void CargarPestana(string p)
     {
         if (rel is not { } r) return;
-        lock (contenidoRel) { if (contenidoRel.ContainsKey(p) || !cargandoRel.Add(p)) return; }
+        var formato = formatoRel;
+        var clave = Clave(p);
+        lock (contenidoRel) { if (contenidoRel.ContainsKey(clave) || !cargandoRel.Add(clave)) return; }
         _ = Task.Run(async () =>
         {
             IReadOnlyList<Seccion>? res;
-            try { res = await r.Cargar(p); } catch { res = null; }
-            lock (contenidoRel) { contenidoRel[p] = res; cargandoRel.Remove(p); }
-            if (rel != r) return;
+            try { res = await r.Cargar(p, formato); } catch { res = null; }
+            lock (contenidoRel) { contenidoRel[clave] = res; cargandoRel.Remove(clave); }
+            if (rel != r || formato != formatoRel) return;
             if (p == pestanaRel) DisponerRel();
             var v = ventana;
             if (v != IntPtr.Zero) PostMessage(v, WM_REHACER, IntPtr.Zero, IntPtr.Zero);
@@ -131,6 +154,7 @@ internal static partial class PanelCartas
         if (rel is null) return 0;
         static bool Dentro(RECT r, int x, int y) => r.Right > 0 && x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
         for (var k = 0; k < rectPestanas.Length; k++) if (Dentro(rectPestanas[k], x, y)) return BAJO_PESTANA - k;
+        for (var k = 0; k < rectFormatos.Length; k++) if (Dentro(rectFormatos[k], x, y)) return BAJO_FORMATO - k;
         if (Dentro(rectOrigen, x, y)) return BAJO_ORIGEN;
         if (Dentro(rectMensaje, x, y)) return BAJO_MENSAJE;
         return 0;
@@ -138,6 +162,7 @@ internal static partial class PanelCartas
 
     private static bool PulsableRelacionadas(int i) =>
         rel is { } r && ((i <= BAJO_PESTANA && i > BAJO_PESTANA - PESTANAS.Length && PESTANAS[BAJO_PESTANA - i] != pestanaRel)
+            || (i <= BAJO_FORMATO && i > BAJO_FORMATO - FORMATOS_REL.Length && FORMATOS_REL[BAJO_FORMATO - i] != formatoRel)
             || (i == BAJO_ORIGEN && r.Ruta is not null)
             || (i == BAJO_MENSAJE && r.AbrirWeb is not null));
 
@@ -147,6 +172,16 @@ internal static partial class PanelCartas
         if (i <= BAJO_PESTANA && i > BAJO_PESTANA - PESTANAS.Length)
         {
             pestanaRel = PESTANAS[BAJO_PESTANA - i];
+            bajoRaton = -1;
+            DisponerRel();
+            Recolocar();
+            InvalidateRect(ventanaPanel, IntPtr.Zero, false);
+            CargarPestana(pestanaRel);
+        }
+        else if (i <= BAJO_FORMATO && i > BAJO_FORMATO - FORMATOS_REL.Length)
+        {
+            // Otro formato: lo de las tres pestañas es otra búsqueda (lo ya traído de otros se guarda).
+            formatoRel = ultimoFormato = FORMATOS_REL[BAJO_FORMATO - i];
             bajoRaton = -1;
             DisponerRel();
             Recolocar();
@@ -185,8 +220,8 @@ internal static partial class PanelCartas
             bool cargando;
             lock (contenidoRel)
             {
-                cargando = cargandoRel.Contains(p);
-                cuantas = contenidoRel.TryGetValue(p, out var s) && s is not null ? s.Sum(sec => p == "combos" ? 1 : sec.Cartas.Count) : null;
+                cargando = cargandoRel.Contains(Clave(p));
+                cuantas = contenidoRel.TryGetValue(Clave(p), out var s) && s is not null ? s.Sum(sec => p == "combos" ? 1 : sec.Cartas.Count) : null;
             }
             var rotulo = Textos.T(ClavePestana[k]) + (cuantas is { } n ? $"  {n}" : cargando ? "  …" : "");
             var w = Medir(hdc, rotulo, 16, 700) + 32;
@@ -202,6 +237,27 @@ internal static partial class PanelCartas
             x += w + 2;
         }
 
+        // LOS FORMATOS, pegados a la derecha en la misma fila: el elegido, relleno en azul.
+        var altoF = ALTO_PESTANAS - 20;
+        var anchos = FORMATOS_REL.Select(f => Medir(hdc, Textos.T("fmt_" + (f ?? "todos")), 14, 600) + 22).ToArray();
+        var xf = ANCHO_PANEL - MARGEN - anchos.Sum() - 6 * (anchos.Length - 1);
+        // Si no caben al lado de las pestañas, no se ponen: mejor sin filtro que encima de ellas.
+        var caben = xf > x + 16;
+        for (var k = 0; k < FORMATOS_REL.Length; k++)
+        {
+            if (!caben) { rectFormatos[k] = default; continue; }
+            var elegido = FORMATOS_REL[k] == formatoRel;
+            var sobre = bajoRaton == BAJO_FORMATO - k;
+            var yf = y + (ALTO_PESTANAS - 12 - altoF) / 2;
+            rectFormatos[k] = new RECT { Left = xf, Top = yf, Right = xf + anchos[k], Bottom = yf + altoF };
+            if (g != IntPtr.Zero)
+                Rectangulo(g, xf, yf, anchos[k], altoF, altoF / 2,
+                    elegido ? Argb(255, 56, 189, 248) : sobre ? Argb(255, 22, 30, 48) : Argb(0, 0, 0, 0), elegido ? null : BORDE);
+            Escribir(hdc, Textos.T("fmt_" + (FORMATOS_REL[k] ?? "todos")), xf, yf, anchos[k], altoF, 14, 600,
+                elegido ? Rgb(9, 13, 24) : sobre ? BLANCO : APAGADO, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+            xf += anchos[k] + 6;
+        }
+
         // LA CARTA DE LA QUE SE PARTE, en miniatura a la izquierda de la cabecera.
         var arriba = ArribaContenido;
         rectOrigen = new RECT { Left = MARGEN, Top = 8, Right = MARGEN + ANCHO_MINI_REL, Bottom = 8 + ALTO_MINI_REL };
@@ -214,7 +270,7 @@ internal static partial class PanelCartas
         rectMensaje = default;
         bool hay, cargandoEsta;
         IReadOnlyList<Seccion>? esta;
-        lock (contenidoRel) { hay = contenidoRel.TryGetValue(pestanaRel, out esta); cargandoEsta = cargandoRel.Contains(pestanaRel); }
+        lock (contenidoRel) { hay = contenidoRel.TryGetValue(Clave(pestanaRel), out esta); cargandoEsta = cargandoRel.Contains(Clave(pestanaRel)); }
         if (hay && esta is { Count: > 0 }) return;
         var mensaje = !hay || cargandoEsta ? Textos.T("panel_cargando") : esta is null ? Textos.T("panel_fallo_web") : r.Vacio(pestanaRel);
         var izq = IzquierdaContenido;
@@ -223,6 +279,37 @@ internal static partial class PanelCartas
         if (hay && esta is null && r.AbrirWeb is not null) rectMensaje = rm;
         Escribir(hdc, mensaje, izq, arriba + 20, der - izq, 60, 18, 500,
             hay && esta is null ? (bajoRaton == BAJO_MENSAJE ? BLANCO : Rgb(125, 211, 252)) : APAGADO, DT_LEFT | DT_WORDBREAK);
+    }
+
+    /// <summary>
+    /// LAS QUE YA TIENES: «×2» y el icono de la colección sobre la carta, a la
+    /// izquierda y justo bajo la línea del título impreso (que ocupa el 8-9 %
+    /// de arriba), la misma pastilla y el mismo sitio que en la web (CartaMini)
+    /// para que se reconozca sin leer (el usuario, 2026-10-12: «que salga un 1x
+    /// 2x si tenemos alguna en la colección de Arena, que no tape el título,
+    /// debajo a la izquierda, como en la web»).
+    /// </summary>
+    private static void PintarCopias(IntPtr hdc, int copias, int x, int y, int ancho, int alto)
+    {
+        var texto = $"×{copias}";
+        const int tam = 13, tamIcono = 12, aire = 6, entre = 4, altoP = 20;
+        var w = aire + Medir(hdc, texto, tam, 700) + entre + tamIcono + aire;
+        var px = x + Math.Max(5, ancho * 4 / 100);
+        var py = y + alto * 11 / 100;
+        var g = Lienzo(hdc);
+        if (g != IntPtr.Zero)
+        {
+            Rectangulo(g, px, py, w, altoP, altoP / 2, Argb(204, 0, 0, 0), Argb(51, 255, 255, 255));
+            GdipDeleteGraphics(g);
+        }
+        Escribir(hdc, texto, px + aire, py, w, altoP, tam, 700, BLANCO, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        var icono = CreateFont(tamIcono, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe MDL2 Assets");
+        var anterior = SelectObject(hdc, icono);
+        SetTextColor(hdc, Rgb(125, 211, 252));
+        var ri = new RECT { Left = px + w - aire - tamIcono, Top = py, Right = px + w - aire, Bottom = py + altoP };
+        DrawText(hdc, "\uE8F1", -1, ref ri, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        SelectObject(hdc, anterior);
+        DeleteObject(icono);
     }
 
     /// <summary>Modo de taller: la carta grande sin el ratón encima (para fotografiarla).</summary>

@@ -46,8 +46,12 @@ internal static class Columna
     /// </summary>
     private sealed record Fila(Accion Accion, string Glifo, string Clave, string? Dato = null, string? Etiqueta = null, int Nivel = 0, CartaMazo? Carta = null);
 
-    /// <summary>Una carta del mazo de Arena para el desplegable: su grpId, cuántas, nombre, coste y la ilustración ya bajada.</summary>
-    public sealed record CartaMazo(int Grp, int N, string Nombre, string Coste, double Cmc, bool Tierra, string? Arte);
+    /// <summary>
+    /// Una carta del mazo de Arena para el desplegable: su grpId, cuántas, nombre,
+    /// coste, la ilustración ya bajada y la dirección de la carta entera (para
+    /// verla en grande al pasar el ratón; se baja la primera vez que se señala).
+    /// </summary>
+    public sealed record CartaMazo(int Grp, int N, string Nombre, string Coste, double Cmc, bool Tierra, string? Arte, string? Imagen = null);
 
     // ── Lo que hace falta de Windows ──────────────────────────────────────
 
@@ -139,7 +143,7 @@ internal static class Columna
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern uint ExtractIconEx(string fichero, int indice, out IntPtr grandes, out IntPtr pequenos, uint cuantos);
 
-    private const uint WS_EX_TOPMOST = 0x8, WS_EX_TOOLWINDOW = 0x80, WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000;
+    private const uint WS_EX_TOPMOST = 0x8, WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80, WS_EX_LAYERED = 0x80000, WS_EX_NOACTIVATE = 0x8000000;
     private const uint WS_POPUP = 0x80000000;
     private const uint WM_DESTROY = 0x2, WM_PAINT = 0xF, WM_ERASEBKGND = 0x14, WM_CLOSE = 0x10, WM_MOUSEACTIVATE = 0x21, WM_TIMER = 0x113;
     private const uint WM_MOUSEMOVE = 0x200, WM_LBUTTONUP = 0x202, WM_MOUSELEAVE = 0x2A3, WM_MOUSEWHEEL = 0x20A;
@@ -720,6 +724,7 @@ internal static class Columna
             Recortar(anchoInicial);
             SetLayeredWindowAttributes(ventana, 0, 236, LWA_ALPHA);
             CrearAyuda(instancia);
+            CrearVista(instancia);
             SetTimer(ventana, new IntPtr(1), 500, IntPtr.Zero);
             // El latido rápido del visor: sólo hace algo con la columna abierta
             // y alguna etiqueta que no cabe (ver Pintar).
@@ -734,7 +739,12 @@ internal static class Columna
             }
         }
         catch { /* sin escritorio o sin permisos: el residente sigue sin columna */ }
-        finally { if (ayuda != IntPtr.Zero) DestroyWindow(ayuda); ayuda = IntPtr.Zero; ventana = IntPtr.Zero; hilo = null; }
+        finally
+        {
+            if (ayuda != IntPtr.Zero) DestroyWindow(ayuda);
+            if (vista != IntPtr.Zero) DestroyWindow(vista);
+            ayuda = vista = IntPtr.Zero; vistaVisible = false; ventana = IntPtr.Zero; hilo = null;
+        }
     }
 
     private static void Recortar(int ancho) =>
@@ -879,6 +889,7 @@ internal static class Columna
                     return IntPtr.Zero;
                 }
                 Recolocar();
+                ActualizarVista();
                 ActualizarAyuda();
                 // Los puntos del indicador de carga andan con este latido.
                 if (enCurso is not null) { faseCurso++; InvalidateRect(hWnd, IntPtr.Zero, false); }
@@ -906,10 +917,18 @@ internal static class Columna
                 if (fila != filaBajoRaton && fila >= 0 && fila < filasM.Length && filasM[fila].Accion is Accion.CartaMazo or Accion.Rastreo
                     && filasM[fila].Dato is { } datoSenalado && AlSenalarCarta is { } senalar)
                     _ = Task.Run(() => { try { senalar(datoSenalado); } catch { /* sin precalentar, se pide al pulsar */ } });
+                var otraFila = fila != filaBajoRaton;
                 filaBajoRaton = fila;
+                if (otraFila) ActualizarVista();
                 if (cambia) InvalidateRect(hWnd, IntPtr.Zero, true);
                 return IntPtr.Zero;
             }
+
+            // Ya bajó la carta grande que se esperaba: a la vista, si sigue señalada.
+            case WM_VISTA:
+                ActualizarVista();
+                ActualizarAyuda();
+                return IntPtr.Zero;
 
             case WM_MOUSELEAVE:
                 siguiendoRaton = false;
@@ -924,11 +943,13 @@ internal static class Columna
                 if (desplegado)
                 {
                     filaBajoRaton = -1;
+                    ActualizarVista();
                     InvalidateRect(hWnd, IntPtr.Zero, true);
                     return IntPtr.Zero;
                 }
                 abierta = false;
                 filaBajoRaton = -1;
+                ActualizarVista();
                 botonBajoRaton = -1;
                 // Al cerrarse la columna, el desplegable se pliega y el rastreador se queda en su fila.
                 if (desplegado || rastreo.Length > 0) { desplegado = false; cartaAbierta = null; desdeCarta = 0; Rehacer(); }
@@ -1409,11 +1430,142 @@ internal static class Columna
         GetWindowRect(ventana, out var rc);
         var x = rc.Right + 6;
         var y = rc.Top + ArribaDe(fila);
-        // Sin salirse de Arena por abajo: la de las últimas filas se iba fuera (2026-10-11).
         var arena = VentanaDeArena();
-        if (arena != IntPtr.Zero && GetWindowRect(arena, out var ra) && ra.Bottom > ra.Top) y = Math.Max(ra.Top, Math.Min(y, ra.Bottom - 12 - alto));
+        var hayArena = GetWindowRect(arena, out var ra) && arena != IntPtr.Zero && ra.Bottom > ra.Top;
+        // Con la carta en grande a la vista, la ayuda debajo de ella (o encima, si no cabe).
+        if (vistaVisible)
+        {
+            y = rectVista.Bottom + 6;
+            if (hayArena && y + alto > ra.Bottom - 12) y = rectVista.Top - 6 - alto;
+        }
+        // Sin salirse de Arena por abajo: la de las últimas filas se iba fuera (2026-10-11).
+        if (hayArena) y = Math.Max(ra.Top, Math.Min(y, ra.Bottom - 12 - alto));
         SetWindowPos(ayuda, HWND_TOPMOST, x, y, ANCHO_AYUDA, alto, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         InvalidateRect(ayuda, IntPtr.Zero, true);
+    }
+
+    // ── La carta en grande, al pasar por una carta del mazo ───────────────
+    //
+    // El usuario, 2026-10-12: «cuando se pone Mejorar el mazo, que haya hover en
+    // las cartas del mazo ampliando la carta». A la derecha de la columna y a la
+    // altura de la fila, la carta entera: la imagen «normal» de Scryfall a la
+    // mitad (244×340), que se ve nítida. Vale igual para el rastreador de la
+    // biblioteca, que pinta las cartas con la misma barra. La imagen la baja
+    // quien arranca la columna (BajarImagenCarta) la primera vez que se señala,
+    // y luego sale al momento. Transparente al ratón: nunca le quita el sitio a
+    // la fila que se está señalando.
+    private const int ANCHO_VISTA = 244, ALTO_VISTA = 340;
+    /// <summary>Mensaje propio: ya bajó la imagen de una carta (WM_APP + 3).</summary>
+    private const uint WM_VISTA = 0x8003;
+    private static IntPtr vista;
+    private static WndProc? procedimientoVista;
+    private static string? ficheroVista;
+    private static bool vistaVisible;
+    private static RECT rectVista;
+    /// <summary>Dirección de la carta entera → fichero en disco (null: no se pudo bajar).</summary>
+    private static readonly Dictionary<string, string?> imagenesVista = new();
+
+    /// <summary>Baja la imagen de una carta y dice dónde quedó (o null). La pone Program.</summary>
+    public static Func<string, Task<string?>>? BajarImagenCarta { get; set; }
+
+    private static void CrearVista(IntPtr instancia)
+    {
+        procedimientoVista = ProcedimientoVista;
+        var clase = new WNDCLASSEX
+        {
+            cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
+            lpfnWndProc = Marshal.GetFunctionPointerForDelegate(procedimientoVista),
+            hInstance = instancia,
+            hCursor = LoadCursor(IntPtr.Zero, IDC_ARROW),
+            lpszClassName = "MtgCornerVistaCarta",
+        };
+        RegisterClassEx(ref clase);
+        vista = CreateWindowEx(
+            WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+            "MtgCornerVistaCarta", "", WS_POPUP, 0, 0, ANCHO_VISTA, ALTO_VISTA, IntPtr.Zero, IntPtr.Zero, instancia, IntPtr.Zero);
+        if (vista == IntPtr.Zero) return;
+        SetLayeredWindowAttributes(vista, 0, 255, LWA_ALPHA);
+        // Las esquinas de una carta de verdad.
+        SetWindowRgn(vista, CreateRoundRectRgn(0, 0, ANCHO_VISTA + 1, ALTO_VISTA + 1, 18, 18), true);
+    }
+
+    /// <summary>
+    /// Con la columna abierta y el ratón en una carta del mazo (o del
+    /// rastreador), su carta en grande; si no, nada. Si aún no está en disco se
+    /// pide, y al llegar (WM_VISTA) se vuelve a mirar.
+    /// </summary>
+    private static void ActualizarVista()
+    {
+        if (vista == IntPtr.Zero) return;
+        var filas = Filas;
+        var fila = abierta && visible && filaBajoRaton >= 0 && filaBajoRaton < filas.Length ? filaBajoRaton : -1;
+        var url = fila >= 0 && filas[fila].Accion is Accion.CartaMazo or Accion.Rastreo ? filas[fila].Carta?.Imagen : null;
+        string? fichero = null;
+        if (url is not null)
+        {
+            bool sabida;
+            lock (imagenesVista) sabida = imagenesVista.TryGetValue(url, out fichero);
+            if (!sabida && BajarImagenCarta is { } bajar)
+            {
+                // Pedida: hasta que llegue cuenta como «no se pudo», y no se pide dos veces.
+                lock (imagenesVista) imagenesVista[url] = null;
+                var columna = ventana;
+                _ = Task.Run(async () =>
+                {
+                    string? f = null;
+                    try { f = await bajar(url); } catch { /* sin carta grande */ }
+                    lock (imagenesVista) imagenesVista[url] = f;
+                    if (f is not null && columna != IntPtr.Zero) PostMessage(columna, WM_VISTA, IntPtr.Zero, IntPtr.Zero);
+                });
+            }
+        }
+        if (fichero is null)
+        {
+            if (vistaVisible) { ShowWindow(vista, SW_HIDE); vistaVisible = false; }
+            ficheroVista = null;
+            return;
+        }
+        // A la derecha de la columna, centrada en la fila y sin salirse de Arena.
+        GetWindowRect(ventana, out var rc);
+        var x = rc.Right + 6;
+        var y = rc.Top + ArribaDe(fila) + AltoDe(filas[fila]) / 2 - ALTO_VISTA / 2;
+        var arena = VentanaDeArena();
+        if (arena != IntPtr.Zero && GetWindowRect(arena, out var ra) && ra.Bottom > ra.Top)
+            y = Math.Max(ra.Top + 8, Math.Min(y, ra.Bottom - 8 - ALTO_VISTA));
+        rectVista = new RECT { Left = x, Top = y, Right = x + ANCHO_VISTA, Bottom = y + ALTO_VISTA };
+        var otra = fichero != ficheroVista;
+        ficheroVista = fichero;
+        SetWindowPos(vista, HWND_TOPMOST, x, y, ANCHO_VISTA, ALTO_VISTA, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        vistaVisible = true;
+        if (otra) InvalidateRect(vista, IntPtr.Zero, false);
+    }
+
+    private static IntPtr ProcedimientoVista(IntPtr hWnd, uint mensaje, IntPtr wParam, IntPtr lParam)
+    {
+        switch (mensaje)
+        {
+            case WM_PAINT:
+            {
+                var hdc = BeginPaint(hWnd, out var ps);
+                try
+                {
+                    var img = ficheroVista is { } f ? ImagenMini(f) : IntPtr.Zero;
+                    if (img != IntPtr.Zero && GdipCreateFromHDC(hdc, out var g) == 0 && g != IntPtr.Zero)
+                    {
+                        GdipSetInterpolationMode(g, 7);
+                        GdipDrawImageRectI(g, img, 0, 0, ANCHO_VISTA, ALTO_VISTA);
+                        GdipDeleteGraphics(g);
+                    }
+                }
+                finally { EndPaint(hWnd, ref ps); }
+                return IntPtr.Zero;
+            }
+            case WM_ERASEBKGND:
+                return new IntPtr(1);
+            case WM_MOUSEACTIVATE:
+                return new IntPtr(MA_NOACTIVATE);
+        }
+        return DefWindowProc(hWnd, mensaje, wParam, lParam);
     }
 
     private static IntPtr ProcedimientoAyuda(IntPtr hWnd, uint mensaje, IntPtr wParam, IntPtr lParam)

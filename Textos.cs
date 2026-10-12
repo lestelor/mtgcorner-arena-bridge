@@ -1175,6 +1175,20 @@ internal static class Textos
             "No known combos for this card.", "Esta carta no tiene combos conocidos.", "Für diese Karte sind keine Combos bekannt.", "Aucun combo connu pour cette carte.",
             "Esta carta não tem combos conhecidos.", "Nessun combo conosciuto per questa carta.", "このカードの既知のコンボはありません。", "这张牌没有已知的组合技。",
         ],
+        // Los botones de formato del panel de similares/combos/sinergias (1.23.0),
+        // con los nombres de la web (filters.format en messages/*.json).
+        ["fmt_standard"] = ["Standard", "Standard", "Standard", "Standard", "Standard", "Standard", "スタンダード", "标准"],
+        ["fmt_alchemy"] = ["Alchemy", "Alchemy", "Alchemy", "Alchemy", "Alchemy", "Alchemy", "アルケミー", "Alchemy"],
+        ["fmt_historic"] = ["Historic", "Historic", "Historic", "Historic", "Historic", "Historic", "ヒストリック", "Historic"],
+        ["fmt_timeless"] = ["Timeless", "Timeless", "Timeless", "Timeless", "Timeless", "Timeless", "タイムレス", "Timeless"],
+        ["fmt_brawl"] = ["Brawl", "Brawl", "Brawl", "Brawl", "Brawl", "Brawl", "Brawl", "Brawl"],
+        ["fmt_todos"] = ["All", "Todos", "Alle", "Tous", "Todos", "Tutti", "すべて", "全部"],
+        // En el pie del panel, al pasar por una carta que ya tienes (1.23.0). {0} = copias.
+        ["panel_en_coleccion"] =
+        [
+            "{0} in your collection", "{0} en tu colección", "{0} in deiner Sammlung", "{0} dans votre collection",
+            "{0} na tua coleção", "{0} nella tua collezione", "コレクションに{0}枚", "收藏中有 {0} 张",
+        ],
         ["panel_pie"] =
         [
             "Click a card to open it on the site", "Pulsa una carta para abrirla en la web", "Klicke eine Karte an, um sie auf der Website zu öffnen", "Cliquez sur une carte pour l'ouvrir sur le site",
