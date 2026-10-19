@@ -463,6 +463,66 @@ internal static class Program
                         ficheros.Where(f => f is not null).Select(f => f!).ToArray(), fijo: true);
                 }
             }
+            // --draft=N: el sobre N (desde 1) del draft del registro de ahora, como
+            // en el residente; sin número, el 18 (con los colores ya pesando).
+            if (args.FirstOrDefault(a => a.StartsWith("--draft", StringComparison.Ordinal)) is { } argDraft)
+            {
+                var vinculoDr = Vinculo.Leer();
+                using var httpDr = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(2) };
+                if (vinculoDr is not null) httpDr.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoDr.Token);
+                var registroDr = LogArena.FicherosPorDefecto(LogArena.Carpeta()).LastOrDefault(File.Exists);
+                var estadoDr = new Contexto.EstadoDraft();
+                var sobresDr = new List<Contexto.SobreDraft>();
+                if (registroDr is not null)
+                {
+                    using var fs = new FileStream(registroDr, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using var sr = new StreamReader(fs);
+                    for (var l = sr.ReadLine(); l is not null; l = sr.ReadLine())
+                    {
+                        var antes = estadoDr.Sobre;
+                        Contexto.LineaDeDraft(l, estadoDr);
+                        if (estadoDr.Sobre is { } s && !ReferenceEquals(s, antes)) sobresDr.Add(s);
+                    }
+                }
+                var nDr = argDraft.Contains('=') && int.TryParse(argDraft[(argDraft.IndexOf('=') + 1)..], out var nPedido) ? nPedido : 18;
+                if (sobresDr.Count == 0) Console.WriteLine("No hay ningún draft en el registro.");
+                else
+                {
+                    var sobreDr = sobresDr[Math.Clamp(nDr - 1, 0, sobresDr.Count - 1)];
+                    await Draft.Mostrar(httpDr, sobreDr, BajarImagen, deTaller: true);
+                    Console.WriteLine($"draft de prueba: sobre {sobreDr.Sobre}, elección {sobreDr.Eleccion}");
+                }
+            }
+            // --mazodraft: el mazo sugerido del último draft del registro, con su
+            // ventana, su fila y el aviso del plan, como al acabar el draft.
+            if (args.Contains("--mazodraft"))
+            {
+                var vinculoMd = Vinculo.Leer();
+                using var httpMd = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(2) };
+                if (vinculoMd is not null) httpMd.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoMd.Token);
+                var estadoMd = new Contexto.EstadoDraft();
+                Contexto.PoolDraft? poolMd = null;
+                if (LogArena.FicherosPorDefecto(LogArena.Carpeta()).LastOrDefault(File.Exists) is { } registroMd)
+                {
+                    using var fs = new FileStream(registroMd, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using var sr = new StreamReader(fs);
+                    for (var l = sr.ReadLine(); l is not null; l = sr.ReadLine())
+                    {
+                        Contexto.LineaDeDraft(l, estadoMd);
+                        if (estadoMd.Terminado is { } t) poolMd = t;
+                    }
+                }
+                if (poolMd is null) Console.WriteLine("No hay ningún draft acabado en el registro.");
+                else
+                {
+                    // El entrenador, como en el residente: el plan sale con su figura.
+                    Superposicion.Entrenador = DatosEntrenador;
+                    await PrecargarEntrenadores();
+                    await Draft.MostrarMazo(httpMd, poolMd, BajarImagen, () => tonoActual,
+                        (t, x) => Superposicion.MostrarSinEsperar(t, x, 30, importante: true, avatar: FiguraEntrenador()));
+                    Console.WriteLine($"mazo de prueba: {poolMd.Cartas.Length} elegidas de {poolMd.Edicion}");
+                }
+            }
             Console.WriteLine("Columna sobre Arena durante 40 s…");
             await Task.Delay(TimeSpan.FromSeconds(40));
             Columna.Cerrar();
@@ -745,6 +805,97 @@ internal static class Program
             Console.WriteLine(await PanelRelacionadas(httpPanel, cual, args.Length > 2 && !args[2].StartsWith("--") ? args[2] : "similares") ? "ensenado" : "no se pudo");
             await Task.Delay(TimeSpan.FromSeconds(40));
             PanelCartas.Cerrar();
+            return 0;
+        }
+        // TALLER DEL DRAFT: los sobres de un registro, valorados como en la columna,
+        // por consola y sin ventanas (se puede con Arena abierto y jugando). Con
+        // cada sobre, la carta que se cogió de verdad, para comparar.
+        if (args.Length > 0 && args[0] == "--probar-draft")
+        {
+            var vinculoD = Vinculo.Leer();
+            using var httpD = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(2) };
+            if (vinculoD is not null) httpD.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoD.Token);
+            var registroD = args.Length > 1 && !args[1].StartsWith("--") ? args[1] : LogArena.FicherosPorDefecto(LogArena.Carpeta()).LastOrDefault(File.Exists);
+            if (registroD is null || !File.Exists(registroD)) { Console.WriteLine("Sin registro."); return 1; }
+            var estadoD = new Contexto.EstadoDraft();
+            var sobresD = new List<Contexto.SobreDraft>();
+            using (var fs = new FileStream(registroD, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var sr = new StreamReader(fs))
+                for (var l = sr.ReadLine(); l is not null; l = sr.ReadLine())
+                {
+                    var antes = estadoD.Sobre;
+                    Contexto.LineaDeDraft(l, estadoD);
+                    if (estadoD.Sobre is { } s && !ReferenceEquals(s, antes) && (sobresD.Count == 0 || sobresD[^1].Eleccion != s.Eleccion || sobresD[^1].Sobre != s.Sobre)) sobresD.Add(s);
+                }
+            Console.WriteLine($"{registroD}: {sobresD.Count} sobres");
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            for (var i = 0; i < sobresD.Count; i++)
+            {
+                var s = sobresD[i];
+                var datosD = await Draft.Datos(httpD, s.Edicion);
+                if (datosD is null) { Console.WriteLine($"{s.Edicion}: sin datos de la web"); continue; }
+                var (cartasD, coloresD) = Draft.Valorar(s, datosD);
+                var deArenaD = BaseArena.Nombres(cartasD.Where(c => c.Datos is null).Select(c => c.Grp));
+                // Lo que se cogió: lo que el sobre siguiente lleva de más.
+                var cogida = i + 1 < sobresD.Count ? sobresD[i + 1].Elegidas.Except(s.Elegidas).Cast<int?>().FirstOrDefault() : null;
+                Console.WriteLine($"\nSobre {s.Sobre} · elección {s.Eleccion} · llevas {s.Elegidas.Length} · tus colores {(coloresD.Length > 0 ? coloresD : "-")}");
+                foreach (var v in cartasD)
+                    Console.WriteLine($"  {(v.Nota is double n ? n.ToString("0.0", inv) : " - ")}  {(v.Datos?.Gih is double g ? (g * 100).ToString("0.0", inv) + "%" : "     -")}  {v.Datos?.Nombre ?? (deArenaD.TryGetValue(v.Grp, out var na) ? na + " [Arena]" : "#" + v.Grp)}{(v.Datos?.Color is { Length: > 0 } col ? " (" + col + ")" : "")}{(v.Grp == cogida ? "   <- cogiste" : "")}");
+                // --consejo: lo que dice el entrenador, en unas cuantas elecciones (la
+                // IA cuesta; --consejo=todas, en las 45).
+                var conConsejo = args.FirstOrDefault(a => a.StartsWith("--consejo", StringComparison.Ordinal));
+                if (conConsejo is not null && (conConsejo == "--consejo=todas" || new[] { 1, 2, 6, 10, 16, 18, 24, 31, 38 }.Contains(i + 1)))
+                {
+                    var candidatasD = cartasD.Where(c => c.Nota is not null).Take(4).Select(c => c.Grp).ToArray();
+                    var cons = candidatasD.Length >= 2 ? await Draft.Consejo(httpD, s, candidatasD, coloresD, tonoActual) : null;
+                    var nombreCons = cartasD.FirstOrDefault(c => c.Grp == cons?.Eleccion)?.Datos?.Nombre;
+                    Console.WriteLine(nombreCons is null ? "  ENTRENADOR: (sin respuesta)" : $"  ENTRENADOR: {nombreCons}{(cons!.Eleccion == candidatasD[0] ? "" : "  [distinta de la nota]")} — {cons.PorQue}");
+                }
+            }
+            // --mazo: el mazo sugerido con lo elegido, y el plan del entrenador
+            // (lo que sale al acabar el draft, por consola).
+            if (args.Contains("--mazo"))
+            {
+                var pool = estadoD.Terminado ?? (sobresD.Count > 0 ? new Contexto.PoolDraft(sobresD[^1].Evento, sobresD[^1].Edicion, sobresD[^1].Elegidas) : null);
+                if (pool is null) { Console.WriteLine("\nSin draft acabado."); return 1; }
+                var datosM = await Draft.Datos(httpD, pool.Edicion);
+                var mazoM = datosM is null ? null : Draft.Construir(pool.Cartas, datosM);
+                Console.WriteLine($"\nMAZO con {pool.Cartas.Length} elegidas ({(estadoD.Terminado is null ? "draft sin acabar" : "draft acabado")}):");
+                if (mazoM is null) { Console.WriteLine("  (no sale: sin datos o menos de 15 jugables)"); return 1; }
+                Console.WriteLine($"  {mazoM.Colores} · {string.Join(" + ", mazoM.Tierras.Select(t => $"{t.N} {t.Color}"))} · {mazoM.Cartas.Count(c => c.EsCriatura)} criaturas");
+                foreach (var c in mazoM.Cartas) Console.WriteLine($"  {(c.EsCriatura ? "C" : " ")} {c.Nombre} ({c.Color})");
+                var fueraM = pool.Cartas.Where(g => !mazoM.Cartas.Any(c => c.Arena == g)).ToArray();
+                var nombresFuera = datosM!.Cartas?.Where(c => fueraM.Contains(c.Arena)).Select(c => c.Nombre).ToList() ?? [];
+                Console.WriteLine($"  banquillo ({fueraM.Length}): {string.Join(", ", nombresFuera)}");
+                Console.WriteLine($"\nPLAN: {await Draft.Plan(httpD, pool, mazoM, tonoActual) ?? "(sin respuesta)"}");
+            }
+            return 0;
+        }
+        // TALLER DEL EDITOR DE INSTRUCCIONES (EditorInstrucciones.cs): lo abre con
+        // un texto de muestra y escribe lo que devuelve. Sin la web: no lee ni guarda.
+        if (args.Length > 0 && args[0] == "--probar-instrucciones")
+        {
+            if (args.Length > 1 && args[1].StartsWith("--idioma=")) Textos.Escoger(args[1]["--idioma=".Length..]);
+            // El entrenador, como en el residente: su aviso sale con su figura.
+            Superposicion.Entrenador = DatosEntrenador;
+            await PrecargarEntrenadores();
+            // --web: el recorrido de la fila de la columna, leyendo y guardando en la cuenta de verdad.
+            if (args.Contains("--web"))
+            {
+                var vinculoI = Vinculo.Leer();
+                using var httpI = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(2) };
+                if (vinculoI is not null) httpI.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoI.Token);
+                await EditarInstrucciones(httpI);
+                await Task.Delay(TimeSpan.FromSeconds(14));
+                return 0;
+            }
+            var devuelto = await EditorInstrucciones.Editar("Soy nuevo en Limitado.\nExplícame las habilidades raras.", 500);
+            Console.WriteLine(devuelto is null ? "(cancelado)" : $"GUARDAR ({devuelto.Length}): {devuelto}");
+            if (devuelto is not null)
+            {
+                AvisoInstrucciones(true, devuelto.Trim().Length == 0);
+                await Task.Delay(TimeSpan.FromSeconds(14));
+            }
             return 0;
         }
         // Ver qué saca el vigía del registro (Contexto.cs) con Arena en marcha:
@@ -1233,6 +1384,16 @@ internal static class Program
                         finally { Columna.EnCurso(null); }
                     }
                     break;
+                case Columna.Accion.MazoDraft:
+                    Draft.AbrirMazo(AvisoDraft);
+                    break;
+                case Columna.Accion.ConsejoDraft:
+                    // Su fila: el porqué entero, otra vez, con la figura del entrenador.
+                    if (Draft.UltimoConsejo is { } cd) AvisoDraft(cd.Titulo, cd.Texto);
+                    break;
+                case Columna.Accion.Entrenador:
+                    await EditarInstrucciones(http);
+                    break;
                 case Columna.Accion.Salir:
                     Columna.Cerrar();
                     Environment.Exit(0);
@@ -1420,6 +1581,12 @@ internal static class Program
         Contexto.BibliotecaCambio += ActualizarRastreador;
         Contexto.Cambio += ActualizarRastreador;
         Contexto.ManoNueva += ConsejoMulligan;
+        // El draft: cada sobre, valorado, en la columna (ver Draft.cs); y si al
+        // arrancar ya hay uno a medias, ése.
+        Contexto.DraftCambio += s => _ = Draft.Mostrar(http, s, BajarImagen, tono: () => tonoActual, avisar: AvisoDraft);
+        if (Contexto.Draft is { } draftYa) _ = Draft.Mostrar(http, draftYa, BajarImagen, tono: () => tonoActual, avisar: AvisoDraft);
+        // Y al acabar, el mazo sugerido (ver Draft.MostrarMazo).
+        Contexto.DraftTerminado += p => _ = Draft.MostrarMazo(http, p, BajarImagen, tono: () => tonoActual, avisar: AvisoDraft);
         // El consejo de cada turno, si está encendido (ver ConsejoTurno).
         var ajustes = LeerAjustes();
         consejoActivo = ajustes.Consejo;
@@ -2034,6 +2201,10 @@ internal static class Program
             Superposicion.MostrarSinEsperar(Textos.T("consejo_cuentas"), calculado, 25, importante: true, avatar: FiguraEntrenador(), ranura: Superposicion.RANURA_CUENTAS);
     }
 
+    /// <summary>El consejo del entrenador en el draft, en un aviso con su figura (ver Draft.Mostrar).</summary>
+    private static void AvisoDraft(string titulo, string texto) =>
+        Superposicion.MostrarSinEsperar(titulo, texto, 20, importante: true, avatar: FiguraEntrenador());
+
     /// <summary>Lo que se manda a /api/mtga-device/consejo con una mesa.</summary>
     private static object CuerpoConsejo(Contexto.Mesa mesa, bool rival) => new
     {
@@ -2393,6 +2564,53 @@ internal static class Program
             }
         }
         catch { firmaCartasMazo = ""; }
+    }
+
+    /// <summary>
+    /// «INSTRUCCIONES DEL ENTRENADOR»: lo que el jugador le pide a su
+    /// entrenador, guardado en su cuenta (ver EditorInstrucciones.cs y, en la
+    /// web, lib/instruccionesEntrenador.ts). Se lee lo de ahora, se edita y, si
+    /// cambió, se guarda; el aviso dice cómo fue. Con la web caída, o una web
+    /// anterior a esta ruta, sólo el aviso: no se abre un editor vacío que luego
+    /// no podría guardar.
+    /// </summary>
+    private static async Task EditarInstrucciones(HttpClient http)
+    {
+        RespuestaInstrucciones? actual;
+        Columna.EnCurso("entrenador");
+        try { actual = await http.GetFromJsonAsync<RespuestaInstrucciones>($"{PuertaDevice}/entrenador", JsonOpciones); }
+        catch { actual = null; }
+        finally { Columna.EnCurso(null); }
+        if (actual is null)
+        {
+            Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("instr_fallo"), 10);
+            return;
+        }
+        var antes = (actual.Texto ?? "").Trim();
+        var nuevo = await EditorInstrucciones.Editar(antes, actual.Tope is > 0 ? actual.Tope.Value : 500);
+        if (nuevo is null || nuevo.Trim() == antes) return;
+        bool ok;
+        Columna.EnCurso("entrenador");
+        try
+        {
+            using var r = await http.PostAsJsonAsync($"{PuertaDevice}/entrenador", new { texto = nuevo }, JsonOpciones);
+            ok = r.IsSuccessStatusCode;
+        }
+        catch { ok = false; }
+        finally { Columna.EnCurso(null); }
+        AvisoInstrucciones(ok, nuevo.Trim().Length == 0);
+    }
+
+    /// <summary>
+    /// Guardadas o borradas, lo dice el entrenador, en su zona y con su figura
+    /// (el usuario, 2026-10-19: «¿los mensajes no deberían ir en la zona de los
+    /// comentarios del coach?»). Un fallo de red es cosa del programa: aviso normal.
+    /// </summary>
+    private static void AvisoInstrucciones(bool ok, bool borradas)
+    {
+        if (!ok) Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("instr_fallo"), 10);
+        else Superposicion.MostrarSinEsperar(Textos.T("col_entrenador"), Textos.T(borradas ? "instr_borradas" : "instr_guardadas"),
+            12, importante: true, avatar: FiguraEntrenador());
     }
 
     private static async Task PanelEstadisticas(HttpClient http)
@@ -4202,6 +4420,9 @@ internal sealed record RespuestaImportar(
 
 /// <summary>Lo que devuelve POST /api/mtga-device/copias: cuántas tienes de cada nombre pedido (sólo las que tienes).</summary>
 internal sealed record RespuestaCopias([property: JsonPropertyName("copias")] Dictionary<string, int>? Copias);
+
+/// <summary>Lo que devuelve GET /api/mtga-device/entrenador: las instrucciones del jugador para su entrenador y su tope.</summary>
+internal sealed record RespuestaInstrucciones([property: JsonPropertyName("texto")] string? Texto, [property: JsonPropertyName("tope")] int? Tope);
 
 /// <summary>Lo que devuelve /api/mtga-device/cartas: las cartas del mazo, con coste e ilustración.</summary>
 internal sealed record RespuestaCartasMazo([property: JsonPropertyName("cartas")] CartaMazoPuente[]? Cartas);

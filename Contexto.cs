@@ -102,6 +102,23 @@ internal static class Contexto
     /// <summary>El evento de la cola («Ladder», «QuickDraft_EOE_…»), o null.</summary>
     public static string? Evento { get; private set; }
 
+    /// <summary>
+    /// UN SOBRE DEL DRAFT, tal como lo apunta Arena: el evento, la edición (en
+    /// mayúsculas, como la nombra 17lands), el número de sobre y de elección
+    /// (desde 1), las cartas del sobre y las que ya llevas, todo en GrpIds.
+    /// </summary>
+    public sealed record SobreDraft(string Evento, string Edicion, int Sobre, int Eleccion, int[] Cartas, int[] Elegidas);
+    /// <summary>El sobre que tienes delante ahora, o null fuera de un draft.</summary>
+    public static SobreDraft? Draft { get; private set; }
+    /// <summary>Llega otro sobre, o acaba el draft (null). Salta en el hilo del vigía.</summary>
+    public static event Action<SobreDraft?>? DraftCambio;
+    /// <summary>Todo lo elegido en un draft que acaba de terminar: el evento, la edición y las cartas (GrpIds).</summary>
+    public sealed record PoolDraft(string Evento, string Edicion, int[] Cartas);
+    /// <summary>
+    /// Acaba de terminar un draft (para el mazo sugerido, ver Draft.cs). No salta
+    /// con lo que se lee al arrancar: un draft de hace una hora no pide mazo ahora.
+    /// </summary>
+    public static event Action<PoolDraft>? DraftTerminado;
     /// <summary>En Limitado, el código de la edición que se está jugando (de «QuickDraft_EOE_…» → «eoe»), o null.</summary>
     public static string? Edicion { get; private set; }
 
@@ -248,6 +265,23 @@ internal static class Contexto
     // dentro de una cadena: \x22 es la comilla, \\ la barra que la precede.
     private static readonly Regex EventoCola = new(@"\\\x22EventName\\\x22:\\\x22([A-Za-z0-9_-]+)", RegexOptions.Compiled);
     private static readonly Regex FormatoMazo = new(@"\\\x22name\\\x22:\\\x22Format\\\x22,\\\x22value\\\x22:\\\x22([A-Za-z]+)", RegexOptions.Compiled);
+    // EL DRAFT CONTRA BOTS (medido el 2026-10-19 con «Y26_FRA_Bot_Draft_20261017»):
+    // la respuesta a BotDraftDraftStatus y a cada BotDraftDraftPick trae, en un
+    // JSON escapado dentro de Payload, el estado («PickNext» o «Completed»), el
+    // sobre y la elección (desde 0), las cartas del sobre y las ya elegidas.
+    private static readonly Regex DraftEstado = new(@"\\\x22DraftStatus\\\x22:\\\x22(\w+)\\\x22,\\\x22PackNumber\\\x22:(\d+),\\\x22PickNumber\\\x22:(\d+)", RegexOptions.Compiled);
+    private static readonly Regex DraftSobre = new(@"\\\x22DraftPack\\\x22:\[([^\]]*)\]", RegexOptions.Compiled);
+    private static readonly Regex DraftElegidas = new(@"\\\x22PickedCards\\\x22:\[([^\]]*)\]", RegexOptions.Compiled);
+    // EL DRAFT CONTRA PERSONAS (Premier y Traditional), SIN PROBAR con un registro
+    // real todavía: según el formato que siguen las herramientas abiertas
+    // (MTGA_Draft_17Lands, docs/02-log-parsing-rules.md), cada sobre llega en
+    // «Draft.Notify» con PackCards, SelfPack y SelfPick (desde 1), sin escapar,
+    // y cada elección en «Event_PlayerDraftMakePick» con GrpId o GrpIds.
+    private static readonly Regex NotifyCartas = new(@"""PackCards"":""([\d,]+)""", RegexOptions.Compiled);
+    private static readonly Regex NotifySobre = new(@"""SelfPack"":(\d+)", RegexOptions.Compiled);
+    private static readonly Regex NotifyEleccion = new(@"""SelfPick"":(\d+)", RegexOptions.Compiled);
+    private static readonly Regex EleccionHumana = new(@"\\\x22GrpIds?\\\x22:\[?([\d,]+)", RegexOptions.Compiled);
+    private static readonly Regex Numero = new(@"\d+", RegexOptions.Compiled);
     // Cada carta del mazo, en el mismo JSON escapado: {\"cardId\":58437,\"quantity\":19}.
     private static readonly Regex CartaDelMazo = new(@"\\\x22cardId\\\x22:(\d+),\\\x22quantity\\\x22:(\d+)", RegexOptions.Compiled);
     // La cronología: turno y jugador activo, vidas por asiento, equipo por
@@ -445,6 +479,7 @@ internal static class Contexto
             acabada = false;
             resto = "";
             idPartida = "";
+            estadoDraft = new EstadoDraft();
             try { RegistroReiniciado?.Invoke(); } catch { /* cosa de quien escucha */ }
             Cambiar(null, null, null, null, null, false, "", [], []);
         }
@@ -471,8 +506,11 @@ internal static class Contexto
 
         string? mazo = Mazo; int? carta = Carta; int? otraCara = CartaOtraCara;
         int? rival = CartaRival; int? rivalOtra = CartaRivalOtraCara; bool enPartida = EnPartida;
+        var draftAntes = estadoDraft.Sobre;
+        var terminadoAntes = estadoDraft.Terminado;
         foreach (var linea in texto.Split('\n'))
         {
+            LineaDeDraft(linea, estadoDraft);
             if (linea.Contains("DeckUpsertDeckV3", StringComparison.Ordinal) || linea.Contains("EventSetDeckV3", StringComparison.Ordinal))
             {
                 var m = NombreMazo.Match(linea);
@@ -703,7 +741,7 @@ internal static class Contexto
                     if (miAsiento != 0 && quien == miAsiento) { carta = obj.Grp; otraCara = obj.Otra; }
                 }
             }
-            if (linea.Contains("MatchGameRoomStateType_Playing", StringComparison.Ordinal)) enPartida = true;
+            if (linea.Contains("MatchGameRoomStateType_Playing", StringComparison.Ordinal)) { enPartida = true; estadoDraft.Sobre = null; }
             if (linea.Contains("MatchGameRoomStateType_MatchCompleted", StringComparison.Ordinal))
             {
                 // El resultado, y la partida entera lista para el resumen.
@@ -769,6 +807,13 @@ internal static class Contexto
         }
         Cambiar(mazo, carta, otraCara, rival, rivalOtra, enPartida, colores, [.. mesa], [.. vistas]);
         ContarBiblioteca();
+        if (!ReferenceEquals(draftAntes, estadoDraft.Sobre) && !MismoSobre(Draft, estadoDraft.Sobre))
+        {
+            Draft = estadoDraft.Sobre;
+            try { DraftCambio?.Invoke(Draft); } catch { /* cosa de quien escucha */ }
+        }
+        if (!ReferenceEquals(terminadoAntes, estadoDraft.Terminado) && estadoDraft.Terminado is { } pool && !leyendoLoViejo)
+            try { DraftTerminado?.Invoke(pool); } catch { /* cosa de quien escucha */ }
         if (turnoPorAvisar != 0 && turnoPorAvisar != turnoAvisado)
         {
             turnoAvisado = turnoPorAvisar;
@@ -786,6 +831,91 @@ internal static class Contexto
         }
         leyendoLoViejo = false;
     }
+
+    /// <summary>Lo que se arrastra de una línea a otra mientras se lee un draft.</summary>
+    internal sealed class EstadoDraft
+    {
+        /// <summary>El último evento al que te uniste: los drafts contra personas no lo repiten en cada sobre.</summary>
+        public string Evento = "";
+        /// <summary>Lo elegido en un draft contra personas, que no viene entero en cada sobre.</summary>
+        public readonly List<int> Elegidas = new();
+        public SobreDraft? Sobre;
+        /// <summary>El último draft terminado, con todo lo elegido.</summary>
+        public PoolDraft? Terminado;
+    }
+    private static EstadoDraft estadoDraft = new();
+
+    /// <summary>«QuickDraft_EOE_20260901» → «EOE»; «Y26_FRA_Bot_Draft_…» → «FRA»: la edición va tras el primer guion bajo.</summary>
+    private static string EdicionDe(string evento)
+    {
+        var partes = evento.Split('_');
+        return partes.Length >= 2 ? partes[1].ToUpperInvariant() : "";
+    }
+
+    private static int[] Numeros(string texto) => Numero.Matches(texto).Select(m => int.Parse(m.Value)).ToArray();
+
+    /// <summary>
+    /// UNA LÍNEA DEL REGISTRO, POR SI TOCA AL DRAFT: pone en <paramref name="e"/>
+    /// el sobre de ahora, o null si el draft acabó. La usan el vigía y el modo de
+    /// taller --probar-draft, que repasa un registro entero.
+    /// </summary>
+    internal static void LineaDeDraft(string linea, EstadoDraft e)
+    {
+        if (linea.Contains("EventJoin", StringComparison.Ordinal))
+        {
+            var ev = EventoCola.Match(linea);
+            if (ev.Success) e.Evento = ev.Groups[1].Value;
+        }
+        if (linea.Contains("DraftStatus", StringComparison.Ordinal))
+        {
+            var est = DraftEstado.Match(linea);
+            if (!est.Success) return;
+            var ev = EventoCola.Match(linea);
+            var evento = ev.Success ? ev.Groups[1].Value : e.Evento;
+            var elegidas = DraftElegidas.Match(linea);
+            if (est.Groups[1].Value != "PickNext")
+            {
+                // «Completed»: trae TODO lo elegido.
+                if (e.Sobre is not null && elegidas.Success) e.Terminado = new PoolDraft(evento, EdicionDe(evento), Numeros(elegidas.Groups[1].Value));
+                e.Sobre = null;
+                return;
+            }
+            var sobre = DraftSobre.Match(linea);
+            e.Sobre = new SobreDraft(evento, EdicionDe(evento), int.Parse(est.Groups[2].Value) + 1, int.Parse(est.Groups[3].Value) + 1,
+                sobre.Success ? Numeros(sobre.Groups[1].Value) : [], elegidas.Success ? Numeros(elegidas.Groups[1].Value) : []);
+            return;
+        }
+        if (linea.Contains("Draft.Notify", StringComparison.Ordinal))
+        {
+            var cartas = NotifyCartas.Match(linea);
+            if (!cartas.Success) return;
+            var s = NotifySobre.Match(linea);
+            var p = NotifyEleccion.Match(linea);
+            var numSobre = s.Success ? int.Parse(s.Groups[1].Value) : 1;
+            var numEleccion = p.Success ? int.Parse(p.Groups[1].Value) : 1;
+            if (numSobre == 1 && numEleccion == 1) e.Elegidas.Clear();
+            e.Sobre = new SobreDraft(e.Evento, EdicionDe(e.Evento), numSobre, numEleccion, Numeros(cartas.Groups[1].Value), e.Elegidas.ToArray());
+            return;
+        }
+        if (linea.Contains("PlayerDraftMakePick", StringComparison.Ordinal) && linea.Contains("==>", StringComparison.Ordinal))
+        {
+            var p = EleccionHumana.Match(linea);
+            if (p.Success) e.Elegidas.AddRange(Numeros(p.Groups[1].Value));
+            return;
+        }
+        // Al elegir mazo, el draft se acabó (en el de bots lo dice además «Completed»).
+        // En el de personas, lo elegido es lo que se fue apuntando.
+        if (linea.Contains("\"CurrentModule\":\"DeckSelect\"", StringComparison.Ordinal))
+        {
+            if (e.Sobre is not null && e.Elegidas.Count >= 20) e.Terminado = new PoolDraft(e.Sobre.Evento, e.Sobre.Edicion, e.Elegidas.ToArray());
+            e.Sobre = null;
+        }
+    }
+
+    /// <summary>El mismo sobre: misma elección del mismo evento con las mismas cartas.</summary>
+    private static bool MismoSobre(SobreDraft? a, SobreDraft? b) =>
+        a is null ? b is null
+        : b is not null && a.Evento == b.Evento && a.Sobre == b.Sobre && a.Eleccion == b.Eleccion && a.Cartas.SequenceEqual(b.Cartas);
 
     /// <summary>Las zonas en las que una carta tuya ha salido de la biblioteca (el limbo no: ahí van los números viejos).</summary>
     private static readonly HashSet<string> FueraDeLaBiblioteca = ["Hand", "Battlefield", "Graveyard", "Exile", "Stack", "Command"];

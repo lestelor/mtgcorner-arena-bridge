@@ -36,7 +36,7 @@ namespace MtgCornerArenaBridge;
 /// </summary>
 internal static class Columna
 {
-    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival, Inicio, Estadisticas, Creador, CartaMazo, MasCartas, Consejo, Biblioteca, Rastreo, Mano, MazoRival, UltimoConsejo, Programa, PlanMazo }
+    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival, Inicio, Estadisticas, Creador, CartaMazo, MasCartas, Consejo, Biblioteca, Rastreo, Mano, MazoRival, UltimoConsejo, Programa, PlanMazo, Draft, CartaDraft, ConsejoDraft, MazoDraft, Entrenador }
 
     /// <summary>
     /// Una fila. Las de contexto traen su etiqueta hecha y un dato (nombre del
@@ -44,7 +44,7 @@ internal static class Columna
     /// que cuelga del desplegable del mazo (el creador y cada carta).
     /// <paramref name="Carta"/>, en las cartas.
     /// </summary>
-    private sealed record Fila(Accion Accion, string Glifo, string Clave, string? Dato = null, string? Etiqueta = null, int Nivel = 0, CartaMazo? Carta = null);
+    private sealed record Fila(Accion Accion, string Glifo, string Clave, string? Dato = null, string? Etiqueta = null, int Nivel = 0, CartaMazo? Carta = null, FilaDraft? Draft = null, string? AyudaPropia = null);
 
     /// <summary>
     /// Una carta del mazo de Arena para el desplegable: su grpId, cuántas, nombre,
@@ -189,6 +189,8 @@ internal static class Columna
         new(Accion.Estadisticas, "\uE9D2", "col_estadisticas", "estadisticas"),
         // El consejo de cada turno, experimental: un interruptor, apagado de salida.
         new(Accion.Consejo, "\uE82F", "col_consejo_no", "consejo"),
+        // Lo que le pides a tu entrenador (estilo, en qu\u00E9 fijarse), para todos sus consejos (1.24.0).
+        new(Accion.Entrenador, "\uE8F2", "col_entrenador", "entrenador"),
         new(Accion.Constructor, "", "col_constructor"),
         // Arranque, versión y salir, que casi no se usan, en UNA fila con sus
         // tres botones (el usuario, 2026-10-09: «me parece bien la propuesta de
@@ -354,6 +356,48 @@ internal static class Columna
     // lleva una fila «Biblioteca · 38 · tierra 45 %» y, al abrirse con el
     // ratón, debajo cada carta con las que quedan y la probabilidad de robarla,
     // con la misma barra que el desplegable del mazo. Cerrada, sólo el icono.
+    /// <summary>
+    /// UNA CARTA DEL SOBRE DEL DRAFT (ver Draft.cs): la carta, su nota de 0 a 5,
+    /// lo que gana cuando está en la mano y si es la que se aconseja.
+    /// </summary>
+    public sealed record FilaDraft(CartaMazo Carta, string Nota, string Gana, bool Mejor);
+    private static volatile FilaDraft[] draft = [];
+    private static string tituloDraft = "";
+    private static int desdeDraft;
+    /// <summary>Lo que dice el entrenador del sobre: la fila corta y el porqué (en la ayuda), o null mientras piensa.</summary>
+    private static (string Corto, string Largo)? consejoDraft;
+
+    /// <summary>
+    /// El sobre de ahora, ya ordenado, o nada (fuera de un draft). Mientras dura
+    /// el draft la columna se queda ABIERTA: el sobre se mira a la vez que el de
+    /// Arena, y abrirla con el ratón en cada elección sería un engorro.
+    /// </summary>
+    public static void Draft(string? titulo, IReadOnlyList<FilaDraft> filas, (string Corto, string Largo)? consejo = null)
+    {
+        var habia = draft.Length > 0;
+        // El mismo sobre con el consejo puesto: no se vuelve arriba de la lista.
+        var mismo = titulo == tituloDraft && filas.Count == draft.Length;
+        draft = filas.ToArray();
+        tituloDraft = titulo ?? "";
+        consejoDraft = consejo;
+        if (!mismo) desdeDraft = 0;
+        Rehacer();
+        if (ventana != IntPtr.Zero && habia != (draft.Length > 0)) PostMessage(ventana, WM_DRAFT, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    /// <summary>La fila «Mazo sugerido» tras un draft (ver Draft.MostrarMazo), o null.</summary>
+    private static string? filaMazoDraft;
+
+    /// <summary>Pone (o quita, con null) la fila para volver a ver el mazo sugerido del draft.</summary>
+    public static void MazoDraft(string? etiqueta)
+    {
+        filaMazoDraft = etiqueta;
+        Rehacer();
+    }
+
+    /// <summary>Abierta sin el ratón encima: en el taller (--abierta) y durante un draft.</summary>
+    private static bool SiempreAbierta => ForzarAbierta || draft.Length > 0;
+
     private static volatile CartaMazo[] rastreo = [];
     private static volatile int bibliotecaTam;
     private static int desdeRastreo;
@@ -443,7 +487,7 @@ internal static class Columna
                 DrawText(hdc, Etiqueta(f), -1, ref r, DT_CALCRECT | DT_SINGLELINE);
                 // El hueco del icono, el texto, y el aire de la derecha (y la
                 // flecha del desplegable, o la ilustración y el coste de la carta).
-                var extra = f.Accion == Accion.Mejorar ? 30 : f.Accion is Accion.CartaMazo or Accion.Rastreo ? 70 : BotonesDe(f) is { } bf ? bf.Length * ANCHO_BOTON + 4 : 0;
+                var extra = f.Accion == Accion.Mejorar ? 30 : f.Accion is Accion.CartaMazo or Accion.Rastreo or Accion.CartaDraft ? 70 : BotonesDe(f) is { } bf ? bf.Length * ANCHO_BOTON + 4 : 0;
                 ancho = Math.Max(ancho, ANCHO_CERRADA + 2 + (r.Right - r.Left) + 16 + extra);
             }
             // Abierto el desplegable, un ancho fijo cómodo: si cambiara con cada
@@ -478,6 +522,27 @@ internal static class Columna
     {
         var contexto = ultimoContexto;
         var arriba = new List<Fila>();
+        // El mazo sugerido del último draft, mientras no empiece otro.
+        if (filaMazoDraft is { } fm && draft.Length == 0) arriba.Add(new Fila(Accion.MazoDraft, GlifoDe(Accion.MazoDraft), "", "mazodraft", fm));
+        // EL SOBRE DEL DRAFT, lo primero: mientras dura, es lo único que se decide.
+        var dr = draft;
+        if (dr.Length > 0)
+        {
+            arriba.Add(new Fila(Accion.Draft, GlifoDe(Accion.Draft), "", "draft", tituloDraft));
+            if (consejoDraft is { } cd)
+                arriba.Add(new Fila(Accion.ConsejoDraft, GlifoDe(Accion.ConsejoDraft), "", "draftconsejo", cd.Corto, AyudaPropia: cd.Largo));
+            if (abierta)
+            {
+                var resto = ALTO_CABECERA + AIRE_ABAJO + (contexto.Length + 1) * ALTO_FILA + ALTO_CARTA * 2;
+                var caben = CartasQueCaben(resto);
+                desdeDraft = Math.Clamp(desdeDraft, 0, Math.Max(0, dr.Length - caben));
+                if (desdeDraft > 0) arriba.Add(new Fila(Accion.MasCartas, "", "", "draft-arriba", Textos.T("col_cartas_antes", desdeDraft), Nivel: 1));
+                foreach (var f in dr.Skip(desdeDraft).Take(caben))
+                    arriba.Add(new Fila(Accion.CartaDraft, "", "", f.Carta.Grp.ToString(), f.Carta.Nombre, 1, f.Carta, f));
+                var despues = dr.Length - desdeDraft - caben;
+                if (despues > 0) arriba.Add(new Fila(Accion.MasCartas, "", "", "draft-abajo", Textos.T("col_cartas_despues", despues), Nivel: 1));
+            }
+        }
         // La mano ofrecida, lo primero: es lo único que hay que decidir YA.
         foreach (var c in contexto.Where(c => c.Accion == Accion.Mano)) arriba.Add(new Fila(c.Accion, GlifoDe(c.Accion), "", c.Dato, c.Etiqueta));
         // Y el último consejo, justo después: antes que la biblioteca (el usuario,
@@ -551,6 +616,9 @@ internal static class Columna
         Accion.Mano => "\uE82F",
         Accion.MazoRival => "\uE77B",
         Accion.UltimoConsejo => "\uE81C",
+        Accion.Draft => "\uE8FD",
+        Accion.ConsejoDraft => "\uE82F",
+        Accion.MazoDraft => "\uE8F1",
         _ => "",
     };
 
@@ -796,7 +864,9 @@ internal static class Columna
         if (ver != visible)
         {
             visible = ver;
-            if (!ver && !ForzarAbierta) { abierta = false; filaBajoRaton = -1; ancho = ANCHO_CERRADA; }
+            if (!ver && !SiempreAbierta) { abierta = false; filaBajoRaton = -1; ancho = ANCHO_CERRADA; }
+            // Vuelve Arena en pleno draft: abierta otra vez.
+            if (ver && SiempreAbierta && !abierta) { abierta = true; ancho = anchoAbierta; Rehacer(); }
         }
         SetWindowPos(ventana, HWND_TOPMOST, x, y, ancho, Alto, SWP_NOACTIVATE | (ver ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
         Recortar(ancho);
@@ -840,7 +910,7 @@ internal static class Columna
         if (desplegado || cartaAbierta is not null)
         {
             desplegado = false; cartaAbierta = null; desdeCarta = 0;
-            if (!ForzarAbierta) { abierta = false; filaBajoRaton = -1; botonBajoRaton = -1; }
+            if (!SiempreAbierta) { abierta = false; filaBajoRaton = -1; botonBajoRaton = -1; }
             Rehacer(); Recolocar();
         }
         try { AlPulsarFuera?.Invoke(); } catch { /* lo de fuera, a su aire */ }
@@ -930,9 +1000,18 @@ internal static class Columna
                 ActualizarAyuda();
                 return IntPtr.Zero;
 
+            // Empieza un draft (se abre) o acaba (se cierra, si no está el ratón encima).
+            case WM_DRAFT:
+                if (SiempreAbierta) abierta = true;
+                else if (!siguiendoRaton) { abierta = false; filaBajoRaton = -1; }
+                Rehacer();
+                Recolocar();
+                InvalidateRect(hWnd, IntPtr.Zero, true);
+                return IntPtr.Zero;
+
             case WM_MOUSELEAVE:
                 siguiendoRaton = false;
-                if (ForzarAbierta) return IntPtr.Zero;
+                if (SiempreAbierta) return IntPtr.Zero;
                 /**
                  * EL DESPLEGABLE DEL MAZO SE QUEDA ABIERTO hasta que se cierra con
                  * su flecha o se elige otra cosa de la columna (el usuario,
@@ -962,6 +1041,7 @@ internal static class Columna
                 // La rueda recorre las cartas del desplegable (o, sin él, las del rastreador), de tres en tres.
                 var giro = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
                 if (desplegado && cartasMazo.Length > 0) desdeCarta = Math.Max(0, desdeCarta - Math.Sign(giro) * 3);
+                else if (draft.Length > 0) desdeDraft = Math.Max(0, desdeDraft - Math.Sign(giro) * 3);
                 else if (rastreo.Length > 0) desdeRastreo = Math.Max(0, desdeRastreo - Math.Sign(giro) * 3);
                 else return IntPtr.Zero;
                 Rehacer();
@@ -1002,6 +1082,12 @@ internal static class Columna
                             _ = Task.Run(async () => { try { await pulsarCarta(Accion.Similares, datoC); } catch { /* lo cuenta quien la lanzó */ } });
                             return IntPtr.Zero;
                         }
+                        case Accion.CartaDraft or Accion.Draft:
+                            return IntPtr.Zero;
+                        case Accion.MasCartas when f.Dato is "draft-arriba" or "draft-abajo":
+                            desdeDraft = Math.Max(0, desdeDraft + (f.Dato == "draft-arriba" ? -8 : 8));
+                            Rehacer(); Recolocar();
+                            return IntPtr.Zero;
                         case Accion.MasCartas when f.Dato is "rast-arriba" or "rast-abajo":
                             desdeRastreo = Math.Max(0, desdeRastreo + (f.Dato == "rast-arriba" ? -8 : 8));
                             Rehacer(); Recolocar();
@@ -1295,6 +1381,11 @@ internal static class Columna
                     PintarBarra(hdc, c, arriba, alto, ancho, sobre, cartaAbierta == c.Grp, enCurso is not null && f.Dato == enCurso, $"{c.N}", coste, false, fChica, fGlifoChico);
                     break;
                 }
+                case Accion.CartaDraft when f.Carta is { } c && f.Draft is { } d:
+                {
+                    PintarBarra(hdc, c, arriba, alto, ancho, sobre, d.Mejor, false, d.Nota, d.Gana, false, fChica, fGlifoChico);
+                    break;
+                }
                 case Accion.Rastreo when f.Carta is { } c:
                 {
                     // El rastreador: cuántas QUEDAN y la probabilidad del siguiente robo; apagada si no queda ninguna.
@@ -1415,7 +1506,7 @@ internal static class Columna
         if (fila == filaAyuda) return;
         if (++ticsCandidata < 2) return;
         filaAyuda = fila;
-        textoAyuda = Textos.T(ClaveAyuda(filas[fila].Accion));
+        textoAyuda = filas[fila].AyudaPropia ?? Textos.T(ClaveAyuda(filas[fila].Accion));
         if (textoAyuda.Length == 0 || textoAyuda.StartsWith("ayuda_", StringComparison.Ordinal)) { ShowWindow(ayuda, SW_HIDE); return; }
 
         // El alto, medido con la fuente con la que se pinta.
@@ -1457,6 +1548,8 @@ internal static class Columna
     private const int ANCHO_VISTA = 244, ALTO_VISTA = 340;
     /// <summary>Mensaje propio: ya bajó la imagen de una carta (WM_APP + 3).</summary>
     private const uint WM_VISTA = 0x8003;
+    /// <summary>Mensaje propio: empieza o acaba un draft (WM_APP + 4).</summary>
+    private const uint WM_DRAFT = 0x8004;
     private static IntPtr vista;
     private static WndProc? procedimientoVista;
     private static string? ficheroVista;
@@ -1499,7 +1592,7 @@ internal static class Columna
         if (vista == IntPtr.Zero) return;
         var filas = Filas;
         var fila = abierta && visible && filaBajoRaton >= 0 && filaBajoRaton < filas.Length ? filaBajoRaton : -1;
-        var url = fila >= 0 && filas[fila].Accion is Accion.CartaMazo or Accion.Rastreo ? filas[fila].Carta?.Imagen : null;
+        var url = fila >= 0 && filas[fila].Accion is Accion.CartaMazo or Accion.Rastreo or Accion.CartaDraft ? filas[fila].Carta?.Imagen : null;
         string? fichero = null;
         if (url is not null)
         {

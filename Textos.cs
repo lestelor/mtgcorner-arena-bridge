@@ -1811,6 +1811,52 @@ internal static class Textos
             "At the start of your main phase, a suggestion of what to play and whether to attack. Experimental: the AI can get it wrong, it never clicks for you, and it is off in competitive events.", "Al empezar tu fase principal, una sugerencia de qué jugar y si atacar. Experimental: la IA puede equivocarse, nunca pulsa por ti y no funciona en eventos competitivos.", "Zu Beginn deiner Hauptphase ein Vorschlag, was du spielen und ob du angreifen solltest. Experimentell: Die KI kann sich irren, klickt nie für dich und ist in kompetitiven Events aus.", "Au début de ta phase principale, une suggestion de quoi jouer et s'il faut attaquer. Expérimental : l'IA peut se tromper, ne clique jamais à ta place et est désactivée en événement compétitif.",
             "No início da tua fase principal, uma sugestão do que jogar e se deves atacar. Experimental: a IA pode enganar-se, nunca clica por ti e não funciona em eventos competitivos.", "All'inizio della tua fase principale, un suggerimento su cosa giocare e se attaccare. Sperimentale: l'IA può sbagliare, non clicca mai al posto tuo ed è spenta negli eventi competitivi.", "メインフェイズの開始時に、何をプレイし攻撃するかの提案を表示します。実験的：AIは間違えることがあり、代わりにクリックすることはなく、競技イベントでは動作しません。", "在你的主阶段开始时，建议出什么牌以及是否攻击。实验性：AI 可能出错，绝不会替你点击，在竞技赛事中不启用。",
         ],
+        // La fila «Instrucciones del entrenador» y su editor (1.24.0, ver EditorInstrucciones.cs).
+        ["col_entrenador"] =
+        [
+            "Coach instructions", "Instrucciones del entrenador", "Anweisungen für den Coach", "Consignes pour le coach",
+            "Instruções para o treinador", "Istruzioni per l'allenatore", "コーチへの指示", "给教练的指示",
+        ],
+        ["ayuda_entrenador"] =
+        [
+            "Tell your coach how you want to be helped: shorter, more detail, what to focus on. It applies to the advice each turn, the mulligan and the draft.", "Dile a tu entrenador cómo quieres que te ayude: más corto, más detalle, en qué fijarse. Vale para el consejo de cada turno, el mulligan y el draft.", "Sag deinem Coach, wie er dir helfen soll: kürzer, ausführlicher, worauf er achten soll. Gilt für den Tipp pro Zug, den Mulligan und den Draft.", "Dis à ton coach comment tu veux être aidé : plus court, plus détaillé, sur quoi se concentrer. Ça vaut pour le conseil à chaque tour, le mulligan et le draft.",
+            "Diz ao teu treinador como queres que te ajude: mais curto, mais detalhe, em que se focar. Vale para o conselho de cada turno, o mulligan e o draft.", "Di' al tuo allenatore come vuoi essere aiutato: più breve, più dettagli, su cosa concentrarsi. Vale per il consiglio a ogni turno, il mulligan e il draft.", "コーチにどう手伝ってほしいかを伝えます。短く、詳しく、どこに注目するかなど。毎ターンのアドバイス、マリガン、ドラフトに反映されます。", "告诉你的教练你希望它怎么帮你：更简短、更详细、关注什么。适用于每回合建议、调度和轮抽。",
+        ],
+        ["instr_titulo"] =
+        [
+            "MTG Corner · Coach instructions", "MTG Corner · Instrucciones del entrenador", "MTG Corner · Anweisungen für den Coach", "MTG Corner · Consignes pour le coach",
+            "MTG Corner · Instruções para o treinador", "MTG Corner · Istruzioni per l'allenatore", "MTG Corner・コーチへの指示", "MTG Corner・给教练的指示",
+        ],
+        ["instr_explicacion"] =
+        [
+            "Write how you want your coach to help you, up to {0} characters. For example: \"I'm new to Limited, explain the keywords\" or \"keep it very short\". It changes the tone and what it looks at, never the rules it follows.", "Escribe cómo quieres que te ayude tu entrenador, hasta {0} caracteres. Por ejemplo: \"soy nuevo en Limitado, explícame las habilidades\" o \"sé muy breve\". Cambia el tono y en qué se fija, nunca las reglas que sigue.", "Schreib, wie dein Coach dir helfen soll, bis zu {0} Zeichen. Zum Beispiel: \"Ich bin neu in Limited, erklär mir die Schlüsselwörter\" oder \"fass dich ganz kurz\". Das ändert den Ton und worauf er achtet, nie die Regeln, denen er folgt.", "Écris comment tu veux que ton coach t'aide, jusqu'à {0} caractères. Par exemple : \"je débute en Limité, explique-moi les capacités\" ou \"sois très bref\". Ça change le ton et ce qu'il regarde, jamais les règles qu'il suit.",
+            "Escreve como queres que o teu treinador te ajude, até {0} caracteres. Por exemplo: \"sou novo em Limitado, explica-me as habilidades\" ou \"sê muito breve\". Muda o tom e aquilo em que se foca, nunca as regras que segue.", "Scrivi come vuoi che ti aiuti il tuo allenatore, fino a {0} caratteri. Per esempio: \"sono nuovo al Limited, spiegami le abilità\" o \"sii molto breve\". Cambia il tono e ciò su cui si concentra, mai le regole che segue.", "コーチにどう手伝ってほしいかを{0}文字まで書いてください。例：「リミテッド初心者なのでキーワード能力を説明して」「とても短く」。口調と注目点が変わりますが、従うルールは変わりません。", "写下你希望教练怎么帮你，最多 {0} 个字符。例如：“我是限制赛新手，给我解释关键字异能”或“说得非常简短”。它会改变语气和关注点，但不会改变它遵守的规则。",
+        ],
+        ["instr_guardar"] =
+        [
+            "Save", "Guardar", "Speichern", "Enregistrer",
+            "Guardar", "Salva", "保存", "保存",
+        ],
+        ["instr_cancelar"] =
+        [
+            "Cancel", "Cancelar", "Abbrechen", "Annuler",
+            "Cancelar", "Annulla", "キャンセル", "取消",
+        ],
+        ["instr_guardadas"] =
+        [
+            "Got it. I'll help you that way from my next piece of advice.", "Entendido. Desde el próximo consejo te ayudo así.", "Verstanden. Ab meinem nächsten Tipp helfe ich dir so.", "Compris. Dès mon prochain conseil, je t'aide comme ça.",
+            "Entendido. A partir do próximo conselho ajudo-te assim.", "Capito. Dal prossimo consiglio ti aiuto così.", "了解。次のアドバイスからそのように手伝います。", "明白了。从下一条建议开始我就这样帮你。",
+        ],
+        ["instr_borradas"] =
+        [
+            "Instructions deleted. I'm back to my usual style.", "Instrucciones borradas. Vuelvo a mi estilo de siempre.", "Anweisungen gelöscht. Ich kehre zu meinem üblichen Stil zurück.", "Consignes supprimées. Je reviens à mon style habituel.",
+            "Instruções apagadas. Volto ao meu estilo de sempre.", "Istruzioni cancellate. Torno al mio stile di sempre.", "指示を削除しました。いつものスタイルに戻ります。", "已删除指示。我恢复平时的风格。",
+        ],
+        ["instr_fallo"] =
+        [
+            "Couldn't reach MTG Corner to read or save your instructions. Try again in a moment.", "No se pudo hablar con MTG Corner para leer o guardar tus instrucciones. Prueba otra vez dentro de un momento.", "MTG Corner war nicht erreichbar, um deine Anweisungen zu lesen oder zu speichern. Versuch es gleich noch einmal.", "Impossible de joindre MTG Corner pour lire ou enregistrer tes consignes. Réessaie dans un moment.",
+            "Não foi possível falar com o MTG Corner para ler ou guardar as tuas instruções. Tenta outra vez daqui a pouco.", "Non è stato possibile contattare MTG Corner per leggere o salvare le tue istruzioni. Riprova tra poco.", "指示の読み込みまたは保存のために MTG Corner に接続できませんでした。少ししてからもう一度お試しください。", "无法连接 MTG Corner 来读取或保存你的指示。请稍后再试。",
+        ],
         ["consejo_titulo"] =
         [
             "Advice · turn {0} (experimental)", "Consejo · turno {0} (experimental)", "Tipp · Zug {0} (experimentell)", "Conseil · tour {0} (expérimental)",
@@ -1922,6 +1968,59 @@ internal static class Textos
             "Library · {0} · land {1}", "Biblioteca · {0} · tierra {1}", "Bibliothek · {0} · Land {1}", "Bibliothèque · {0} · terrain {1}",
             "Grimório · {0} · terreno {1}", "Grimorio · {0} · terra {1}", "ライブラリー・{0}・土地 {1}", "牌库・{0}・地 {1}",
         ],
+        // El draft en la columna (Draft.cs): la cabecera del sobre y una carta sin datos.
+        ["col_draft"] =
+        [
+            "Pack {0} · pick {1}", "Sobre {0} · elección {1}", "Booster {0} · Pick {1}", "Booster {0} · choix {1}",
+            "Pacote {0} · escolha {1}", "Busta {0} · scelta {1}", "パック{0}・ピック{1}", "第{0}包・第{1}抽",
+        ],
+        ["draft_sin_datos"] =
+        [
+            "No 17lands data", "Sin datos de 17lands", "Keine 17lands-Daten", "Pas de données 17lands",
+            "Sem dados do 17lands", "Nessun dato 17lands", "17landsのデータなし", "无 17lands 数据",
+        ],
+        // El entrenador en el draft (Draft.cs): su fila en la columna y el principio del aviso.
+        ["draft_entrenador"] =
+        [
+            "Coach: take {0}", "Entrenador: coge {0}", "Trainer: nimm {0}", "Coach : prends {0}",
+            "Treinador: escolhe {0}", "Allenatore: prendi {0}", "コーチ：{0}を取ろう", "教练：拿 {0}",
+        ],
+        ["draft_coge"] =
+        [
+            "Take {0}", "Coge {0}", "Nimm {0}", "Prends {0}",
+            "Escolhe {0}", "Prendi {0}", "{0}を取ろう", "拿 {0}",
+        ],
+        // El mazo sugerido al acabar el draft (Draft.MostrarMazo).
+        ["draft_mazo_titulo"] =
+        [
+            "Suggested deck · {0} · {1}", "Mazo sugerido · {0} · {1}", "Deckvorschlag · {0} · {1}", "Deck suggéré · {0} · {1}",
+            "Baralho sugerido · {0} · {1}", "Mazzo suggerito · {0} · {1}", "おすすめデッキ・{0}・{1}", "推荐套牌・{0}・{1}",
+        ],
+        ["draft_mazo_fila"] =
+        [
+            "Suggested deck ({0})", "Mazo sugerido ({0})", "Deckvorschlag ({0})", "Deck suggéré ({0})",
+            "Baralho sugerido ({0})", "Mazzo suggerito ({0})", "おすすめデッキ（{0}）", "推荐套牌（{0}）",
+        ],
+        ["draft_mazo_criaturas"] =
+        [
+            "Creatures ({0})", "Criaturas ({0})", "Kreaturen ({0})", "Créatures ({0})",
+            "Criaturas ({0})", "Creature ({0})", "クリーチャー（{0}）", "生物（{0}）",
+        ],
+        ["draft_mazo_hechizos"] =
+        [
+            "Other spells ({0})", "Otros hechizos ({0})", "Andere Zauber ({0})", "Autres sorts ({0})",
+            "Outras mágicas ({0})", "Altre magie ({0})", "その他の呪文（{0}）", "其他咒语（{0}）",
+        ],
+        ["draft_mazo_plan"] =
+        [
+            "How to play this deck", "Cómo se juega este mazo", "So spielst du dieses Deck", "Comment jouer ce deck",
+            "Como jogar este baralho", "Come giocare questo mazzo", "このデッキの戦い方", "这副套牌怎么打",
+        ],
+        ["tierra_w"] = ["Plains", "Llanura", "Ebene", "Plaine", "Planície", "Pianura", "平地", "平原"],
+        ["tierra_u"] = ["Island", "Isla", "Insel", "Île", "Ilha", "Isola", "島", "海岛"],
+        ["tierra_b"] = ["Swamp", "Pantano", "Sumpf", "Marais", "Pântano", "Palude", "沼", "沼泽"],
+        ["tierra_r"] = ["Mountain", "Montaña", "Gebirge", "Montagne", "Montanha", "Montagna", "山", "山脉"],
+        ["tierra_g"] = ["Forest", "Bosque", "Wald", "Forêt", "Floresta", "Foresta", "森", "树林"],
         ["col_mano"] =
         [
             "Hand: {0}", "Mano: {0}", "Hand: {0}", "Main : {0}",
