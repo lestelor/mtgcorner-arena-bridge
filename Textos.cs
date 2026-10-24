@@ -1410,8 +1410,8 @@ internal static class Textos
         ],
         ["est_escalera_nota"] =
         [
-            "last {0} games", "últimas {0} partidas", "letzte {0} Partien", "{0} dernières parties",
-            "últimas {0} partidas", "ultime {0} partite", "直近 {0} 試合", "最近 {0} 局",
+            "last {0} ranked games", "últimas {0} clasificatorias", "letzte {0} Ranglisten-Partien", "{0} dernières parties classées",
+            "últimas {0} ranqueadas", "ultime {0} partite classificate", "直近 {0} ランク戦", "最近 {0} 局排位",
         ],
         ["est_mazos"] =
         [
@@ -1470,8 +1470,8 @@ internal static class Textos
         ],
         ["est_mazo_no_subido"] =
         [
-            "This deck isn't on MTG Corner yet: import your collection from the menu to see its curve.", "Este mazo aún no está en MTG Corner: importa tu colección desde el menú para ver su curva.", "Dieses Deck ist noch nicht auf MTG Corner: Importiere deine Sammlung über das Menü, um seine Kurve zu sehen.", "Ce deck n'est pas encore sur MTG Corner : importe ta collection depuis le menu pour voir sa courbe.",
-            "Este baralho ainda não está no MTG Corner: importe sua coleção pelo menu para ver a curva.", "Questo mazzo non è ancora su MTG Corner: importa la collezione dal menu per vederne la curva.", "このデッキはまだ MTG Corner にありません。メニューからコレクションを取り込むとカーブが表示されます。", "该套牌尚未同步到 MTG Corner：从菜单导入收藏即可查看其曲线。",
+            "Select this deck once in Arena with the program open and its curve will show here.", "Elige este mazo una vez en Arena con el programa abierto y su curva saldrá aquí.", "Wähle dieses Deck einmal in Arena, während das Programm läuft, dann erscheint hier seine Kurve.", "Choisis ce deck une fois dans Arena avec le programme ouvert et sa courbe s'affichera ici.",
+            "Escolha este baralho uma vez no Arena com o programa aberto e a curva aparecerá aqui.", "Scegli questo mazzo una volta in Arena con il programma aperto e qui comparirà la sua curva.", "プログラムを開いたまま Arena でこのデッキを一度選ぶと、ここにカーブが表示されます。", "在程序运行时于 Arena 中选择一次该套牌，这里就会显示其曲线。",
         ],
         ["est_vacio"] =
         [
@@ -1517,6 +1517,11 @@ internal static class Textos
         [
             "All", "Todos", "Alle", "Tous",
             "Todos", "Tutti", "すべて", "全部",
+        ],
+        ["est_juegos_todos"] =
+        [
+            "All games", "Todos los juegos", "Alle Spiele", "Tous les jeux",
+            "Todos os jogos", "Tutti i giochi", "すべてのゲーム", "全部玩法",
         ],
         ["tipo_creature"] =
         [

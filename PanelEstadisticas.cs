@@ -29,9 +29,12 @@ internal static partial class PanelCartas
 {
     // ── Los datos, ya preparados por Program ──────────────────────────────
 
-    public sealed record PartidaEst(DateTime Cuando, bool Gane, string? Mazo);
+    /// <summary>Una partida. <c>Modo</c>: su juego («ranked:standard», «standardbrawl»…, ver lib/modosArena.ts en la web), desde la 1.26.0.</summary>
+    public sealed record PartidaEst(DateTime Cuando, bool Gane, string? Mazo, string? Modo = null);
     /// <summary>Un punto de la escalera. <c>Puesto</c>: en mítico, el número de la clasificación, si se sabe (1.22.3).</summary>
-    public sealed record PeldanoEst(int Antes, int Pos, string Clase, int Nivel, bool Gane, DateTime Cuando, string? Mazo, bool Subio, int? Puesto = null);
+    public sealed record PeldanoEst(int Antes, int Pos, string Clase, int Nivel, bool Gane, DateTime Cuando, string? Mazo, bool Subio, int? Puesto = null, string? Modo = null);
+    /// <summary>Un juego con partidas, con su nombre ya en tu idioma.</summary>
+    public sealed record ModoEst(string Id, string Nombre, int Ganadas, int Perdidas);
     public sealed record SegmentoCurva(string Tipo, int N, string[] Cartas);
     public sealed record ColumnaCurva(int Cmc, int Total, SegmentoCurva[] Tipos);
     public sealed record AnalisisMazo(int Tierras, double Medio, double ManoBuena, double TierraT3, ColumnaCurva[] Curva);
@@ -40,14 +43,21 @@ internal static partial class PanelCartas
     public sealed record Estadisticas(
         int Ganadas, int Perdidas, PartidaEst[] Partidas, MazoEst[] Mazos,
         string? Clase, int? Nivel, PeldanoEst[] Escalera,
-        IReadOnlyDictionary<string, string> Iconos, string? MazoArena, int? Puesto = null);
+        IReadOnlyDictionary<string, string> Iconos, string? MazoArena, int? Puesto = null, ModoEst[]? Modos = null);
 
     private static Estadisticas? est;
     /// <summary>El mazo elegido en el selector: -1 es «Todos».</summary>
     private static int mazoEst = -1;
+    /// <summary>
+    /// EL JUEGO ELEGIDO: -1 es «Todos los juegos». Pedido del usuario el
+    /// 2026-10-24: «no es lo mismo ranked standard que standard brawl, o
+    /// competitive brawl». Filtra igual que el mazo, y los dos se combinan.
+    /// </summary>
+    private static int modoEst = -1;
 
     // Dónde está cada cosa en la ventana, para el ratón (se rehacen al pintar).
     private static RECT[] rectFichasEst = [];
+    private static RECT[] rectModosEst = [];
     private static RECT[] rectPuntosEst = [];
     private static (int X, int Y)[] centroPuntosEst = [];
     private static PuntoEvolucion[] puntosEst = [];
@@ -55,7 +65,7 @@ internal static partial class PanelCartas
     private static int desdePeldano;
     private static (RECT R, string Texto)[] rectSegmentosEst = [];
 
-    private const int BAJO_FICHA_EST = -1000, BAJO_PUNTO_EST = -900, BAJO_PELDANO_EST = -2000, BAJO_SEGMENTO_EST = -3000;
+    private const int BAJO_FICHA_EST = -1000, BAJO_PUNTO_EST = -900, BAJO_PELDANO_EST = -2000, BAJO_SEGMENTO_EST = -3000, BAJO_MODO_EST = -4000;
 
     private const int ALTO_TARJETAS = 112, ALTO_SELECTOR = 46, ALTO_ESCALERA = 290, ALTO_INFERIOR = 340;
     private const int RADIO = 10;
@@ -257,13 +267,25 @@ internal static partial class PanelCartas
     // ── Lo que depende del mazo elegido ───────────────────────────────────
 
     private static string? NombreElegido(Estadisticas e) => mazoEst >= 0 && mazoEst < e.Mazos.Length ? e.Mazos[mazoEst].Nombre : null;
-    private static PartidaEst[] Filtradas(Estadisticas e) => NombreElegido(e) is { } n ? e.Partidas.Where(p => p.Mazo == n).ToArray() : e.Partidas;
+    private static ModoEst[] Modos(Estadisticas e) => e.Modos ?? [];
+    private static ModoEst? ModoElegido(Estadisticas e) => modoEst >= 0 && modoEst < Modos(e).Length ? Modos(e)[modoEst] : null;
+    /// <summary>Las partidas del juego elegido (todas con «Todos los juegos»).</summary>
+    private static PartidaEst[] DelModo(Estadisticas e) => ModoElegido(e) is { } m ? e.Partidas.Where(p => p.Modo == m.Id).ToArray() : e.Partidas;
+    private static PartidaEst[] Filtradas(Estadisticas e) => NombreElegido(e) is { } n ? DelModo(e).Where(p => p.Mazo == n).ToArray() : DelModo(e);
+    /// <summary>Con un juego elegido, sólo los mazos que tienen partidas en él (y el elegido, si lo hay).</summary>
+    private static bool MazoVisible(Estadisticas e, int i) =>
+        ModoElegido(e) is not { } m || i == mazoEst || e.Partidas.Any(p => p.Modo == m.Id && p.Mazo == e.Mazos[i].Nombre);
 
-    /// <summary>El mazo cuya curva se enseña: el elegido; con «Todos», el que Arena tiene puesto; si no, el primero que tenga lista.</summary>
+    /// <summary>
+    /// El mazo cuya curva se enseña: el elegido; con «Todos», el que Arena tiene
+    /// puesto; si no, el primero que tenga lista. Con un juego elegido, entre los
+    /// que tienen partidas en él.
+    /// </summary>
     private static MazoEst? MazoDeLaCurva(Estadisticas e)
     {
         if (mazoEst >= 0 && mazoEst < e.Mazos.Length) return e.Mazos[mazoEst];
-        return e.Mazos.FirstOrDefault(m => m.Nombre == e.MazoArena && m.Analisis is not null) ?? e.Mazos.FirstOrDefault(m => m.Analisis is not null);
+        var visibles = e.Mazos.Where((m, i) => MazoVisible(e, i)).ToArray();
+        return visibles.FirstOrDefault(m => m.Nombre == e.MazoArena && m.Analisis is not null) ?? visibles.FirstOrDefault(m => m.Analisis is not null);
     }
 
     /// <summary>La evolución: por día si hay varios (los últimos 30), si no partida a partida (las últimas 60).</summary>
@@ -290,14 +312,25 @@ internal static partial class PanelCartas
 
     // ── La disposición ────────────────────────────────────────────────────
 
-    private static void AnadirBloquesEstadisticas(List<Bloque> lista, Estadisticas e)
+    private static void AnadirBloquesEstadisticas(List<Bloque> lista, Estadisticas e, IntPtr hdc, int ancho)
     {
         lista.Add(new Bloque("", false, false, ALTO_TARJETAS, Especial: "est_tarjetas", Col: 0));
-        lista.Add(new Bloque("", false, false, ALTO_SELECTOR, Especial: "est_selector", Col: 0));
+        // Los juegos, encima de los mazos: sólo si se ha jugado a más de uno.
+        if (Modos(e).Length >= 2)
+        {
+            lineasModos = CabenEnUnaLinea(hdc, FichasDeModos(e), ancho, conPunto: false) ? 1 : 2;
+            lista.Add(new Bloque("", false, false, ALTO_SELECTOR + (lineasModos - 1) * 40, Especial: "est_modos", Col: 0));
+        }
+        // Medido con «Todos los juegos»: con un juego elegido salen menos mazos, y caben igual.
+        var modoAntes = modoEst; modoEst = -1;
+        lineasMazos = CabenEnUnaLinea(hdc, FichasDeMazos(e), ancho, conPunto: true) ? 1 : 2;
+        modoEst = modoAntes;
+        lista.Add(new Bloque("", false, false, ALTO_SELECTOR + (lineasMazos - 1) * 40, Especial: "est_selector", Col: 0));
         if (e.Escalera.Length >= 2) lista.Add(new Bloque("", false, false, ALTO_ESCALERA, Especial: "est_escalera", Col: 0));
         lista.Add(new Bloque("", false, false, ALTO_INFERIOR, Especial: "est_evolucion", Col: 1));
         lista.Add(new Bloque("", false, false, ALTO_INFERIOR, Especial: "est_curva", Col: 2));
         rectFichasEst = new RECT[e.Mazos.Length + 1];
+        rectModosEst = new RECT[Modos(e).Length + 1];
     }
 
     private static void PintarEstadistica(IntPtr zona, string especial, Estadisticas e, int y, int alto, int arriba, int bx, int bw)
@@ -305,6 +338,7 @@ internal static partial class PanelCartas
         switch (especial)
         {
             case "est_tarjetas": PintarTarjetas(zona, e, y, bx, bw); break;
+            case "est_modos": PintarModos(zona, e, y, arriba, bx, bw); break;
             case "est_selector": PintarSelector(zona, e, y, arriba, bx, bw); break;
             case "est_escalera": PintarEscalera(zona, e, y, alto, arriba, bx, bw); break;
             case "est_evolucion": PintarEvolucion(zona, e, y, alto, arriba, bx, bw); break;
@@ -319,18 +353,30 @@ internal static partial class PanelCartas
         if (est is null) return 0;
         static bool Dentro(RECT r, int x, int y) => r.Right > 0 && x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
         for (var i = 0; i < rectFichasEst.Length; i++) if (Dentro(rectFichasEst[i], x, y)) return BAJO_FICHA_EST - i;
+        for (var i = 0; i < rectModosEst.Length; i++) if (Dentro(rectModosEst[i], x, y)) return BAJO_MODO_EST - i;
         for (var i = 0; i < rectSegmentosEst.Length; i++) if (Dentro(rectSegmentosEst[i].R, x, y)) return BAJO_SEGMENTO_EST - i;
         for (var i = 0; i < rectPuntosEst.Length; i++) if (Dentro(rectPuntosEst[i], x, y)) return BAJO_PUNTO_EST - i;
         for (var i = 0; i < rectPeldanosEst.Length; i++) if (Dentro(rectPeldanosEst[i], x, y)) return BAJO_PELDANO_EST - i;
         return 0;
     }
 
-    private static bool PulsableEstadisticas(int i) => est is not null && i <= BAJO_FICHA_EST && i > BAJO_FICHA_EST - rectFichasEst.Length;
+    private static bool EsFichaDeModo(int i) => i <= BAJO_MODO_EST && i > BAJO_MODO_EST - rectModosEst.Length;
+    private static bool PulsableEstadisticas(int i) => est is not null && (i <= BAJO_FICHA_EST && i > BAJO_FICHA_EST - rectFichasEst.Length || EsFichaDeModo(i));
 
-    /// <summary>Pulsar una ficha elige ese mazo (o «Todos»); pulsar la elegida vuelve a «Todos».</summary>
+    /// <summary>Pulsar una ficha elige ese mazo o ese juego (o «Todos»); pulsar la elegida vuelve a «Todos».</summary>
     private static bool PulsarEstadisticas(int i, IntPtr ventana)
     {
         if (!PulsableEstadisticas(i)) return false;
+        if (EsFichaDeModo(i))
+        {
+            var juego = BAJO_MODO_EST - i - 1;
+            modoEst = juego == modoEst ? -1 : juego;
+            // El mazo elegido, si no tiene partidas en el juego nuevo, se suelta.
+            if (est is { } e && mazoEst >= 0 && mazoEst < e.Mazos.Length && ModoElegido(e) is { } m
+                && !e.Partidas.Any(p => p.Modo == m.Id && p.Mazo == e.Mazos[mazoEst].Nombre)) mazoEst = -1;
+            InvalidateRect(ventana, IntPtr.Zero, false);
+            return true;
+        }
         var elegido = BAJO_FICHA_EST - i - 1;
         mazoEst = elegido == mazoEst ? -1 : elegido;
         InvalidateRect(ventana, IntPtr.Zero, false);
@@ -346,7 +392,9 @@ internal static partial class PanelCartas
         int X(int i) => bx + i * (w + hueco);
         // Con un mazo elegido, sus números; el rango es de la cuenta.
         var elegido = mazoEst >= 0 && mazoEst < e.Mazos.Length ? e.Mazos[mazoEst] : null;
-        var ganadas = elegido?.Ganadas ?? e.Ganadas; var perdidas = elegido?.Perdidas ?? e.Perdidas;
+        // Con un juego elegido, lo de ese juego (y de ese mazo, si lo hay), contado aquí.
+        var (ganadas, perdidas) = ModoElegido(e) is null ? (elegido?.Ganadas ?? e.Ganadas, elegido?.Perdidas ?? e.Perdidas)
+            : (Filtradas(e).Count(p => p.Gane), Filtradas(e).Count(p => !p.Gane));
         var total = ganadas + perdidas;
         var pct = total > 0 ? (double)ganadas / total : 0;
         var partidas = Filtradas(e);
@@ -434,35 +482,105 @@ internal static partial class PanelCartas
         else Escribir(hdc, Textos.T("est_sin_rango"), X(3) + pad, y + 40, w - pad * 2, 30, 20, 600, APAGADO, una | DT_END_ELLIPSIS);
     }
 
-    // ── El selector de mazos ──────────────────────────────────────────────
+    // ── Los selectores: de juegos y de mazos ──────────────────────────────
 
-    private static void PintarSelector(IntPtr hdc, Estadisticas e, int y, int arriba, int bx, int bw)
+    private sealed record Ficha(string Nombre, string Datos, (int R, int G, int B) Color, bool Arena, bool Visible = true);
+
+    private static string Marcador(int ganadas, int perdidas) =>
+        ganadas + perdidas > 0 ? $"{ganadas}–{perdidas} · {Pct((double)ganadas / (ganadas + perdidas))}" : "0–0";
+
+    /// <summary>
+    /// «Todos los juegos» y una ficha por juego con partidas (1.26.0). Sólo sale si
+    /// hay más de uno. Sin punto (el color es de los mazos) ni porcentaje, y en dos
+    /// líneas desde cinco juegos: en una, con siete, los nombres salían cortados
+    /// («Clasific…») y el último no cabía.
+    /// </summary>
+    private static void PintarModos(IntPtr hdc, Estadisticas e, int y, int arriba, int bx, int bw) =>
+        PintarFichas(hdc, FichasDeModos(e), modoEst + 1, BAJO_MODO_EST, rectModosEst, y, arriba, bx, bw, lineasModos, conPunto: false);
+
+    private static List<Ficha> FichasDeModos(Estadisticas e)
     {
-        // «Todos» y una ficha por mazo: punto de su color, nombre, V–D y %.
-        var fichas = new List<(string Nombre, string Datos, (int R, int G, int B) Color, bool Arena)>
+        var fichas = new List<Ficha> { new(Textos.T("est_juegos_todos"), $"{e.Ganadas}–{e.Perdidas}", (125, 211, 252), false) };
+        foreach (var m in Modos(e)) fichas.Add(new(m.Nombre, $"{m.Ganadas}–{m.Perdidas}", (125, 211, 252), false));
+        return fichas;
+    }
+
+    /// <summary>Las líneas de la fila de juegos: una si caben con el nombre entero, dos si no. Se mide al disponer, que es cuando se fija el alto.</summary>
+    private static int lineasModos = 1;
+
+    private static bool CabenEnUnaLinea(IntPtr hdc, List<Ficha> fichas, int ancho, bool conPunto)
+    {
+        const int hueco = 8, padDer = 14;
+        var padIzq = conPunto ? 30 : 16;
+        var total = fichas.Sum(f => padIzq + Math.Min(Medir(hdc, f.Nombre, 14, 600), 400) + 10 + Medir(hdc, f.Datos, 13, 500) + padDer) + hueco * (fichas.Count - 1);
+        return total <= ancho;
+    }
+
+    private static void PintarSelector(IntPtr hdc, Estadisticas e, int y, int arriba, int bx, int bw) =>
+        PintarFichas(hdc, FichasDeMazos(e), mazoEst + 1, BAJO_FICHA_EST, rectFichasEst, y, arriba, bx, bw, lineasMazos);
+
+    /// <summary>Las líneas de la fila de mazos, como las de juegos: los nombres también salían cortados («Mono-White…»).</summary>
+    private static int lineasMazos = 1;
+
+    private static List<Ficha> FichasDeMazos(Estadisticas e)
+    {
+        // «Todos» y una ficha por mazo: punto de su color, nombre, V–D y %. Con un
+        // juego elegido, las cuentas son las de ese juego y sólo salen sus mazos.
+        var modo = ModoElegido(e);
+        var delModo = DelModo(e);
+        var todosGan = modo is null ? e.Ganadas : delModo.Count(p => p.Gane);
+        var todosPer = modo is null ? e.Perdidas : delModo.Length - todosGan;
+        var fichas = new List<Ficha> { new(Textos.T("est_todos"), $"{todosGan}–{todosPer}", (125, 211, 252), false) };
+        for (var i = 0; i < e.Mazos.Length; i++)
         {
-            (Textos.T("est_todos"), $"{e.Ganadas}–{e.Perdidas}", (125, 211, 252), false),
-        };
-        foreach (var m in e.Mazos)
-        {
-            var j = m.Ganadas + m.Perdidas;
-            fichas.Add((m.Nombre, j > 0 ? $"{m.Ganadas}–{m.Perdidas} · {Pct((double)m.Ganadas / j)}" : "0–0", ColorMazo(m.Nombre), m.Nombre == e.MazoArena));
+            var m = e.Mazos[i];
+            var (gan, per) = modo is null ? (m.Ganadas, m.Perdidas)
+                : (delModo.Count(p => p.Mazo == m.Nombre && p.Gane), delModo.Count(p => p.Mazo == m.Nombre && !p.Gane));
+            fichas.Add(new(m.Nombre, Marcador(gan, per), ColorMazo(m.Nombre), m.Nombre == e.MazoArena, MazoVisible(e, i)));
         }
-        const int alto = 34, hueco = 8, padIzq = 30, padDer = 14;
-        // Los anchos: el nombre se recorta si no caben todas en una fila.
+        return fichas;
+    }
+
+    /// <summary>
+    /// Una fila de fichas. `elegidaFicha` es su índice en `fichas` (0, la de
+    /// «Todos»); las que no se ven o no caben se quedan sin sitio para el ratón.
+    /// </summary>
+    private static void PintarFichas(IntPtr hdc, List<Ficha> fichas, int elegidaFicha, int bajoBase, RECT[] destino, int y, int arriba, int bx, int bw,
+        int lineas = 1, bool conPunto = true)
+    {
+        const int alto = 34, hueco = 8, padDer = 14, entreLineas = 6;
+        var padIzq = conPunto ? 30 : 16;
+        // Los anchos: el nombre se recorta si no caben todas en las líneas que hay.
         var anchosDatos = fichas.Select(f => Medir(hdc, f.Datos, 13, 500)).ToArray();
         var anchosNombre = fichas.Select(f => Medir(hdc, f.Nombre, 14, 600)).ToArray();
         int AnchoFicha(int i, int maxNombre) => padIzq + Math.Min(anchosNombre[i], maxNombre) + 10 + anchosDatos[i] + padDer;
+        var visibles = Enumerable.Range(0, fichas.Count).Where(i => fichas[i].Visible).ToArray();
+        // Cuántas líneas hacen falta con ese tope de nombre, repartiendo de izquierda a derecha.
+        int LineasCon(int maxNombre)
+        {
+            int n = 1, x0 = 0;
+            foreach (var i in visibles)
+            {
+                var w = AnchoFicha(i, maxNombre);
+                if (x0 > 0 && x0 + w > bw) { n++; x0 = 0; }
+                x0 += w + hueco;
+            }
+            return n;
+        }
         var maxNombre = 400;
-        while (maxNombre > 60 && Enumerable.Range(0, fichas.Count).Sum(i => AnchoFicha(i, maxNombre)) + hueco * (fichas.Count - 1) > bw) maxNombre -= 10;
+        while (maxNombre > 60 && LineasCon(maxNombre) > lineas) maxNombre -= 10;
 
         var x = bx;
+        var linea = 0;
         var rects = new RECT[fichas.Count];
         for (var i = 0; i < fichas.Count; i++)
         {
+            if (!fichas[i].Visible) { rects[i] = default; continue; }
             var w = AnchoFicha(i, maxNombre);
+            if (x > bx && x + w > bx + bw && linea + 1 < lineas) { linea++; x = bx; }
             if (x + w > bx + bw) { rects[i] = default; continue; }
-            rects[i] = new RECT { Left = x, Top = y + 4, Right = x + w, Bottom = y + 4 + alto };
+            var top = y + 4 + linea * (alto + entreLineas);
+            rects[i] = new RECT { Left = x, Top = top, Right = x + w, Bottom = top + alto };
             x += w + hueco;
         }
         var g = Lienzo(hdc);
@@ -471,15 +589,15 @@ internal static partial class PanelCartas
             for (var i = 0; i < fichas.Count; i++)
             {
                 var r = rects[i]; if (r.Right == 0) continue;
-                var elegida = mazoEst == i - 1;
-                var sobre = bajoRaton == BAJO_FICHA_EST - i;
+                var elegida = elegidaFicha == i;
+                var sobre = bajoRaton == bajoBase - i;
                 var c = fichas[i].Color;
                 Rectangulo(g, r.Left, r.Top, r.Right - r.Left, alto, alto / 2,
                     elegida ? Argb(60, c) : sobre ? Argb(255, 30, 41, 64) : Argb(255, 20, 28, 48),
                     elegida ? Argb(255, c) : Argb(255, 44, 58, 88));
-                Circulo(g, r.Left + 16, r.Top + alto / 2, 5, Argb(255, c));
+                if (conPunto) Circulo(g, r.Left + 16, r.Top + alto / 2, 5, Argb(255, c));
                 // El mazo que Arena tiene puesto: un aro ámbar alrededor de su punto.
-                if (fichas[i].Arena)
+                if (conPunto && fichas[i].Arena)
                 {
                     var aro = Pluma(Argb(255, 251, 191, 36), 1.5f);
                     GdipDrawArcI(g, aro, r.Left + 16 - 8, r.Top + alto / 2 - 8, 16, 16, 0, 360);
@@ -488,15 +606,15 @@ internal static partial class PanelCartas
             }
             GdipDeleteGraphics(g);
         }
-        for (var i = 0; i < fichas.Count; i++)
+        for (var i = 0; i < fichas.Count && i < destino.Length; i++)
         {
             var r = rects[i];
-            if (r.Right == 0) { rectFichasEst[i] = default; continue; }
-            var elegida = mazoEst == i - 1;
+            if (r.Right == 0) { destino[i] = default; continue; }
+            var elegida = elegidaFicha == i;
             var anchoNombre = Math.Min(anchosNombre[i], maxNombre);
             Escribir(hdc, fichas[i].Nombre, r.Left + padIzq, r.Top, anchoNombre, alto, 14, 600, elegida ? Rgb(255, 255, 255) : BLANCO, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
             Escribir(hdc, fichas[i].Datos, r.Left + padIzq + anchoNombre + 10, r.Top, anchosDatos[i] + 4, alto, 13, 500, APAGADO, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
-            rectFichasEst[i] = new RECT { Left = r.Left, Top = arriba + r.Top, Right = r.Right, Bottom = arriba + r.Bottom };
+            destino[i] = new RECT { Left = r.Left, Top = arriba + r.Top, Right = r.Right, Bottom = arriba + r.Bottom };
         }
     }
 
@@ -533,6 +651,9 @@ internal static partial class PanelCartas
             return Textos.T("est_puesto_franja", Math.Max(1, mejor - 99), mejor);
         }
         var elegido = NombreElegido(e);
+        // Con un juego elegido, las partidas de los demás también se apagan (la
+        // escalera sólo trae clasificatorias de construido desde la 1.26.0).
+        var modoSel = ModoElegido(e)?.Id;
 
         // Las insignias: donde se SUBE de nivel, encima de ese punto; si chocan, gana la de después.
         var insignias = new List<(RECT R, string Fichero)>();
@@ -574,7 +695,7 @@ internal static partial class PanelCartas
             // mazo; con un mazo elegido, las partidas de los demás, apagadas.
             for (var i = 0; i < p.Length; i++)
             {
-                var apagada = elegido is not null && p[i].Mazo != elegido;
+                var apagada = elegido is not null && p[i].Mazo != elegido || modoSel is not null && p[i].Modo != modoSel;
                 var color = ColorMazo(p[i].Mazo);
                 var salto = Math.Abs(p[i].Pos - p[i].Antes);
                 var arranque = gx + (i + (salto > 0 ? 0.4 : 1)) * ancho;
@@ -634,7 +755,7 @@ internal static partial class PanelCartas
         var (porDia, puntos) = Evolucion(Filtradas(e));
         puntosEst = puntos;
         var elegido = NombreElegido(e);
-        Ceja(hdc, Textos.T("est_evolucion"), elegido ?? Textos.T(porDia ? "est_evolucion_dia" : "est_evolucion_partida"), bx, y, bw);
+        Ceja(hdc, Textos.T("est_evolucion"), elegido ?? ModoElegido(e)?.Nombre ?? Textos.T(porDia ? "est_evolucion_dia" : "est_evolucion_partida"), bx, y, bw);
         var cy0 = y + 28; var ch = alto - 34;
         int gx = bx + 48, gy = cy0 + 18, gw = bw - 48 - 24, gh = ch - 18 - 32;
         var valores = puntos.Select(q => q.Valor).Append(0).ToArray();

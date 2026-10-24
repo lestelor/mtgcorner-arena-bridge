@@ -125,7 +125,7 @@ internal static class Program
                     using var conSaltos = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
                     conSaltos.DefaultRequestHeaders.UserAgent.ParseAdd($"MtgCornerArenaBridge/{VersionPropia}");
                     var huellas = await conSaltos.GetStringAsync($"https://github.com/lestelor/mtgcorner-arena-bridge/releases/download/v{numero}/SHA256.txt");
-                    var h = System.Text.RegularExpressions.Regex.Match(huellas, @"([0-9a-fA-F]{64})");
+                    var h = System.Text.RegularExpressions.Regex.Match(huellas, @"\b([0-9a-fA-F]{64})\b");
                     if (h.Success) sha = h.Groups[1].Value;
                 }
                 catch { /* sin huella se avisa y se deja la página, como siempre */ }
@@ -2068,6 +2068,7 @@ internal static class Program
         if (Contexto.Mazo is not { Length: > 0 } nombre || Contexto.CartasMazo.Length == 0) return;
         if (Contexto.Edicion is not null || Contexto.Formato is { } f && (f.StartsWith("draft", StringComparison.OrdinalIgnoreCase) || f.StartsWith("sealed", StringComparison.OrdinalIgnoreCase))) return;
         var cartas = Contexto.CartasMazo.Select(c => new CartaRecordada(c.Grp, c.N)).ToArray();
+        RecordarEntreLosVistos(nombre, cartas);
         if (mazoRecordado is { } m && m.Nombre == nombre && m.Cartas.SequenceEqual(cartas)) return;
         mazoRecordado = new MazoRecordado(nombre, cartas);
         try
@@ -2076,6 +2077,54 @@ internal static class Program
             File.WriteAllText(FicheroMazoRecordado, JsonSerializer.Serialize(mazoRecordado, JsonOpciones));
         }
         catch { /* sin guardar: vale para esta sesión */ }
+    }
+
+    /// <summary>
+    /// LAS LISTAS DE LOS MAZOS QUE SE HAN VISTO ELEGIR EN ARENA (1.26.0,
+    /// 2026-10-24), para Stats. El usuario: «si el deck no está en MTG Corner, no
+    /// sale la curva de maná… ¿no se puede leer de Arena?». Arena sólo dice la
+    /// lista del mazo que eliges o guardas, así que se apuntan las que pasan, las
+    /// 40 últimas y la más reciente primero, y Stats las manda a la web. Las de
+    /// limitado no, como el recordado de arriba.
+    /// </summary>
+    private static List<MazoRecordado>? mazosVistos;
+    private static string FicheroMazosVistos => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MtgCornerArenaBridge", "mazos-arena.json");
+
+    private static List<MazoRecordado> MazosVistos()
+    {
+        if (mazosVistos is not null) return mazosVistos;
+        try { mazosVistos = JsonSerializer.Deserialize<List<MazoRecordado>>(File.ReadAllText(FicheroMazosVistos), JsonOpciones)?.Where(v => v is { Nombre.Length: > 0, Cartas.Length: > 0 }).ToList(); }
+        catch { /* sin fichero todavía */ }
+        mazosVistos ??= [];
+        // El último que se recordaba antes de que existiera esta lista también cuenta.
+        if (LeerMazoRecordado() is { } r && !mazosVistos.Any(v => v.Nombre == r.Nombre)) mazosVistos.Add(r);
+        return mazosVistos;
+    }
+
+    private static void RecordarEntreLosVistos(string nombre, CartaRecordada[] cartas)
+    {
+        var vistos = MazosVistos();
+        if (vistos.Count > 0 && vistos[0].Nombre == nombre && vistos[0].Cartas.SequenceEqual(cartas)) return;
+        vistos.RemoveAll(v => v.Nombre == nombre);
+        vistos.Insert(0, new MazoRecordado(nombre, cartas));
+        if (vistos.Count > 40) vistos.RemoveRange(40, vistos.Count - 40);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(FicheroMazosVistos)!);
+            File.WriteAllText(FicheroMazosVistos, JsonSerializer.Serialize(vistos, JsonOpciones));
+        }
+        catch { /* sin guardar: vale para esta sesión */ }
+    }
+
+    /// <summary>Lo que Stats manda a la web: el mazo que Arena tiene puesto (aunque sea de limitado) y los vistos.</summary>
+    private static object[] ListasParaStats()
+    {
+        var listas = new List<object>();
+        if (Contexto.Mazo is { Length: > 0 } actual && Contexto.CartasMazo.Length > 0)
+            listas.Add(new { nombre = actual, cartas = Contexto.CartasMazo.Select(c => new { grp = c.Grp, n = c.N }) });
+        foreach (var v in MazosVistos().Where(v => v.Nombre != Contexto.Mazo))
+            listas.Add(new { nombre = v.Nombre, cartas = v.Cartas.Select(c => new { grp = c.Grp, n = c.N }) });
+        return listas.ToArray();
     }
     /// <summary>Las cartas del mazo de ahora con nombre, coste e ilustración: las usan el rastreador y el consejo de mulligan.</summary>
     private static List<Columna.CartaMazo> cartasDelMazoActual = [];
@@ -2814,7 +2863,8 @@ internal static class Program
         {
             if (partidaPorSubir) await SubirTrasPartida(LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta())).Fragmentos);
             var tz = (int)TimeZoneInfo.Local.GetUtcOffset(DateTime.Now).TotalMinutes;
-            var r = await http.GetAsync($"{PuertaDevice}/estadisticas?idioma={Textos.Idioma}&tz={tz}&mazo={Uri.EscapeDataString(Contexto.Mazo ?? "")}");
+            // Por POST desde la 1.26.0: con las listas de los mazos vistos, para su curva (ver ListasParaStats).
+            using var r = await http.PostAsJsonAsync($"{PuertaDevice}/estadisticas", new { idioma = Textos.Idioma, tz, mazo = Contexto.Mazo ?? "", listas = ListasParaStats() }, JsonOpciones);
             if (!r.IsSuccessStatusCode) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("est_fallo")); return; }
             var d = await r.Content.ReadFromJsonAsync<RespuestaEstadisticas>(JsonOpciones);
             if (d is null) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("est_fallo")); return; }
@@ -2842,9 +2892,10 @@ internal static class Program
         var iconos = new Dictionary<string, string>();
         foreach (var (clave, url) in d.Iconos ?? new Dictionary<string, string>())
             if (await BajarImagen(url) is { } fichero) iconos[clave] = fichero;
-        var partidas = (d.Partidas ?? []).Select(q => new PanelCartas.PartidaEst(Local(q.Cuando), q.Gane, q.Mazo))
+        var partidas = (d.Partidas ?? []).Select(q => new PanelCartas.PartidaEst(Local(q.Cuando), q.Gane, q.Mazo, q.Modo))
             .Where(q => q.Cuando != DateTime.MinValue).ToArray();
-        var escalera = (d.EscaleraCompleta ?? []).Select(q => new PanelCartas.PeldanoEst(q.Antes, q.Pos, q.Clase ?? "Bronze", q.Nivel, q.Gane, Local(q.Cuando), q.Mazo, q.Subio, q.Puesto)).ToArray();
+        var escalera = (d.EscaleraCompleta ?? []).Select(q => new PanelCartas.PeldanoEst(q.Antes, q.Pos, q.Clase ?? "Bronze", q.Nivel, q.Gane, Local(q.Cuando), q.Mazo, q.Subio, q.Puesto, q.Modo)).ToArray();
+        var modos = (d.Modos ?? []).Where(m => m.Id is { Length: > 0 }).Select(m => new PanelCartas.ModoEst(m.Id!, m.Nombre ?? m.Id!, m.Ganadas, m.Perdidas)).ToArray();
         var mazos = (d.MazosAnalisis ?? []).Where(m => m.Nombre is { Length: > 0 }).Select(m => new PanelCartas.MazoEst(
             m.Nombre!, m.Ganadas, m.Perdidas, m.Actual,
             m.Analisis is { } a ? new PanelCartas.AnalisisMazo(a.Tierras, a.Medio, a.Mano?.Buenas ?? 0, a.LandDrops?.FirstOrDefault(l => l.Turno == 3)?.P ?? 0,
@@ -2852,12 +2903,13 @@ internal static class Program
                     (c.Tipos ?? []).Select(t => new PanelCartas.SegmentoCurva(t.Tipo ?? "other", t.N,
                         (t.Cartas ?? []).Select(x => $"{x.N}× {x.Nombre}").ToArray())).ToArray())).ToArray())
             : null)).ToArray();
-        var e = new PanelCartas.Estadisticas(total.Ganadas, total.Perdidas, partidas, mazos, d.Rango?.Clase, d.Rango?.Nivel, escalera, iconos, d.MazoArena ?? Contexto.Mazo, d.Rango?.Puesto);
+        var e = new PanelCartas.Estadisticas(total.Ganadas, total.Perdidas, partidas, mazos, d.Rango?.Clase, d.Rango?.Nivel, escalera, iconos, d.MazoArena ?? Contexto.Mazo, d.Rango?.Puesto, modos);
         // Lo que se copia: el resumen en unas líneas.
         var jugadas = total.Ganadas + total.Perdidas;
         var plano = new List<string> { $"{Textos.T("est_total")}: {total.Ganadas}–{total.Perdidas} ({Math.Round(100.0 * total.Ganadas / jugadas)}%)" };
         if (e.Clase is { } clase) plano.Add($"{Textos.T("est_rango")}: {Textos.T("clase_" + clase.ToLowerInvariant())}{(clase != "Mythic" && e.Nivel is { } nv ? " " + nv : "")}{(clase == "Mythic" && e.Puesto is { } pu ? " " + Textos.T("est_puesto", pu) : "")}");
         foreach (var m in e.Mazos) plano.Add($"• {m.Nombre}: {m.Ganadas}–{m.Perdidas}");
+        if (modos.Length > 1) foreach (var m in modos) plano.Add($"• {m.Nombre}: {m.Ganadas}–{m.Perdidas}");
         PanelCartas.MostrarTexto(Textos.T("est_titulo"), [], string.Join("\r\n", plano), conEstadisticas: e);
     }
 
@@ -4415,14 +4467,20 @@ internal sealed record RespuestaEstadisticas(
     [property: JsonPropertyName("escaleraCompleta")] PeldanoCompletoPuente[]? EscaleraCompleta = null,
     [property: JsonPropertyName("iconos")] Dictionary<string, string>? Iconos = null,
     [property: JsonPropertyName("mazoArena")] string? MazoArena = null,
-    [property: JsonPropertyName("mazosAnalisis")] MazoAnalisisPuente[]? MazosAnalisis = null);
-internal sealed record PartidaEstPuente([property: JsonPropertyName("cuando")] string? Cuando, [property: JsonPropertyName("gane")] bool Gane, [property: JsonPropertyName("mazo")] string? Mazo);
+    [property: JsonPropertyName("mazosAnalisis")] MazoAnalisisPuente[]? MazosAnalisis = null,
+    [property: JsonPropertyName("modos")] ModoEstPuente[]? Modos = null);
+/// <summary>Un juego de Arena con partidas (lib/modosArena.ts en la web), con su nombre ya en tu idioma. Desde la 1.26.0.</summary>
+internal sealed record ModoEstPuente(
+    [property: JsonPropertyName("id")] string? Id, [property: JsonPropertyName("nombre")] string? Nombre,
+    [property: JsonPropertyName("ganadas")] int Ganadas, [property: JsonPropertyName("perdidas")] int Perdidas);
+internal sealed record PartidaEstPuente([property: JsonPropertyName("cuando")] string? Cuando, [property: JsonPropertyName("gane")] bool Gane, [property: JsonPropertyName("mazo")] string? Mazo,
+    [property: JsonPropertyName("modo")] string? Modo = null);
 internal sealed record PeldanoCompletoPuente(
     [property: JsonPropertyName("antes")] int Antes, [property: JsonPropertyName("pos")] int Pos,
     [property: JsonPropertyName("clase")] string? Clase, [property: JsonPropertyName("nivel")] int Nivel,
     [property: JsonPropertyName("gane")] bool Gane, [property: JsonPropertyName("cuando")] string? Cuando,
     [property: JsonPropertyName("mazo")] string? Mazo, [property: JsonPropertyName("subio")] bool Subio,
-    [property: JsonPropertyName("puesto")] int? Puesto = null);
+    [property: JsonPropertyName("puesto")] int? Puesto = null, [property: JsonPropertyName("modo")] string? Modo = null);
 internal sealed record MazoAnalisisPuente(
     [property: JsonPropertyName("nombre")] string? Nombre, [property: JsonPropertyName("ganadas")] int Ganadas, [property: JsonPropertyName("perdidas")] int Perdidas,
     [property: JsonPropertyName("actual")] bool Actual, [property: JsonPropertyName("analisis")] AnalisisPuente? Analisis);

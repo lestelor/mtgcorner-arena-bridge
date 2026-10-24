@@ -284,8 +284,8 @@ internal static partial class PanelCartas
         extras = conExtras;
         est = conEstadisticas;
         PrepararImportacion(conImportacion);
-        rectPuntosEst = []; centroPuntosEst = []; rectFichasEst = []; rectPeldanosEst = []; rectSegmentosEst = []; puntosEst = [];
-        mazoEst = -1;
+        rectPuntosEst = []; centroPuntosEst = []; rectFichasEst = []; rectModosEst = []; rectPeldanosEst = []; rectSegmentosEst = []; puntosEst = [];
+        mazoEst = -1; modoEst = -1;
         rectTonos = new RECT[conExtras?.Tonos.Length ?? 0];
         enlaces = conEnlaces?.ToArray() ?? [];
         rectEnlaces = new RECT[enlaces.Length];
@@ -346,7 +346,7 @@ internal static partial class PanelCartas
         var colTexto = dosColumnas ? 2 : 0;
 
         var lista = new List<Bloque>();
-        if (est is { } estadisticas) AnadirBloquesEstadisticas(lista, estadisticas);
+        if (est is { } estadisticas) AnadirBloquesEstadisticas(lista, estadisticas, hdc, anchoTodo);
         int Medir(string t, int anchoCol, bool titulo)
         {
             SelectObject(hdc, titulo ? fTitulo : fTexto);
