@@ -198,7 +198,43 @@ internal static class Contexto
     /// vidas y el turno. Sólo lo que se ve en la pantalla: el registro no trae
     /// la mano del rival, y aunque la trajera no se usaría.
     /// </summary>
-    public sealed record Mesa(int Turno, int[] Mano, EnMesa[] Mia, EnMesa[] DelRival, int? VidaYo, int? VidaRival);
+    public sealed record Mesa(int Turno, int[] Mano, EnMesa[] Mia, EnMesa[] DelRival, int? VidaYo, int? VidaRival,
+        Comandante[]? Comandantes = null, Comandante[]? ComandantesRival = null);
+
+    /// <summary>
+    /// BRAWL (1.25.0): un comandante de la partida, si está ahora en la zona de
+    /// mando (se puede lanzar desde ahí) y cuántas veces se ha lanzado ya desde
+    /// ella: el impuesto es el doble. En Arena la zona de mando es UNA, la 26,
+    /// pública y compartida: de quién es cada carta lo dice su dueño.
+    /// </summary>
+    public sealed record Comandante(int Grp, bool EnZona, int Lanzado);
+
+    /// <summary>Tus comandantes al repartir la mano: para el consejo de mulligan, que llega antes que la mesa.</summary>
+    public static Comandante[] ComandantesAlRepartir { get; private set; } = [];
+    /// <summary>Los comandantes vistos en la partida, por dueño, y las veces que cada uno salió de la zona de mando a la pila.</summary>
+    private static readonly Dictionary<int, List<int>> comandantesDe = new();
+    private static readonly Dictionary<(int Dueno, int Grp), int> lanzadosDesdeMando = new();
+    private static readonly HashSet<int> lanzamientosVistos = new();
+
+    /// <summary>
+    /// Los comandantes de un jugador: los que hay en la zona de mando ahora (que
+    /// se apuntan, para seguir sabiéndolo cuando salgan) y los apuntados antes.
+    /// Fuera de Brawl la zona está vacía y sale [].
+    /// </summary>
+    private static Comandante[] Comandantes(int dueno)
+    {
+        if (dueno == 0) return [];
+        var ahora = new HashSet<int>();
+        foreach (var (idz, ids) in idsZona)
+        {
+            if (!zonas.TryGetValue(idz, out var tipo) || tipo != "Command") continue;
+            foreach (var id in ids)
+                if (objetos.TryGetValue(id, out var o) && o.EsCarta && o.Grp > 0 && o.Dueno == dueno) ahora.Add(o.Grp);
+        }
+        if (!comandantesDe.TryGetValue(dueno, out var suyos)) comandantesDe[dueno] = suyos = [];
+        foreach (var g in ahora) if (!suyos.Contains(g)) suyos.Add(g);
+        return suyos.Select(g => new Comandante(g, ahora.Contains(g), lanzadosDesdeMando.GetValueOrDefault((dueno, g)))).ToArray();
+    }
 
     /// <summary>Empieza tu primera fase principal (una vez por turno). Salta en el hilo del vigía.</summary>
     public static event Action<Mesa>? MiFasePrincipal;
@@ -257,6 +293,11 @@ internal static class Contexto
     // pares y `zone_dest` no es el primero, así que se salta con `.{0,400}?`.
     private static readonly Regex Traslado = new(
         @"""affectedIds"":\s*\[\s*(\d+)[^\]]*\],\s*""type"":\s*\[\s*""AnnotationType_ZoneTransfer""\s*\].{0,400}?""zone_dest"".{0,80}?""valueInt32"":\s*\[\s*(\d+)", RegexOptions.Compiled);
+    // El mismo traslado, con su ORIGEN, que es el primer detalle: para contar las
+    // veces que un comandante sale de la zona de mando a la pila (su impuesto, ver
+    // Comandantes). Medido en el Player.log: zone_src, zone_dest y category, en ese orden.
+    private static readonly Regex TrasladoDesde = new(
+        @"""affectedIds"":\s*\[\s*(\d+)[^\]]*\],\s*""type"":\s*\[\s*""AnnotationType_ZoneTransfer""\s*\],\s*""details"":\s*\[\s*\{\s*""key"":\s*""zone_src"",\s*""type"":\s*""[^""]*"",\s*""valueInt32"":\s*\[\s*(\d+)\s*\]\s*\},\s*\{\s*""key"":\s*""zone_dest"",\s*""type"":\s*""[^""]*"",\s*""valueInt32"":\s*\[\s*(\d+)", RegexOptions.Compiled);
     // SÓLO los mensajes dirigidos a un asiento: los hay para los dos («[ 1, 2 ]»)
     // y tomar el primero de ésos te sentaba en el 1 cada pocos segundos
     // (visto el 2026-09-26: los colores propios alternaban con los del rival).
@@ -678,6 +719,16 @@ internal static class Contexto
                     else if (obj.Dueno == 3 - miAsiento) { rival = obj.Grp; rivalOtra = obj.Otra; }
                 }
             }
+            if (linea.Contains("AnnotationType_ZoneTransfer", StringComparison.Ordinal))
+                foreach (Match t in TrasladoDesde.Matches(linea))
+                {
+                    var idObj = int.Parse(t.Groups[1].Value);
+                    if (zonas.TryGetValue(int.Parse(t.Groups[2].Value), out var desde) && desde == "Command"
+                        && zonas.TryGetValue(int.Parse(t.Groups[3].Value), out var hasta) && hasta == "Stack"
+                        && objetos.TryGetValue(idObj, out var lanzado) && lanzado.EsCarta && lanzado.Grp > 0 && lanzado.Dueno is { } quien
+                        && lanzamientosVistos.Add(idObj))
+                        lanzadosDesdeMando[(quien, lanzado.Grp)] = lanzadosDesdeMando.GetValueOrDefault((quien, lanzado.Grp)) + 1;
+                }
             // Tus respuestas: lo que cuenta los mulligans de la mano que llega.
             if (linea.Contains("MulliganOption_Mulligan", StringComparison.Ordinal)) mulligansHechos++;
             else if (linea.Contains("MulliganOption_AcceptHand", StringComparison.Ordinal)) mulligansHechos = 0;
@@ -724,6 +775,7 @@ internal static class Contexto
                 if (cartasMano.Length > 0 && firma != firmaMano)
                 {
                     firmaMano = firma;
+                    ComandantesAlRepartir = Comandantes(miAsiento);
                     if (!leyendoLoViejo)
                         try { ManoNueva?.Invoke(cartasMano, tierrasMano, mulligansHechos); } catch { /* cosa de quien escucha */ }
                 }
@@ -781,6 +833,10 @@ internal static class Contexto
                 mesaRivalPorAvisar = null;
                 vidaYoAhora = vidaRivalAhora = null;
                 firmaMano = "";
+                comandantesDe.Clear();
+                lanzadosDesdeMando.Clear();
+                lanzamientosVistos.Clear();
+                ComandantesAlRepartir = [];
                 miAsiento = 0;
             }
         }
@@ -970,7 +1026,7 @@ internal static class Contexto
                 if (o.Dueno == miAsiento) mia.Add(c); else suya.Add(c);
             }
         }
-        return new Mesa(turno, mano, [.. mia], [.. suya], vidaYoAhora, vidaRivalAhora);
+        return new Mesa(turno, mano, [.. mia], [.. suya], vidaYoAhora, vidaRivalAhora, Comandantes(miAsiento), Comandantes(3 - miAsiento));
     }
 
     /// <summary>

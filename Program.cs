@@ -674,8 +674,10 @@ internal static class Program
             }
             string Carta(Contexto.EnMesa c) => $"{(c.Ficha is { } f ? f + "*" : c.Grp.ToString())}#{c.Id}"
                 + (c.Fuerza is { } fu ? $" {fu}/{c.Resistencia}" : "") + (c.Girada ? " g" : "") + (c.Mareada ? " m" : "") + (c.En is { } en ? $" ->#{en}" : "");
+            // Brawl: los comandantes, «grp (zona de mando, lanzado N)» o «grp (fuera)».
+            static string Mandos(Contexto.Comandante[]? cs) => cs is { Length: > 0 } ? string.Join(", ", cs.Select(c => $"{c.Grp} ({(c.EnZona ? "zona de mando" : "fuera")}, lanzado {c.Lanzado})")) : "-";
             void Escribir(string que, Contexto.Mesa m) => Console.WriteLine(
-                $"{que} T{m.Turno} vidas {m.VidaYo}/{m.VidaRival} mano=[{string.Join(",", m.Mano)}]\n  mía:   {string.Join(" | ", m.Mia.Where(c => !c.Tierra).Select(Carta))} (+{m.Mia.Count(c => c.Tierra)} tierras, {m.Mia.Count(c => c.Tierra && !c.Girada)} sin girar)\n  rival: {string.Join(" | ", m.DelRival.Where(c => !c.Tierra).Select(Carta))} (+{m.DelRival.Count(c => c.Tierra)} tierras)");
+                $"{que} T{m.Turno} vidas {m.VidaYo}/{m.VidaRival} mano=[{string.Join(",", m.Mano)}]\n  mía:   {string.Join(" | ", m.Mia.Where(c => !c.Tierra).Select(Carta))} (+{m.Mia.Count(c => c.Tierra)} tierras, {m.Mia.Count(c => c.Tierra && !c.Girada)} sin girar)\n  rival: {string.Join(" | ", m.DelRival.Where(c => !c.Tierra).Select(Carta))} (+{m.DelRival.Count(c => c.Tierra)} tierras)\n  comandante: {Mandos(m.Comandantes)} · del rival: {Mandos(m.ComandantesRival)}");
             Contexto.MiFasePrincipal += m => { Escribir("FASE PRINCIPAL", m); Apuntar(m, false); };
             Contexto.TurnoDelRival += m => { Escribir("TURNO RIVAL", m); Apuntar(m, true); };
             Contexto.Repasar(registroM);
@@ -873,6 +875,48 @@ internal static class Program
         }
         // TALLER DEL EDITOR DE INSTRUCCIONES (EditorInstrucciones.cs): lo abre con
         // un texto de muestra y escribe lo que devuelve. Sin la web: no lee ni guarda.
+        // TALLER DE LA OPINIÓN: la pregunta del entrenador con las rarezas, como al
+        // ganar una partida (o como desde el botón, con --boton). Sin tocar los ajustes.
+        if (args.Length > 0 && args[0] == "--probar-opinion")
+        {
+            sinGuardarAjustes = true;
+            if (LeerAjustes().Tono is { } tonoO && TONOS.Contains(tonoO)) tonoActual = tonoO;
+            if (args.FirstOrDefault(a => a.StartsWith("--tono=")) is { } tonoArgO && TONOS.Contains(tonoArgO[7..])) tonoActual = tonoArgO[7..];
+            var vinculoO = Vinculo.Leer();
+            using var httpO = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(2) };
+            httpO.DefaultRequestHeaders.Add("X-Bridge-Version", VersionPropia);
+            if (vinculoO is not null) httpO.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoO.Token);
+            await PrecargarEntrenadores();
+            Superposicion.Entrenador = DatosEntrenador;
+            Superposicion.CambiarEntrenador = () => { };
+            Superposicion.SiguienteEntrenador = () => Textos.T("tono_" + TONOS[(Array.IndexOf(TONOS, tonoActual) + 1) % TONOS.Length]);
+            Superposicion.Hablar = () => { };
+            PreguntarOpinion(httpO, args.Contains("--boton") ? "boton" : "partida");
+            await Task.Delay(TimeSpan.FromSeconds(60));
+            return 0;
+        }
+        // TALLER DEL SALUDO: el del entrenador al abrir Arena, con su bocadillo
+        // (pulsarlo abre el editor, que lee y guarda en la cuenta de verdad).
+        // --tono=amable|directo|sargento para ver otro; sin él, el que tengas.
+        if (args.Length > 0 && args[0] == "--probar-saludo")
+        {
+            var ajustesS = LeerAjustes();
+            if (ajustesS.Tono is { } tonoS && TONOS.Contains(tonoS)) tonoActual = tonoS;
+            if (args.FirstOrDefault(a => a.StartsWith("--tono=")) is { } tonoArgS && TONOS.Contains(tonoArgS[7..])) tonoActual = tonoArgS[7..];
+            var vinculoS = Vinculo.Leer();
+            using var httpS = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(2) };
+            if (vinculoS is not null) httpS.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoS.Token);
+            await PrecargarEntrenadores();
+            Superposicion.Entrenador = DatosEntrenador;
+            // El botón de cambiar, para que se vea como en el residente; aquí no
+            // cambia nada (pulsarlo en el residente sí guarda el entrenador elegido).
+            Superposicion.CambiarEntrenador = () => { };
+            Superposicion.SiguienteEntrenador = () => Textos.T("tono_" + TONOS[(Array.IndexOf(TONOS, tonoActual) + 1) % TONOS.Length]);
+            Superposicion.Hablar = () => _ = Task.Run(() => EditarInstrucciones(httpS));
+            MostrarSaludo();
+            await Task.Delay(TimeSpan.FromSeconds(40));
+            return 0;
+        }
         if (args.Length > 0 && args[0] == "--probar-instrucciones")
         {
             if (args.Length > 1 && args[1].StartsWith("--idioma=")) Textos.Escoger(args[1]["--idioma=".Length..]);
@@ -1394,6 +1438,9 @@ internal static class Program
                 case Columna.Accion.Entrenador:
                     await EditarInstrucciones(http);
                     break;
+                case Columna.Accion.Opinion:
+                    PreguntarOpinion(http, "boton");
+                    break;
                 case Columna.Accion.Salir:
                     Columna.Cerrar();
                     Environment.Exit(0);
@@ -1591,9 +1638,29 @@ internal static class Program
         var ajustes = LeerAjustes();
         consejoActivo = ajustes.Consejo;
         if (ajustes.Tono is { } tonoGuardado && TONOS.Contains(tonoGuardado)) tonoActual = tonoGuardado;
+        (primerUso, partidasVistas, opinionPreguntada, opinionVeces, opinionRespondida) =
+            (ajustes.PrimerUso, ajustes.Partidas, ajustes.OpinionPreguntada, ajustes.OpinionVeces, ajustes.OpinionRespondida);
+        if (primerUso is null) { primerUso = DateTime.UtcNow; GuardarAjustes(); }
         _ = PrecargarEntrenadores();
         Superposicion.Entrenador = DatosEntrenador;
         ConectarCambioDeEntrenador();
+        // El bocadillo de sus avisos: hablarle es darle instrucciones (fuera del hilo del aviso).
+        Superposicion.Hablar = () => _ = Task.Run(() => EditarInstrucciones(http));
+        // La opinión del programa, en un buen momento (ver PreguntarOpinion): al
+        // ganar una partida, con el resumen ya fuera; al acabar un draft, con el
+        // plan del mazo ya leído.
+        Contexto.PartidaAcabada += () =>
+        {
+            partidasVistas++;
+            GuardarAjustes();
+            if (Contexto.UltimaPartida?.Gane == true && !EventoCompetitivo(Contexto.Evento) && TocaPreguntarOpinion())
+                _ = Task.Run(async () => { await Task.Delay(TimeSpan.FromSeconds(8)); if (!Contexto.EnPartida) PreguntarOpinion(http, "partida"); });
+        };
+        Contexto.DraftTerminado += p =>
+        {
+            if (!EventoCompetitivo(p.Evento) && TocaPreguntarOpinion())
+                _ = Task.Run(async () => { await Task.Delay(TimeSpan.FromSeconds(45)); if (!Contexto.EnPartida) PreguntarOpinion(http, "draft"); });
+        };
         Columna.ConsejoActivo = () => consejoActivo;
         Contexto.MiFasePrincipal += mesa => { if (consejoActivo) _ = ConsejoTurno(http, mesa); };
         // El mazo del rival se avisa una vez por partida: al acabar, a cero.
@@ -1650,6 +1717,8 @@ internal static class Program
         while (true)
         {
             while (!LectorArena.ArenaAbierto()) await Task.Delay(TimeSpan.FromSeconds(20));
+            // Arena acaba de abrirse (o ya lo estaba al arrancar): el entrenador saluda.
+            _ = Saludar();
 
             if (!recienSubido)
             {
@@ -2041,7 +2110,17 @@ internal static class Program
     private static volatile bool consejoActivo;
 
     /// <summary>Lo que se recuerda entre sesiones: el consejo de cada turno y el entrenador elegido en el resumen.</summary>
-    internal sealed record Ajustes(bool Consejo, string? Tono = null);
+    /// <summary>
+    /// Lo que se recuerda entre sesiones: el consejo de turno, el entrenador y,
+    /// desde la 1.25.0, lo de la opinión (ver PreguntarOpinion): desde cuándo se
+    /// usa, cuántas partidas lleva, cuándo y cuántas veces se preguntó y si ya
+    /// contestó.
+    /// </summary>
+    internal sealed record Ajustes(bool Consejo, string? Tono = null, DateTime? PrimerUso = null, int Partidas = 0,
+        DateTime? OpinionPreguntada = null, int OpinionVeces = 0, bool OpinionRespondida = false);
+    private static DateTime? primerUso, opinionPreguntada;
+    private static int partidasVistas, opinionVeces;
+    private static bool opinionRespondida;
     private static string FicheroAjustes => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MtgCornerArenaBridge", "ajustes.json");
 
     private static Ajustes LeerAjustes()
@@ -2050,12 +2129,17 @@ internal static class Program
         catch { return new Ajustes(false); }
     }
 
+    /// <summary>Los talleres que tocan la opinión no escriben ajustes: probar no puede dejar apuntado que ya contestaste.</summary>
+    private static bool sinGuardarAjustes;
+
     private static void GuardarAjustes()
     {
+        if (sinGuardarAjustes) return;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FicheroAjustes)!);
-            File.WriteAllText(FicheroAjustes, JsonSerializer.Serialize(new Ajustes(consejoActivo, tonoActual), JsonOpciones));
+            File.WriteAllText(FicheroAjustes, JsonSerializer.Serialize(new Ajustes(consejoActivo, tonoActual, primerUso, partidasVistas,
+                opinionPreguntada, opinionVeces, opinionRespondida), JsonOpciones));
         }
         catch { /* sin guardar, vale para esta sesión */ }
     }
@@ -2226,7 +2310,13 @@ internal static class Program
         // El mazo que se juega, para su plan (la web lo guarda por persona y nombre).
         nombreMazo = Contexto.Mazo,
         lista = Contexto.CartasMazo.Select(c => new { grp = c.Grp, n = c.N }),
+        // Brawl (1.25.0): los comandantes de cada uno, si están en la zona de mando y cuántas veces se lanzaron.
+        comandantes = (mesa.Comandantes ?? []).Select(c => new { grp = c.Grp, enZona = c.EnZona, lanzado = c.Lanzado }),
+        comandantesRival = (mesa.ComandantesRival ?? []).Select(c => new { grp = c.Grp, enZona = c.EnZona, lanzado = c.Lanzado }),
     };
+
+    /// <summary>¿Es una partida de Brawl? Arena dice «HistoricBrawl» o «Brawl» en el mazo (ver Contexto.Formato).</summary>
+    internal static bool EsBrawl(string? formato) => formato?.Contains("brawl", StringComparison.OrdinalIgnoreCase) == true;
 
     /// <summary>Pide el consejo de este turno y lo enseña encima del juego.</summary>
     private static async Task ConsejoTurno(HttpClient http, Contexto.Mesa mesa, bool rival = false)
@@ -2357,9 +2447,11 @@ internal static class Program
     {
         ultimaMano = (tierras, mulligans);
         if (EventoCompetitivo(Contexto.Evento)) return;
-        var texto = TextoMulligan(cartas, tierras, mulligans, Contexto.CartasMazo, Contexto.Mazo);
+        // En Brawl el primer mulligan es gratis: siete nuevas y ninguna al fondo.
+        var alFondo = EsBrawl(Contexto.Formato) ? Math.Max(0, mulligans - 1) : mulligans;
+        var texto = TextoMulligan(cartas, tierras, alFondo, Contexto.CartasMazo, Contexto.Mazo);
         var esta = Interlocked.Increment(ref manoEnCurso);
-        if (httpResidente is { } http) _ = MulliganConIa(http, cartas, tierras, mulligans, texto, esta);
+        if (httpResidente is { } http) _ = MulliganConIa(http, cartas, tierras, mulligans, alFondo, texto, esta);
         else MostrarMano(texto);
     }
 
@@ -2382,7 +2474,7 @@ internal static class Program
         Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), texto, 20, importante: true, avatar: FiguraEntrenador());
     }
 
-    private static async Task MulliganConIa(HttpClient http, int[] cartas, int tierras, int mulligans, string deLasCuentas, int esta)
+    private static async Task MulliganConIa(HttpClient http, int[] cartas, int tierras, int mulligans, int alFondo, string deLasCuentas, int esta)
     {
         string? conIa = null;
         try
@@ -2403,6 +2495,8 @@ internal static class Program
                 mazo = mazo.Select(c => new { grp = c.Grp, n = c.N }),
                 // Para el plan del mazo (desde el 1.21.0).
                 nombreMazo = Contexto.Mazo,
+                // Brawl (1.25.0): el comandante, que no está en la mano pero siempre se puede lanzar.
+                comandantes = Contexto.ComandantesAlRepartir.Select(c => new { grp = c.Grp, enZona = c.EnZona, lanzado = c.Lanzado }),
                 mulligans,
                 tierras,
                 probabilidad = Math.Round(p * 100),
@@ -2415,7 +2509,7 @@ internal static class Program
                 // El veredicto de la IA delante, su razón, y las cuentas de antes sin su veredicto.
                 var cuentas = deLasCuentas.Split(". ", 2) is { Length: 2 } partes ? partes[1] : "";
                 // Qué poner debajo: lo que diga la IA; si no lo dice, lo de las cuentas (ya va en `cuentas`).
-                var fondo = mulligans > 0 && clave != "mul_mulligan" && d.AlFondo is { Length: > 0 } af ? " " + Textos.T("mul_fondo_cuales", string.Join(", ", af)) : "";
+                var fondo = alFondo > 0 && clave != "mul_mulligan" && d.AlFondo is { Length: > 0 } af ? " " + Textos.T("mul_fondo_cuales", string.Join(", ", af)) : "";
                 if (fondo.Length > 0) cuentas = QuitarFondo(cuentas);
                 conIa = $"{Textos.T(clave)}{fondo} {razon} {cuentas}".Trim();
             }
@@ -2600,6 +2694,107 @@ internal static class Program
         finally { Columna.EnCurso(null); }
         AvisoInstrucciones(ok, nuevo.Trim().Length == 0);
     }
+
+    /// <summary>
+    /// ¿TOCA PREGUNTAR QUÉ LE PARECE EL PROGRAMA? (el usuario, 2026-10-24: «de
+    /// vez en cuando preguntar qué le parece… algo que sea divertido y que no
+    /// moleste»). Sólo a quien ya lo ha usado algo: tres días desde que lo
+    /// instaló o cinco partidas. Como mucho una vez al mes. Y nunca más si ya
+    /// contestó o si se le preguntó dos veces sin respuesta: a la tercera es
+    /// pesadez. El botón de «Programa» no cuenta: ése lo pide uno mismo.
+    /// </summary>
+    private static bool TocaPreguntarOpinion()
+    {
+        if (opinionRespondida || opinionVeces >= 2) return false;
+        var dias = primerUso is { } p ? (DateTime.UtcNow - p).TotalDays : 0;
+        if (dias < 3 && partidasVistas < 5) return false;
+        return opinionPreguntada is not { } u || (DateTime.UtcNow - u).TotalDays >= 30;
+    }
+
+    /// <summary>
+    /// «¿QUÉ RAREZA LE DAS AL PROGRAMA?», en la voz de su entrenador y en su
+    /// zona, con las cinco gemas debajo (de bulk a mítica, ver
+    /// Superposicion.Opciones): un clic y ya. Debajo, «Escribir algo (opcional)»
+    /// para quien quiera contar más. Con su propia ranura: no se lleva el consejo
+    /// ni el plan del mazo que haya a la vista. Desde el botón, además, el correo.
+    /// </summary>
+    private static void PreguntarOpinion(HttpClient http, string origen)
+    {
+        if (origen != "boton")
+        {
+            opinionPreguntada = DateTime.UtcNow;
+            opinionVeces++;
+            GuardarAjustes();
+        }
+        var rarezas = Enumerable.Range(1, 5).Select(n => Textos.T("rareza_" + n)).ToArray();
+        var texto = Textos.T("opinion_pregunta_" + tonoActual) + (origen == "boton" ? "\n" + Textos.T("opinion_correo") : "");
+        Superposicion.MostrarSinEsperar(Textos.T("opinion_titulo"), texto, 30, importante: true, avatar: FiguraEntrenador(), ranura: "opinion",
+            opciones: new Superposicion.Opciones(rarezas,
+                n => _ = Task.Run(() => EnviarNota(http, n, origen)),
+                Textos.T("opinion_escribir"),
+                () => _ = Task.Run(() => EscribirOpinion(http, null, origen))));
+    }
+
+    internal sealed record RespuestaOpinion([property: JsonPropertyName("id")] long? Id);
+
+    /// <summary>Lo que se manda a /api/mtga-device/opinion: la nota, el texto o los dos, y de dónde viene.</summary>
+    private static async Task<long?> MandarOpinion(HttpClient http, int? rareza, string? texto, long? id, string origen)
+    {
+        try
+        {
+            using var r = await http.PostAsJsonAsync($"{PuertaDevice}/opinion", new { id, rareza, texto, origen, idioma = Textos.Idioma, tono = tonoActual }, JsonOpciones);
+            return r.IsSuccessStatusCode ? (await r.Content.ReadFromJsonAsync<RespuestaOpinion>(JsonOpciones))?.Id ?? 0 : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Una gema pulsada: se manda, y el entrenador contesta según la rareza, con la puerta abierta a escribir.</summary>
+    private static async Task EnviarNota(HttpClient http, int rareza, string origen)
+    {
+        opinionRespondida = true;
+        GuardarAjustes();
+        var id = await MandarOpinion(http, rareza, null, null, origen);
+        if (id is null) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("opinion_fallo"), 10); return; }
+        Superposicion.MostrarSinEsperar(Textos.T("rareza_" + rareza), Textos.T("opinion_respuesta_" + rareza), 20, importante: true, avatar: FiguraEntrenador(), ranura: "opinion",
+            opciones: new Superposicion.Opciones(Enlace: Textos.T("opinion_escribir"), AlEnlace: () => _ = Task.Run(() => EscribirOpinion(http, id > 0 ? id : null, origen))));
+    }
+
+    /// <summary>«Escribir algo»: la ventanita de texto (la de las instrucciones, con sus textos), y se manda sobre la nota si la hay.</summary>
+    private static async Task EscribirOpinion(HttpClient http, long? id, string origen)
+    {
+        var texto = await EditorInstrucciones.Editar("", 1000, Textos.T("opinion_editor_titulo"), Textos.T("opinion_editor_explicacion"), Textos.T("opinion_enviar"));
+        if (string.IsNullOrWhiteSpace(texto)) return;
+        opinionRespondida = true;
+        GuardarAjustes();
+        var ok = await MandarOpinion(http, null, texto, id, origen) is not null;
+        if (ok) Superposicion.MostrarSinEsperar(Textos.T("opinion_titulo"), Textos.T("opinion_gracias"), 12, importante: true, avatar: FiguraEntrenador(), ranura: "opinion");
+        else Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("opinion_fallo"), 10);
+    }
+
+    /// <summary>
+    /// EL SALUDO DEL ENTRENADOR AL ABRIR ARENA (el usuario, 2026-10-19: «el coach
+    /// que salga nada más empezar a la derecha y que diga hola y una frase
+    /// divertida para cada uno de los tipos de personajes»; y «que pueda decir
+    /// dame instrucciones de cómo quieres que juegue, y pones unos pocos
+    /// ejemplos»). Su frase según quién sea, lo que puedes pedirle y el bocadillo
+    /// para hacerlo. Una vez cada vez que se abre Arena, cuando ya ha cargado, y
+    /// nunca en mitad de una partida: entonces se calla. Sin su figura (no ha
+    /// bajado) tampoco: el texto habla de su bocadillo.
+    /// </summary>
+    private static async Task Saludar()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(30));
+            if (!LectorArena.ArenaAbierto() || Contexto.EnPartida || FiguraEntrenador() is null) return;
+            MostrarSaludo();
+        }
+        catch { /* un saludo que no sale no estropea nada */ }
+    }
+
+    private static void MostrarSaludo() =>
+        Superposicion.MostrarSinEsperar(Textos.T("saludo_titulo_" + tonoActual),
+            Textos.T("saludo_" + tonoActual) + "\n" + Textos.T("saludo_pideme"), 25, importante: true, avatar: FiguraEntrenador());
 
     /// <summary>
     /// Guardadas o borradas, lo dice el entrenador, en su zona y con su figura

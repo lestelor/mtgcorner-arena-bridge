@@ -100,6 +100,8 @@ internal static class EditorInstrucciones
     private static WndProc? procedimiento;
     private static IntPtr editor, cuenta, fuente, pincelFondo, pincelCampo, pincelAmbar, pincelPulsado;
     private static string? resultado;
+    /// <summary>Los textos de esta vez: los de las instrucciones, o los de quien la abra para otra cosa (la opinión del programa).</summary>
+    private static string tituloVentana = "", rotuloGuardar = "";
     private static int tope, abierto;
     private static bool claseHecha;
 
@@ -107,13 +109,18 @@ internal static class EditorInstrucciones
     /// Abre el editor con el texto de ahora y espera: el texto nuevo al guardar,
     /// null al cancelar. Si ya hay uno abierto, null (no se abren dos).
     /// </summary>
-    public static Task<string?> Editar(string actual, int maximo)
+    /// <param name="titulo">El de la barra; sin él, el de las instrucciones.</param>
+    /// <param name="explicacion">Lo de encima del cuadro; sin ella, la de las instrucciones.</param>
+    /// <param name="guardar">El botón de aceptar; sin él, «Guardar».</param>
+    public static Task<string?> Editar(string actual, int maximo, string? titulo = null, string? explicacion = null, string? guardar = null)
     {
         if (Interlocked.Exchange(ref abierto, 1) == 1) return Task.FromResult<string?>(null);
         var listo = new TaskCompletionSource<string?>();
         var hilo = new Thread(() =>
         {
-            try { listo.TrySetResult(Correr(actual, maximo)); }
+            tituloVentana = titulo ?? Textos.T("instr_titulo");
+            rotuloGuardar = guardar ?? Textos.T("instr_guardar");
+            try { listo.TrySetResult(Correr(actual, maximo, explicacion ?? Textos.T("instr_explicacion", maximo))); }
             catch { listo.TrySetResult(null); }
             finally { Interlocked.Exchange(ref abierto, 0); }
         }) { IsBackground = true, Name = "instrucciones" };
@@ -134,7 +141,7 @@ internal static class EditorInstrucciones
         return IntPtr.Zero;
     }
 
-    private static string? Correr(string actual, int maximo)
+    private static string? Correr(string actual, int maximo, string explicacion)
     {
         resultado = null;
         tope = maximo;
@@ -167,7 +174,7 @@ internal static class EditorInstrucciones
         if (ppp == 0) ppp = 96;
         int S(int v) => (int)Math.Round(v * ppp / 96.0);
 
-        var ventana = CreateWindowEx(WS_EX_TOPMOST | WS_EX_DLGMODALFRAME, "MtgCornerInstrucciones", Textos.T("instr_titulo"),
+        var ventana = CreateWindowEx(WS_EX_TOPMOST | WS_EX_DLGMODALFRAME, "MtgCornerInstrucciones", tituloVentana,
             WS_POPUP | WS_CAPTION | WS_SYSMENU, 0, 0, S(ANCHO), S(400), IntPtr.Zero, IntPtr.Zero, instancia, IntPtr.Zero);
         if (ventana == IntPtr.Zero) { Limpiar(); return null; }
         // La barra del título también oscura (Windows 10 2004 en adelante; antes, el 19).
@@ -186,7 +193,6 @@ internal static class EditorInstrucciones
 
         // Lo que mide la explicación, medido y no supuesto: en japonés o en
         // alemán no ocupa lo mismo que en español.
-        var explicacion = Textos.T("instr_explicacion", maximo);
         var medida = new RECT { Right = anchoUtil };
         var hdc = GetDC(ventana);
         var antes = SelectObject(hdc, fuente);
@@ -211,7 +217,7 @@ internal static class EditorInstrucciones
         y += S(ALTO_TEXTO) + S(14);
         cuenta = Control("STATIC", "", 0, S(MARGEN), y + (S(ALTO_BOTON) - S(20)) / 2, S(120), S(20), ID_CUENTA);
         Control("BUTTON", Textos.T("instr_cancelar"), WS_TABSTOP | BS_OWNERDRAW, cliente.Right - S(MARGEN) - S(ANCHO_BOTON) * 2 - S(10), y, S(ANCHO_BOTON), S(ALTO_BOTON), ID_CANCELAR);
-        Control("BUTTON", Textos.T("instr_guardar"), WS_TABSTOP | BS_OWNERDRAW, cliente.Right - S(MARGEN) - S(ANCHO_BOTON), y, S(ANCHO_BOTON), S(ALTO_BOTON), ID_GUARDAR);
+        Control("BUTTON", rotuloGuardar, WS_TABSTOP | BS_OWNERDRAW, cliente.Right - S(MARGEN) - S(ANCHO_BOTON), y, S(ANCHO_BOTON), S(ALTO_BOTON), ID_GUARDAR);
         Contar();
 
         // Del alto del área útil al de la ventana, con su barra y sus bordes; y en el centro de Arena.
@@ -288,7 +294,7 @@ internal static class EditorInstrucciones
                 SetBkMode(d.hDC, 1);   // TRANSPARENT
                 SetTextColor(d.hDC, guardar && !pulsado ? SOBRE_AMBAR : TEXTO);
                 var antes = SelectObject(d.hDC, fuente);
-                var rotulo = d.CtlID == ID_GUARDAR ? Textos.T("instr_guardar") : Textos.T("instr_cancelar");
+                var rotulo = d.CtlID == ID_GUARDAR ? rotuloGuardar : Textos.T("instr_cancelar");
                 DrawText(d.hDC, rotulo, -1, ref r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 SelectObject(d.hDC, antes);
                 if ((d.itemState & ODS_FOCUS) != 0)

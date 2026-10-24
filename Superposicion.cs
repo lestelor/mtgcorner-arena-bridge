@@ -160,6 +160,7 @@ internal static class Superposicion
     [DllImport("gdi32.dll")] private static extern int CombineRgn(IntPtr destino, IntPtr uno, IntPtr otro, int modo);
     private const int RGN_OR = 2;
     [DllImport("gdi32.dll")] private static extern IntPtr CreateRectRgn(int izq, int arriba, int der, int abajo);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreatePolygonRgn(POINT[] puntos, int cuantos, int modo);
     [DllImport("gdiplus.dll")] private static extern int GdipCreateBitmapFromScan0(int ancho, int alto, int paso, int formato, IntPtr datos, out IntPtr mapa);
     [DllImport("gdiplus.dll")] private static extern int GdipGetImageGraphicsContext(IntPtr imagen, out IntPtr grafico);
     [DllImport("gdiplus.dll")] private static extern int GdipBitmapGetPixel(IntPtr mapa, int x, int y, out uint color);
@@ -272,6 +273,42 @@ internal static class Superposicion
     public static Action? CambiarEntrenador { get; set; }
     public static Func<string>? SiguienteEntrenador { get; set; }
     private const int BAJO_ENTRENADOR = -3, LADO_BOTON_ENTRENADOR = 22;
+
+    /// <summary>
+    /// EL BOCADILLO PARA HABLARLE (el usuario, 2026-10-19: «que haya como un icono
+    /// de bocadillo al lado para dar la impresión de que puedes hablar con él,
+    /// así aligeramos la barra»). Un globo de cómic pequeño junto a la cabeza de
+    /// la figura, con tres puntos como quien escribe; pulsarlo abre el editor de
+    /// las instrucciones del entrenador (EditorInstrucciones.cs). Sale en todos
+    /// los avisos con figura, no sólo en el saludo: el saludo se va y él sigue
+    /// hablando en los consejos. Lo pone Program; sin él, no sale.
+    /// </summary>
+    public static Action? Hablar { get; set; }
+
+    /// <summary>
+    /// LO QUE SE PUEDE PULSAR DEBAJO DEL TEXTO (2026-10-24, la opinión del
+    /// programa): las cinco RAREZAS para puntuarlo, de bulk a mítica, y un
+    /// enlace («Escribir algo (opcional)»). El usuario eligió las rarezas entre
+    /// caritas, una mano inicial y las caras del entrenador: «algo que sea
+    /// divertido y que no moleste». Un clic en una gema ya es la respuesta y el
+    /// aviso se cierra; escribir es aparte y sólo para quien quiera. Cualquiera
+    /// de los dos puede ir solo: el aviso de después de puntuar lleva sólo el
+    /// enlace. Las acciones se llaman en el hilo del aviso: quien las pone las
+    /// manda a otro si tardan.
+    /// </summary>
+    public sealed record Opciones(string[]? Rarezas = null, Action<int>? AlElegir = null, string? Enlace = null, Action? AlEnlace = null);
+    [ThreadStatic] private static Opciones? opciones;
+    /// <summary>Lo que ocupan, dentro del globo y debajo del texto.</summary>
+    private const int ALTO_GEMAS = 74, ALTO_ENLACE = 28, LADO_GEMA = 26, BAJO_ENLACE = -5, BAJO_GEMA = -20;
+    [ThreadStatic] private static int extraAbajo;
+    /// <summary>
+    /// Los colores de cada rareza, como el símbolo de la edición: el bulk de cartón,
+    /// la común negra, la infrecuente plata, la rara oro y la mítica naranja. Cada
+    /// una con su borde en claro: la común, negra sobre el globo oscuro, no se veía.
+    /// </summary>
+    private static readonly uint[] COLOR_RAREZA = [0xFF9A6B3F, 0xFF0B0F19, 0xFFC0C7D1, 0xFFD4A72C, 0xFFE8590C];
+    private static readonly uint[] BORDE_RAREZA = [0xFFD9B48A, 0xFFE2E8F0, 0xFFF8FAFC, 0xFFFDE68A, 0xFFFDBA74];
+    private const int BAJO_HABLAR = -4, ANCHO_HABLAR = 32, ALTO_HABLAR = 22;
     [ThreadStatic] private static string? nombreEntrenador;
     [ThreadStatic] private static uint colorEntrenador;
     [ThreadStatic] private static (int R, int G, int B) colorEntrenadorRgb;
@@ -407,7 +444,7 @@ internal static class Superposicion
     ///  · las alertas fijas (combos y sinergias del rival) no sustituyen a nadie:
     ///    se quedan, cada una con su X.
     /// </summary>
-    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false, bool importante = false, string? avatar = null, string? ranura = null)
+    public static Thread? MostrarSinEsperar(string titulo, string texto, int segundos = 6, IReadOnlyList<string>? imagenes = null, bool fijo = false, bool importante = false, string? avatar = null, string? ranura = null, Opciones? opciones = null)
     {
         try
         {
@@ -437,7 +474,7 @@ internal static class Superposicion
             var quien = ent is { } e ? (e.Nombre, e.Color) : ("", (245, 158, 11));
             var hilo = new Thread(() =>
             {
-                try { Correr(titulo, texto, segundos, ficheros, fijo, conAvatar, quien, yo); }
+                try { Correr(titulo, texto, segundos, ficheros, fijo, conAvatar, quien, yo, opciones); }
                 catch (Exception ex) { Console.Error.WriteLine($"[aviso] {ex.GetType().Name}: {ex.Message}"); Quitar(yo); }
             });
             hilo.IsBackground = true;
@@ -595,6 +632,12 @@ internal static class Superposicion
             var figura = RegionFigura(RectFigura());
             CombineRgn(forma, forma, figura, RGN_OR);
             DeleteObject(figura);
+            if (ConBotonHablar)
+            {
+                var hablar = RegionHablar();
+                CombineRgn(forma, forma, hablar, RGN_OR);
+                DeleteObject(hablar);
+            }
         }
         else forma = CreateRoundRectRgn(0, 0, ANCHO + 1, ALTO + 1, 18, 18);
         SetWindowRgn(ventana, forma, true);
@@ -605,7 +648,7 @@ internal static class Superposicion
         lock (pila) return pila.FirstOrDefault(a => a.Ventana == ventana);
     }
 
-    private static void Correr(string titulo, string texto, int segundos, string[] ficheros, bool fijo, string? avatar, (string Nombre, (int R, int G, int B) Color) quien, Apilado yo)
+    private static void Correr(string titulo, string texto, int segundos, string[] ficheros, bool fijo, string? avatar, (string Nombre, (int R, int G, int B) Color) quien, Apilado yo, Opciones? opc = null)
     {
         // EN PÍXELES DE VERDAD. `GetWindowRect` devuelve píxeles físicos; sin
         // declararse consciente del DPI, Windows virtualiza las coordenadas y
@@ -617,6 +660,8 @@ internal static class Superposicion
         textoTitulo = titulo;
         textoCuerpo = texto;
         ficherosMini = ficheros;
+        opciones = opc;
+        extraAbajo = (opc?.Rarezas is { Length: > 0 } ? ALTO_GEMAS : 0) + (opc?.Enlace is { Length: > 0 } ? ALTO_ENLACE : 0);
         minis = new();
         reloj = new();
         ventanaZoom = IntPtr.Zero;
@@ -637,8 +682,8 @@ internal static class Superposicion
         var alto = AltoDelCuerpo(texto);
         // Con la figura, la franja de arriba más el globo, que ya no repite quién
         // habla (va en la franja) y por eso sube como uno de seguida.
-        altoTextoPrimera = avatar is null ? alto : alto - SUBE_SEGUIDA + BajaConFigura;
-        altoTextoSeguida = avatar is null ? alto : alto - SUBE_SEGUIDA;
+        altoTextoPrimera = (avatar is null ? alto : alto - SUBE_SEGUIDA + BajaConFigura) + extraAbajo;
+        altoTextoSeguida = (avatar is null ? alto : alto - SUBE_SEGUIDA) + extraAbajo;
 
         esPrimera = true;
         AjustarAlto();
@@ -754,7 +799,7 @@ internal static class Superposicion
                 return new IntPtr(MA_NOACTIVATE);
 
             case WM_SETCURSOR:
-                SetCursor(LoadCursor(IntPtr.Zero, bajoRaton is BAJO_X or BAJO_ENTRENADOR ? IDC_HAND : IDC_ARROW));
+                SetCursor(LoadCursor(IntPtr.Zero, bajoRaton is BAJO_X or BAJO_ENTRENADOR or BAJO_HABLAR or BAJO_ENLACE || bajoRaton <= BAJO_GEMA ? IDC_HAND : IDC_ARROW));
                 return new IntPtr(1);
 
             case WM_MOUSEMOVE:
@@ -776,6 +821,18 @@ internal static class Superposicion
             {
                 var donde = conCierre ? QueHayEn(lParam) : -1;
                 if (donde == BAJO_X) PostMessage(ventana, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                // Una gema: ésa es la nota, y el aviso ya ha hecho su trabajo.
+                else if (donde <= BAJO_GEMA && opciones?.AlElegir is { } elegir)
+                {
+                    PostMessage(ventana, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                    try { elegir(BAJO_GEMA - donde + 1); } catch { /* cosa de quien lo puso */ }
+                }
+                else if (donde == BAJO_ENLACE && opciones?.AlEnlace is { } enlace)
+                {
+                    PostMessage(ventana, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                    try { enlace(); } catch { /* cosa de quien lo puso */ }
+                }
+                else if (donde == BAJO_HABLAR && Hablar is { } hablar) hablar();
                 else if (donde == BAJO_ENTRENADOR && CambiarEntrenador is { } cambiar)
                 {
                     // El siguiente entrenador, en todos los bocadillos abiertos (cada uno en su hilo).
@@ -921,6 +978,146 @@ internal static class Superposicion
         return new RECT { Left = x, Top = pie - h, Right = x + w, Bottom = pie };
     }
 
+    /// <summary>El bocadillo de hablarle: a la derecha de la cabeza de la figura, encima del globo.</summary>
+    private static RECT RectHablar()
+    {
+        var f = RectFigura();
+        var abajo = ArribaGlobo - 9;
+        return new RECT { Left = f.Right + 4, Top = abajo - ALTO_HABLAR, Right = f.Right + 4 + ANCHO_HABLAR, Bottom = abajo };
+    }
+
+    /// <summary>Con el bocadillo: sólo en el primero con entrenador, y si Program sabe qué hacer al pulsarlo.</summary>
+    private static bool ConBotonHablar => avatarFichero is not null && !DeSeguida && Hablar is not null;
+
+    /// <summary>Las tres puntas del pico: sale de abajo a la izquierda, hacia la figura.</summary>
+    private static POINT[] PicoHablar()
+    {
+        var b = RectHablar();
+        return [new POINT { x = b.Left + 18, y = b.Bottom - 1 }, new POINT { x = b.Left - 5, y = b.Bottom + 7 }, new POINT { x = b.Left + 9, y = b.Bottom - 1 }];
+    }
+
+    /// <summary>Lo que ocupa en la ventana, un poco holgado para no cortar el borde.</summary>
+    private static IntPtr RegionHablar()
+    {
+        var b = RectHablar();
+        var forma = CreateRoundRectRgn(b.Left - 1, b.Top - 1, b.Right + 2, b.Bottom + 2, 20, 20);
+        var p = PicoHablar();
+        var pico = CreatePolygonRgn([new POINT { x = p[0].x + 1, y = p[0].y - 2 }, new POINT { x = p[1].x - 2, y = p[1].y + 2 }, new POINT { x = p[2].x - 1, y = p[2].y - 2 }], 3, 1 /* ALTERNATE */);
+        CombineRgn(forma, forma, pico, RGN_OR);
+        DeleteObject(pico);
+        return forma;
+    }
+
+    /// <summary>El bocadillo: claro, con el borde del color del entrenador y tres puntos; al pasar, más vivo.</summary>
+    private static void PintarHablar(IntPtr hdc)
+    {
+        var b = RectHablar();
+        var sobre = bajoRaton == BAJO_HABLAR;
+        ArrancarGdiplus();
+        if (GdipCreateFromHDC(hdc, out var g) != 0 || g == IntPtr.Zero) return;
+        GdipSetSmoothingMode(g, 4);
+        int x = b.Left, y = b.Top, w = b.Right - b.Left - 1, h = b.Bottom - b.Top - 1, d = 18;
+        var p = PicoHablar();
+        GdipCreatePath(0, out var c);
+        GdipAddPathArcI(c, x, y, d, d, 180, 90);
+        GdipAddPathArcI(c, x + w - d, y, d, d, 270, 90);
+        GdipAddPathArcI(c, x + w - d, y + h - d, d, d, 0, 90);
+        GdipAddPathLineI(c, p[0].x, p[0].y, p[1].x, p[1].y);
+        GdipAddPathLineI(c, p[1].x, p[1].y, p[2].x, p[2].y);
+        GdipAddPathArcI(c, x, y + h - d, d, d, 90, 90);
+        GdipClosePathFigure(c);
+        var (cr, cg, cb) = colorEntrenadorRgb;
+        var color = (uint)((255 << 24) | (cr << 16) | (cg << 8) | cb);
+        GdipCreateSolidFill(sobre ? 0xFFFFFFFF : 0xFFE2E8F0, out var relleno);
+        GdipFillPath(g, relleno, c);
+        GdipCreatePen1(color, sobre ? 2.4f : 1.6f, 2, out var pluma);
+        GdipDrawPath(g, pluma, c);
+        // Los tres puntos, como quien está escribiendo: en su color al pasar.
+        GdipCreateSolidFill(sobre ? color : 0xFF1E293B, out var puntos);
+        for (var k = -1; k <= 1; k++) GdipFillEllipseI(g, puntos, x + w / 2 + k * 7 - 2, y + h / 2 - 2, 5, 5);
+        GdipDeleteBrush(relleno); GdipDeleteBrush(puntos); GdipDeletePen(pluma); GdipDeletePath(c); GdipDeleteGraphics(g);
+    }
+
+    /// <summary>
+    /// Las gemas de rareza (la de bulk, una caja) con su nombre debajo y, al
+    /// pasar, su hueco resaltado y la gema más grande; y el enlace, subrayado.
+    /// </summary>
+    private static void PintarOpciones(IntPtr hdc)
+    {
+        var o = opciones!;
+        var letra = CreateFont(13, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
+        var antes = SelectObject(hdc, letra);
+        SetBkMode(hdc, TRANSPARENT_BK);
+        if (o.Rarezas is { Length: > 0 } rz)
+        {
+            ArrancarGdiplus();
+            for (var i = 0; i < rz.Length && i < COLOR_RAREZA.Length; i++)
+            {
+                var r = RectGema(i);
+                var sobre = bajoRaton == BAJO_GEMA - i;
+                if (sobre) { var p = CreateSolidBrush(Rgb(30, 41, 59)); FillRect(hdc, ref r, p); DeleteObject(p); }
+                var lado = sobre ? LADO_GEMA + 6 : LADO_GEMA;
+                int cx = (r.Left + r.Right) / 2, cy = r.Top + 4 + LADO_GEMA / 2 + 1;
+                if (GdipCreateFromHDC(hdc, out var g) == 0 && g != IntPtr.Zero)
+                {
+                    GdipSetSmoothingMode(g, 4);
+                    GdipCreateSolidFill(COLOR_RAREZA[i], out var relleno);
+                    GdipCreatePen1(sobre ? 0xFFFFFFFF : BORDE_RAREZA[i], sobre ? 2f : 1.4f, 2, out var borde);
+                    GdipCreatePath(0, out var c);
+                    var m = lado / 2;
+                    if (i == 0)
+                    {
+                        // El bulk, una caja de cartón: el cuerpo y la tapa.
+                        GdipAddPathLineI(c, cx - m, cy - m / 2, cx + m, cy - m / 2);
+                        GdipAddPathLineI(c, cx + m, cy - m / 2, cx + m, cy + m);
+                        GdipAddPathLineI(c, cx + m, cy + m, cx - m, cy + m);
+                        GdipClosePathFigure(c);
+                        GdipFillPath(g, relleno, c);
+                        GdipDrawPath(g, borde, c);
+                        GdipCreatePath(0, out var tapa);
+                        GdipAddPathLineI(tapa, cx - m - 2, cy - m / 2, cx - m + 4, cy - m);
+                        GdipAddPathLineI(tapa, cx - m + 4, cy - m, cx + m - 4, cy - m);
+                        GdipAddPathLineI(tapa, cx + m - 4, cy - m, cx + m + 2, cy - m / 2);
+                        GdipDrawPath(g, borde, tapa);
+                        GdipDeletePath(tapa);
+                    }
+                    else
+                    {
+                        // Una gema tallada: el rombo y su faceta de arriba.
+                        GdipAddPathLineI(c, cx, cy - m, cx + m, cy);
+                        GdipAddPathLineI(c, cx + m, cy, cx, cy + m);
+                        GdipAddPathLineI(c, cx, cy + m, cx - m, cy);
+                        GdipClosePathFigure(c);
+                        GdipFillPath(g, relleno, c);
+                        GdipDrawPath(g, borde, c);
+                        GdipCreatePath(0, out var faceta);
+                        GdipAddPathLineI(faceta, cx - m / 2, cy - m / 2, cx + m / 2, cy - m / 2);
+                        GdipDrawPath(g, borde, faceta);
+                        GdipDeletePath(faceta);
+                    }
+                    GdipDeleteBrush(relleno); GdipDeletePen(borde); GdipDeletePath(c); GdipDeleteGraphics(g);
+                }
+                var rNombre = new RECT { Left = r.Left, Top = r.Top + LADO_GEMA + 12, Right = r.Right, Bottom = r.Bottom };
+                SetTextColor(hdc, sobre ? Rgb(255, 255, 255) : Rgb(148, 163, 184));
+                // En dos renglones si hace falta: «Nicht so häufig» no cabe en uno.
+                DrawText(hdc, rz[i], -1, ref rNombre, DT_CENTER | DT_WORDBREAK | DT_END_ELLIPSIS);
+            }
+        }
+        if (o.Enlace is { Length: > 0 } enlace)
+        {
+            var r = RectEnlace();
+            var sobre = bajoRaton == BAJO_ENLACE;
+            var subrayada = CreateFont(14, 0, 0, 0, 400, 0, 1, 0, 1, 0, 0, 5, 0, "Segoe UI");
+            SelectObject(hdc, subrayada);
+            SetTextColor(hdc, sobre ? Rgb(255, 255, 255) : Rgb(125, 211, 252));
+            DrawText(hdc, enlace, -1, ref r, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+            SelectObject(hdc, letra);
+            DeleteObject(subrayada);
+        }
+        SelectObject(hdc, antes);
+        DeleteObject(letra);
+    }
+
     private static string TextoNombre() =>
         nombreEntrenador is { Length: > 0 } ? Textos.T("aviso_dice", nombreEntrenador).ToUpperInvariant() : "MTG CORNER";
 
@@ -1006,6 +1203,23 @@ internal static class Superposicion
         finally { SelectObject(hdc, anterior); DeleteObject(fuente); ReleaseDC(IntPtr.Zero, hdc); }
     }
 
+    /// <summary>Donde empiezan las opciones: al pie del globo, debajo del texto.</summary>
+    private static int ArribaOpciones => ALTO_TEXTO - 8 - extraAbajo;
+
+    /// <summary>El hueco de la gema i (de 0 a 4): cinco iguales a lo ancho del texto, con su nombre debajo.</summary>
+    private static RECT RectGema(int i)
+    {
+        var ancho = (ANCHO - 26 - izq) / 5;
+        return new RECT { Left = izq + i * ancho, Top = ArribaOpciones + 4, Right = izq + (i + 1) * ancho, Bottom = ArribaOpciones + ALTO_GEMAS - 4 };
+    }
+
+    /// <summary>El enlace, debajo de las gemas (o solo, al pie del texto).</summary>
+    private static RECT RectEnlace()
+    {
+        var arriba = ArribaOpciones + (opciones?.Rarezas is { Length: > 0 } ? ALTO_GEMAS : 0);
+        return new RECT { Left = izq, Top = arriba, Right = ANCHO - 26, Bottom = arriba + ALTO_ENLACE - 6 };
+    }
+
     private static RECT RectMini(int i) => new() { Left = izq + i * (ANCHO_MINI + AIRE_MINI), Top = ALTO_TEXTO - 4, Right = izq + i * (ANCHO_MINI + AIRE_MINI) + ANCHO_MINI, Bottom = ALTO_TEXTO - 4 + ALTO_MINI };
 
     /// <summary>Qué hay bajo un punto de la ventana: la X, una miniatura o nada. Sólo en las fijas: las otras no ven el ratón.</summary>
@@ -1015,6 +1229,10 @@ internal static class Superposicion
         var x = (short)(lParam.ToInt64() & 0xFFFF);
         var y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
         bool Dentro(RECT r) => x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
+        if (opciones?.Rarezas is { Length: > 0 } rz)
+            for (var i = 0; i < rz.Length; i++) if (Dentro(RectGema(i))) return BAJO_GEMA - i;
+        if (opciones?.Enlace is { Length: > 0 } && Dentro(RectEnlace())) return BAJO_ENLACE;
+        if (ConBotonHablar && Dentro(RectHablar())) return BAJO_HABLAR;
         if (ConBotonEntrenador && Dentro(RectBotonEntrenador())) return BAJO_ENTRENADOR;
         if (Dentro(RectX())) return BAJO_X;
         for (var i = 0; i < ficherosMini.Length; i++) if (Dentro(RectMini(i))) return i;
@@ -1111,10 +1329,12 @@ internal static class Superposicion
                 // En la franja, en blanco sobre su color, centrado en lo que deja la figura.
                 SetTextColor(hdc, Rgb(255, 255, 255));
                 var rNombre = new RECT { Left = RectFigura().Right + 14, Top = ArribaGlobo, Right = RectX().Left - 6, Bottom = ArribaGlobo + BANDA };
-                if (bajoRaton == BAJO_ENTRENADOR && SiguienteEntrenador?.Invoke() is { Length: > 0 } siguiente)
+                var explica = bajoRaton == BAJO_ENTRENADOR && SiguienteEntrenador?.Invoke() is { Length: > 0 } siguiente
+                    ? Textos.T("aviso_cambiar_entrenador", siguiente)
+                    : bajoRaton == BAJO_HABLAR ? Textos.T("hablar_entrenador") : null;
+                if (explica is not null)
                 {
-                    // Al pasar por el botón, a quién se cambia: en dos renglones si no cabe en uno, centrado en la franja.
-                    var explica = Textos.T("aviso_cambiar_entrenador", siguiente);
+                    // Al pasar por un botón, qué hace: en dos renglones si no cabe en uno, centrado en la franja.
                     var medida = rNombre;
                     DrawText(hdc, explica, -1, ref medida, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
                     var altoExplica = Math.Min(medida.Bottom - medida.Top, BANDA);
@@ -1148,8 +1368,9 @@ internal static class Superposicion
 
             SelectObject(hdc, normal);
             SetTextColor(hdc, Rgb(203, 213, 225));
-            var rCuerpo = new RECT { Left = izq, Top = 58 - sube, Right = ANCHO - 26, Bottom = ALTO_TEXTO - 10 };
+            var rCuerpo = new RECT { Left = izq, Top = 58 - sube, Right = ANCHO - 26, Bottom = ALTO_TEXTO - 10 - extraAbajo };
             DrawText(hdc, textoCuerpo, -1, ref rCuerpo, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
+            if (opciones is not null) PintarOpciones(hdc);
 
             // Las miniaturas, en fila bajo el texto. Se cargan la primera vez
             // que se pinta y se sueltan al cerrar.
@@ -1164,6 +1385,7 @@ internal static class Superposicion
                     GdipDeleteGraphics(gA);
                 }
                 if (ConBotonEntrenador) PintarBotonEntrenador(hdc);
+                if (ConBotonHablar) PintarHablar(hdc);
             }
             if (ficherosMini.Length > 0)
             {

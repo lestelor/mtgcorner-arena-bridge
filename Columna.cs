@@ -36,7 +36,7 @@ namespace MtgCornerArenaBridge;
 /// </summary>
 internal static class Columna
 {
-    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival, Inicio, Estadisticas, Creador, CartaMazo, MasCartas, Consejo, Biblioteca, Rastreo, Mano, MazoRival, UltimoConsejo, Programa, PlanMazo, Draft, CartaDraft, ConsejoDraft, MazoDraft, Entrenador }
+    public enum Accion { Importar, Coleccion, Constructor, Arranque, Salir, Mejorar, Similares, Combos, Amenaza, Sinergias, Resumen, Version, SinergiaRival, Inicio, Estadisticas, Creador, CartaMazo, MasCartas, Consejo, Biblioteca, Rastreo, Mano, MazoRival, UltimoConsejo, Programa, PlanMazo, Draft, CartaDraft, ConsejoDraft, MazoDraft, Entrenador, Opinion }
 
     /// <summary>
     /// Una fila. Las de contexto traen su etiqueta hecha y un dato (nombre del
@@ -189,8 +189,6 @@ internal static class Columna
         new(Accion.Estadisticas, "\uE9D2", "col_estadisticas", "estadisticas"),
         // El consejo de cada turno, experimental: un interruptor, apagado de salida.
         new(Accion.Consejo, "\uE82F", "col_consejo_no", "consejo"),
-        // Lo que le pides a tu entrenador (estilo, en qu\u00E9 fijarse), para todos sus consejos (1.24.0).
-        new(Accion.Entrenador, "\uE8F2", "col_entrenador", "entrenador"),
         new(Accion.Constructor, "", "col_constructor"),
         // Arranque, versión y salir, que casi no se usan, en UNA fila con sus
         // tres botones (el usuario, 2026-10-09: «me parece bien la propuesta de
@@ -204,6 +202,8 @@ internal static class Columna
     [
         new(Accion.Arranque, "", "col_arranque"),
         new(Accion.Version, "\uE946", "col_version", "version"),
+        // Qu\u00E9 te parece el programa: las rarezas y, si quieres, unas l\u00EDneas (1.25.0).
+        new(Accion.Opinion, "\uEB51", "col_opinion", "opinion"),
         new(Accion.Salir, "", "col_salir"),
     ];
 
@@ -264,9 +264,20 @@ internal static class Columna
     ];
     // Los de «Programa» dicen su rótulo de siempre («Arranque automático: sí», la versión…).
     private static readonly Boton[] BotonesPrograma = FilasPrograma.Select(f => new Boton(f, null)).ToArray();
+    // El de «Consejo por turno»: hablar con el entrenador (sus instrucciones). Era
+    // una fila propia en la 1.24.0; ahora es este botón y el bocadillo de sus avisos
+    // (el usuario, 2026-10-19: «así aligeramos la barra»). Pulsar el resto de la
+    // fila sigue encendiendo y apagando el consejo.
+    private static readonly Boton[] BotonesConsejo = [new(new Fila(Accion.Entrenador, "", "", "entrenador"), "hablar_entrenador")];
     /// <summary>Los botones de una fila, o null si no lleva.</summary>
     private static Boton[]? BotonesDe(Fila f) =>
-        f.Nivel > 0 ? null : f.Accion == Accion.Similares ? BotonesCarta : f.Accion == Accion.Programa ? BotonesPrograma : null;
+        f.Nivel > 0 ? null : f.Accion switch
+        {
+            Accion.Similares => BotonesCarta,
+            Accion.Programa => BotonesPrograma,
+            Accion.Consejo => BotonesConsejo,
+            _ => null,
+        };
     private static string RotuloBoton(Boton b) => b.Clave is { } c ? Textos.T(c) : Etiqueta(b.Fila);
     /// <summary>El botón bajo el ratón en la fila señalada, o -1.</summary>
     private static int botonBajoRaton = -1;

@@ -1808,8 +1808,8 @@ internal static class Textos
         ],
         ["ayuda_consejo"] =
         [
-            "At the start of your main phase, a suggestion of what to play and whether to attack. Experimental: the AI can get it wrong, it never clicks for you, and it is off in competitive events.", "Al empezar tu fase principal, una sugerencia de qué jugar y si atacar. Experimental: la IA puede equivocarse, nunca pulsa por ti y no funciona en eventos competitivos.", "Zu Beginn deiner Hauptphase ein Vorschlag, was du spielen und ob du angreifen solltest. Experimentell: Die KI kann sich irren, klickt nie für dich und ist in kompetitiven Events aus.", "Au début de ta phase principale, une suggestion de quoi jouer et s'il faut attaquer. Expérimental : l'IA peut se tromper, ne clique jamais à ta place et est désactivée en événement compétitif.",
-            "No início da tua fase principal, uma sugestão do que jogar e se deves atacar. Experimental: a IA pode enganar-se, nunca clica por ti e não funciona em eventos competitivos.", "All'inizio della tua fase principale, un suggerimento su cosa giocare e se attaccare. Sperimentale: l'IA può sbagliare, non clicca mai al posto tuo ed è spenta negli eventi competitivi.", "メインフェイズの開始時に、何をプレイし攻撃するかの提案を表示します。実験的：AIは間違えることがあり、代わりにクリックすることはなく、競技イベントでは動作しません。", "在你的主阶段开始时，建议出什么牌以及是否攻击。实验性：AI 可能出错，绝不会替你点击，在竞技赛事中不启用。",
+            "At the start of your main phase, a suggestion of what to play and whether to attack. Experimental: the AI can get it wrong, it never clicks for you, and it is off in competitive events. The speech bubble on the right tells your coach how you want help.", "Al empezar tu fase principal, una sugerencia de qué jugar y si atacar. Experimental: la IA puede equivocarse, nunca pulsa por ti y no funciona en eventos competitivos. El bocadillo de la derecha sirve para decirle a tu entrenador cómo quieres que te ayude.", "Zu Beginn deiner Hauptphase ein Vorschlag, was du spielen und ob du angreifen solltest. Experimentell: Die KI kann sich irren, klickt nie für dich und ist in kompetitiven Events aus. Mit der Sprechblase rechts sagst du deinem Coach, wie er dir helfen soll.", "Au début de ta phase principale, une suggestion de quoi jouer et s'il faut attaquer. Expérimental : l'IA peut se tromper, ne clique jamais à ta place et est désactivée en événement compétitif. La bulle à droite sert à dire à ton coach comment t'aider.",
+            "No início da tua fase principal, uma sugestão do que jogar e se deves atacar. Experimental: a IA pode enganar-se, nunca clica por ti e não funciona em eventos competitivos. O balão à direita serve para dizeres ao teu treinador como te ajudar.", "All'inizio della tua fase principale, un suggerimento su cosa giocare e se attaccare. Sperimentale: l'IA può sbagliare, non clicca mai al posto tuo ed è spenta negli eventi competitivi. Il fumetto a destra serve a dire al tuo allenatore come aiutarti.", "メインフェイズの開始時に、何をプレイし攻撃するかの提案を表示します。実験的：AIは間違えることがあり、代わりにクリックすることはなく、競技イベントでは動作しません。右の吹き出しで、コーチに手伝い方を伝えられます。", "在你的主阶段开始时，建议出什么牌以及是否攻击。实验性：AI 可能出错，绝不会替你点击，在竞技赛事中不启用。右边的对话气泡用来告诉教练你希望它怎么帮你。",
         ],
         // La fila «Instrucciones del entrenador» y su editor (1.24.0, ver EditorInstrucciones.cs).
         ["col_entrenador"] =
@@ -1817,10 +1817,157 @@ internal static class Textos
             "Coach instructions", "Instrucciones del entrenador", "Anweisungen für den Coach", "Consignes pour le coach",
             "Instruções para o treinador", "Istruzioni per l'allenatore", "コーチへの指示", "给教练的指示",
         ],
-        ["ayuda_entrenador"] =
+        // El saludo del entrenador al abrir Arena y su bocadillo para hablarle (1.24.1).
+        ["saludo_titulo_amable"] =
         [
-            "Tell your coach how you want to be helped: shorter, more detail, what to focus on. It applies to the advice each turn, the mulligan and the draft.", "Dile a tu entrenador cómo quieres que te ayude: más corto, más detalle, en qué fijarse. Vale para el consejo de cada turno, el mulligan y el draft.", "Sag deinem Coach, wie er dir helfen soll: kürzer, ausführlicher, worauf er achten soll. Gilt für den Tipp pro Zug, den Mulligan und den Draft.", "Dis à ton coach comment tu veux être aidé : plus court, plus détaillé, sur quoi se concentrer. Ça vaut pour le conseil à chaque tour, le mulligan et le draft.",
-            "Diz ao teu treinador como queres que te ajude: mais curto, mais detalhe, em que se focar. Vale para o conselho de cada turno, o mulligan e o draft.", "Di' al tuo allenatore come vuoi essere aiutato: più breve, più dettagli, su cosa concentrarsi. Vale per il consiglio a ogni turno, il mulligan e il draft.", "コーチにどう手伝ってほしいかを伝えます。短く、詳しく、どこに注目するかなど。毎ターンのアドバイス、マリガン、ドラフトに反映されます。", "告诉你的教练你希望它怎么帮你：更简短、更详细、关注什么。适用于每回合建议、调度和轮抽。",
+            "Hi there!", "¡Hola!", "Hallo!", "Coucou !",
+            "Olá!", "Ciao!", "こんにちは！", "你好呀！",
+        ],
+        ["saludo_amable"] =
+        [
+            "So happy to see you. Whatever the cards say today, we'll enjoy every game together.", "Qué alegría verte. Digan lo que digan las cartas hoy, vamos a disfrutar cada partida juntos.", "Schön, dich zu sehen. Egal, was die Karten heute sagen: Wir genießen jede Partie zusammen.", "Quel plaisir de te voir. Quoi que disent les cartes aujourd'hui, on va profiter de chaque partie ensemble.",
+            "Que alegria ver-te. Digam o que disserem as cartas hoje, vamos aproveitar cada partida juntos.", "Che bello vederti. Qualunque cosa dicano le carte oggi, ci godremo ogni partita insieme.", "会えてうれしいです。今日のカードがどうであれ、一緒に一戦一戦を楽しみましょう。", "见到你真开心。不管今天牌运如何，我们一起享受每一局吧。",
+        ],
+        ["saludo_titulo_directo"] =
+        [
+            "Hello, class", "Buenas, clase", "Guten Tag, Klasse", "Bonjour, la classe",
+            "Olá, turma", "Salve, classe", "皆さん、こんにちは", "同学们好",
+        ],
+        ["saludo_directo"] =
+        [
+            "Today's lesson: draw, think, then play. In that order. There will be a test.", "La lección de hoy: robar, pensar y luego jugar. En ese orden. Habrá examen.", "Heutige Lektion: ziehen, nachdenken, dann spielen. In dieser Reihenfolge. Es gibt eine Prüfung.", "Leçon du jour : piocher, réfléchir, puis jouer. Dans cet ordre. Il y aura une interro.",
+            "A lição de hoje: comprar, pensar e depois jogar. Por esta ordem. Vai haver teste.", "La lezione di oggi: pescare, pensare e poi giocare. In quest'ordine. Ci sarà un'interrogazione.", "今日の授業：引く、考える、それからプレイ。この順番で。テストに出ます。", "今天的课：抽牌、思考、再出牌。按这个顺序。要考的。",
+        ],
+        ["saludo_titulo_sargento"] =
+        [
+            "Attention, recruit!", "¡Firmes, recluta!", "Stillgestanden, Rekrut!", "Garde-à-vous, recrue !",
+            "Sentido, recruta!", "Attenti, recluta!", "気をつけ、新兵！", "立正，新兵！",
+        ],
+        ["saludo_sargento"] =
+        [
+            "Those cards won't shuffle themselves! I want that mana in formation and not one complaint!", "¡Esas cartas no se van a barajar solas! ¡Quiero ese maná en formación y ni una queja!", "Die Karten mischen sich nicht von allein! Ich will das Mana in Formation sehen, und keine Klagen!", "Ces cartes ne vont pas se mélanger toutes seules ! Je veux ce mana en formation, et pas une plainte !",
+            "Essas cartas não se vão baralhar sozinhas! Quero esse mana em formação e nem uma queixa!", "Queste carte non si mescolano da sole! Voglio quel mana in formazione e nessuna lamentela!", "カードは勝手に切れたりしないぞ！マナは整列、文句は一切なしだ！", "牌可不会自己洗！法术力给我列好队，不许抱怨！",
+        ],
+        ["saludo_pideme"] =
+        [
+            "Click my speech bubble and tell me how you want me to help. For example: \"keep it very short\", \"I'm new to Limited\" or \"I like aggressive decks\".", "Pulsa mi bocadillo y dime cómo quieres que te ayude. Por ejemplo: \"sé muy breve\", \"soy nuevo en Limitado\" o \"me gustan los mazos agresivos\".", "Klick auf meine Sprechblase und sag mir, wie ich dir helfen soll. Zum Beispiel: \"fass dich ganz kurz\", \"ich bin neu in Limited\" oder \"ich mag aggressive Decks\".", "Clique sur ma bulle et dis-moi comment t'aider. Par exemple : \"sois très bref\", \"je débute en Limité\" ou \"j'aime les decks agressifs\".",
+            "Carrega no meu balão e diz-me como queres que te ajude. Por exemplo: \"sê muito breve\", \"sou novo em Limitado\" ou \"gosto de baralhos agressivos\".", "Clicca sul mio fumetto e dimmi come vuoi che ti aiuti. Per esempio: \"sii molto breve\", \"sono nuovo al Limited\" o \"mi piacciono i mazzi aggressivi\".", "吹き出しをクリックして、どう手伝ってほしいか教えてください。例：「とても短く」「リミテッド初心者です」「アグロデッキが好き」。", "点我的对话气泡，告诉我你希望我怎么帮你。例如：“说得非常简短”“我是限制赛新手”“我喜欢快攻套牌”。",
+        ],
+        ["hablar_entrenador"] =
+        [
+            "Tell your coach how you want help", "Dile a tu entrenador cómo quieres que te ayude", "Sag deinem Coach, wie er dir helfen soll", "Dis à ton coach comment t'aider",
+            "Diz ao teu treinador como te ajudar", "Di' al tuo allenatore come aiutarti", "コーチに手伝い方を伝える", "告诉教练怎么帮你",
+        ],
+        // La opinión del programa: la pregunta del entrenador, las rarezas y lo de después (1.25.0).
+        ["col_opinion"] =
+        [
+            "Tell us what you think", "Danos tu opinión", "Sag uns deine Meinung", "Donne-nous ton avis",
+            "Dá-nos a tua opinião", "Dicci cosa ne pensi", "ご意見をお聞かせください", "告诉我们你的看法",
+        ],
+        ["opinion_titulo"] =
+        [
+            "Your opinion", "Tu opinión", "Deine Meinung", "Ton avis",
+            "A tua opinião", "La tua opinione", "ご意見", "你的意见",
+        ],
+        ["opinion_pregunta_amable"] =
+        [
+            "If the program were a card, what rarity would you give it? Your answer helps me a lot.", "Si el programa fuera una carta, ¿qué rareza le darías? Tu respuesta me ayuda muchísimo.", "Wenn das Programm eine Karte wäre, welche Seltenheit würdest du ihm geben? Deine Antwort hilft mir sehr.", "Si le programme était une carte, quelle rareté lui donnerais-tu ? Ta réponse m'aide beaucoup.",
+            "Se o programa fosse uma carta, que raridade lhe darias? A tua resposta ajuda-me imenso.", "Se il programma fosse una carta, che rarità gli daresti? La tua risposta mi aiuta tantissimo.", "このプログラムがカードだったら、レアリティはどれ？あなたの答えがとても役に立ちます。", "如果这个程序是一张牌，你会给它什么稀有度？你的回答对我帮助很大。",
+        ],
+        ["opinion_pregunta_directo"] =
+        [
+            "Exam question: what rarity would you give this program?", "Pregunta de examen: ¿qué rareza le das al programa?", "Prüfungsfrage: Welche Seltenheit gibst du diesem Programm?", "Question d'examen : quelle rareté donnes-tu à ce programme ?",
+            "Pergunta de exame: que raridade dás a este programa?", "Domanda d'esame: che rarità dai a questo programma?", "試験問題：このプログラムのレアリティは？", "考试题：你给这个程序什么稀有度？",
+        ],
+        ["opinion_pregunta_sargento"] =
+        [
+            "Recruit! Report in: what rarity does this program deserve?", "¡Recluta! Informe: ¿qué rareza se merece este programa?", "Rekrut! Meldung: Welche Seltenheit verdient dieses Programm?", "Recrue ! Au rapport : quelle rareté mérite ce programme ?",
+            "Recruta! Relatório: que raridade merece este programa?", "Recluta! Rapporto: che rarità merita questo programma?", "新兵！報告せよ：このプログラムにふさわしいレアリティは？", "新兵！报告：这个程序配得上什么稀有度？",
+        ],
+        ["opinion_correo"] =
+        [
+            "Or write to us at contact@mtgcorner.com", "O escríbenos a contact@mtgcorner.com", "Oder schreib uns an contact@mtgcorner.com", "Ou écris-nous à contact@mtgcorner.com",
+            "Ou escreve-nos para contact@mtgcorner.com", "Oppure scrivici a contact@mtgcorner.com", "contact@mtgcorner.com へのメールも歓迎です", "也可以写信到 contact@mtgcorner.com",
+        ],
+        ["rareza_1"] =
+        [
+            "Bulk", "Bulk", "Bulk", "Bulk",
+            "Bulk", "Bulk", "バルク", "散卡",
+        ],
+        ["rareza_2"] =
+        [
+            "Common", "Común", "Häufig", "Commune",
+            "Comum", "Comune", "コモン", "普通",
+        ],
+        ["rareza_3"] =
+        [
+            "Uncommon", "Infrecuente", "Nicht so häufig", "Peu commune",
+            "Incomum", "Non comune", "アンコモン", "非普通",
+        ],
+        ["rareza_4"] =
+        [
+            "Rare", "Rara", "Selten", "Rare",
+            "Rara", "Rara", "レア", "稀有",
+        ],
+        ["rareza_5"] =
+        [
+            "Mythic", "Mítica", "Mythisch", "Mythique",
+            "Mítica", "Mitica", "神話レア", "秘稀",
+        ],
+        ["opinion_respuesta_1"] =
+        [
+            "Ouch. Straight to the bulk box... Tell me what's wrong and I'll fix it.", "Auch. Directo a la caja de bulk... Cuéntame qué falla y lo arreglo.", "Autsch. Direkt in die Bulk-Kiste... Sag mir, was nicht passt, und ich repariere es.", "Aïe. Direct dans la boîte de bulk... Dis-moi ce qui ne va pas et je le corrige.",
+            "Ai. Direto para a caixa de bulk... Diz-me o que falha e eu arranjo.", "Ahia. Dritto nella scatola del bulk... Dimmi cosa non va e lo sistemo.", "うっ。バルク箱行きか…。何がダメか教えてくれれば直します。", "哎呀，直接进散卡箱了……告诉我哪里不好，我来改。",
+        ],
+        ["opinion_respuesta_2"] =
+        [
+            "Common, huh? Fair enough. What would make it rarer?", "Común, ¿eh? Me vale. ¿Qué le falta para subir de rareza?", "Häufig, was? Fair. Was fehlt, damit es seltener wird?", "Commune, hein ? D'accord. Qu'est-ce qui la rendrait plus rare ?",
+            "Comum, hein? Justo. O que lhe falta para subir de raridade?", "Comune, eh? Ci sta. Cosa manca per salire di rarità?", "コモンか。了解。レアリティを上げるには何が足りない？", "普通，是吧？可以。还差什么才能更稀有？",
+        ],
+        ["opinion_respuesta_3"] =
+        [
+            "Uncommon: playable, but not a first pick yet. What's missing?", "Infrecuente: jugable, pero aún no es primera elección. ¿Qué le falta?", "Nicht so häufig: spielbar, aber noch kein First Pick. Was fehlt?", "Peu commune : jouable, mais pas encore un premier choix. Qu'est-ce qui manque ?",
+            "Incomum: jogável, mas ainda não é primeira escolha. O que lhe falta?", "Non comune: giocabile, ma non ancora una prima scelta. Cosa manca?", "アンコモン：使えるけど、まだ1手目では取らない。何が足りない？", "非普通：能用，但还不是首选。还缺什么？",
+        ],
+        ["opinion_respuesta_4"] =
+        [
+            "Rare! Into the binder it goes. Thanks a lot!", "¡Rara! Va a la carpeta. ¡Muchas gracias!", "Selten! Ab in den Ordner. Vielen Dank!", "Rare ! Direct dans le classeur. Merci beaucoup !",
+            "Rara! Vai para o dossier. Muito obrigado!", "Rara! Finisce nel raccoglitore. Grazie mille!", "レア！バインダー入りだ。ありがとう！", "稀有！收进卡册。非常感谢！",
+        ],
+        ["opinion_respuesta_5"] =
+        [
+            "Mythic! Straight into the binder of the good ones. You made my day!", "¡Mítica! Directa a la carpeta de las buenas. ¡Me has alegrado el día!", "Mythisch! Direkt in den Ordner der Guten. Du hast meinen Tag gerettet!", "Mythique ! Direct dans le classeur des meilleures. Tu as illuminé ma journée !",
+            "Mítica! Direto para o dossier das boas. Fizeste-me o dia!", "Mitica! Dritta nel raccoglitore delle migliori. Mi hai fatto la giornata!", "神話レア！最高のバインダー行きだ。最高の一日になったよ！", "秘稀！直接收进最好的卡册。你让我开心了一整天！",
+        ],
+        ["opinion_escribir"] =
+        [
+            "Write something (optional)", "Escribir algo (opcional)", "Etwas schreiben (optional)", "Écrire quelque chose (facultatif)",
+            "Escrever algo (opcional)", "Scrivi qualcosa (facoltativo)", "ひとこと書く（任意）", "写点什么（可选）",
+        ],
+        ["opinion_editor_titulo"] =
+        [
+            "MTG Corner · Your opinion", "MTG Corner · Tu opinión", "MTG Corner · Deine Meinung", "MTG Corner · Ton avis",
+            "MTG Corner · A tua opinião", "MTG Corner · La tua opinione", "MTG Corner・ご意見", "MTG Corner・你的意见",
+        ],
+        ["opinion_editor_explicacion"] =
+        [
+            "Tell us whatever you like: what works, what doesn't, what you'd add. We read every message. You can also write to contact@mtgcorner.com.", "Cuéntanos lo que quieras: qué funciona, qué no, qué añadirías. Leemos todos los mensajes. También puedes escribirnos a contact@mtgcorner.com.", "Erzähl uns, was du willst: was funktioniert, was nicht, was du ergänzen würdest. Wir lesen jede Nachricht. Du kannst uns auch an contact@mtgcorner.com schreiben.", "Dis-nous ce que tu veux : ce qui marche, ce qui ne marche pas, ce que tu ajouterais. Nous lisons chaque message. Tu peux aussi écrire à contact@mtgcorner.com.",
+            "Conta-nos o que quiseres: o que funciona, o que não, o que acrescentarias. Lemos todas as mensagens. Também podes escrever para contact@mtgcorner.com.", "Raccontaci quello che vuoi: cosa funziona, cosa no, cosa aggiungeresti. Leggiamo ogni messaggio. Puoi anche scrivere a contact@mtgcorner.com.", "何でも教えてください：良いところ、ダメなところ、追加してほしいこと。メッセージはすべて読んでいます。contact@mtgcorner.com へのメールも歓迎です。", "想说什么都可以：哪些好用、哪些不好、你想加什么。每条消息我们都会读。也可以写信到 contact@mtgcorner.com。",
+        ],
+        ["opinion_enviar"] =
+        [
+            "Send", "Enviar", "Senden", "Envoyer",
+            "Enviar", "Invia", "送信", "发送",
+        ],
+        ["opinion_gracias"] =
+        [
+            "Thank you! We read every message, and yours helps decide what comes next.", "¡Gracias! Leemos todos los mensajes, y el tuyo ayuda a decidir lo que viene.", "Danke! Wir lesen jede Nachricht, und deine hilft zu entscheiden, was als Nächstes kommt.", "Merci ! Nous lisons chaque message, et le tien aide à décider de la suite.",
+            "Obrigado! Lemos todas as mensagens, e a tua ajuda a decidir o que vem a seguir.", "Grazie! Leggiamo ogni messaggio, e il tuo aiuta a decidere cosa arriverà.", "ありがとう！メッセージはすべて読んでいて、あなたの声が次の改善を決めます。", "谢谢！每条消息我们都会读，你的意见会帮我们决定接下来做什么。",
+        ],
+        ["opinion_fallo"] =
+        [
+            "Couldn't send your opinion right now. Try again in a moment, or write to contact@mtgcorner.com.", "No se pudo enviar tu opinión ahora. Prueba dentro de un momento o escríbenos a contact@mtgcorner.com.", "Deine Meinung konnte gerade nicht gesendet werden. Versuch es gleich noch einmal oder schreib an contact@mtgcorner.com.", "Impossible d'envoyer ton avis pour l'instant. Réessaie dans un moment ou écris à contact@mtgcorner.com.",
+            "Não foi possível enviar a tua opinião agora. Tenta daqui a pouco ou escreve para contact@mtgcorner.com.", "Non è stato possibile inviare la tua opinione ora. Riprova tra poco o scrivi a contact@mtgcorner.com.", "今はご意見を送信できませんでした。少ししてからもう一度お試しいただくか、contact@mtgcorner.com までご連絡ください。", "现在无法发送你的意见。请稍后再试，或写信到 contact@mtgcorner.com。",
         ],
         ["instr_titulo"] =
         [
@@ -1875,8 +2022,8 @@ internal static class Textos
         ],
         ["ayuda_programa"] =
         [
-            "Start with Windows, the program version and quit, in its three buttons.", "El arranque con Windows, la versión del programa y salir, en sus tres botones.", "Mit Windows starten, die Programmversion und Beenden, in den drei Schaltflächen.", "Démarrer avec Windows, la version du programme et quitter, dans ses trois boutons.",
-            "Arrancar com o Windows, a versão do programa e sair, nos seus três botões.", "Avvio con Windows, la versione del programma ed esci, nei suoi tre pulsanti.", "Windows起動時の自動開始、プログラムのバージョン、終了。3つのボタンにあります。", "随 Windows 启动、程序版本和退出，都在这三个按钮里。",
+            "Start with Windows, the program version, tell us what you think, and quit, in its four buttons.", "El arranque con Windows, la versión del programa, darnos tu opinión y salir, en sus cuatro botones.", "Mit Windows starten, die Programmversion, deine Meinung und Beenden, in den vier Schaltflächen.", "Démarrer avec Windows, la version du programme, donner ton avis et quitter, dans ses quatre boutons.",
+            "Arrancar com o Windows, a versão do programa, dar a tua opinião e sair, nos seus quatro botões.", "Avvio con Windows, la versione del programma, la tua opinione ed esci, nei suoi quattro pulsanti.", "Windows起動時の自動開始、プログラムのバージョン、ご意見、終了。4つのボタンにあります。", "随 Windows 启动、程序版本、提意见和退出，都在这四个按钮里。",
         ],
         // La fila de la carta del rival en la columna, y lo que dice al pasar por cada botón (1.22.2).
         ["col_carta_rival"] =
