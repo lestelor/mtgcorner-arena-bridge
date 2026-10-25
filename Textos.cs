@@ -1822,6 +1822,11 @@ internal static class Textos
             "Coach instructions", "Instrucciones del entrenador", "Anweisungen für den Coach", "Consignes pour le coach",
             "Instruções para o treinador", "Istruzioni per l'allenatore", "コーチへの指示", "给教练的指示",
         ],
+        ["comandante_rival"] =
+        [
+            "Their commander", "Su comandante", "Sein Kommandeur", "Son commandant",
+            "O comandante dele", "Il suo comandante", "相手の統率者", "对手的指挥官",
+        ],
         // El saludo del entrenador al abrir Arena y su bocadillo para hablarle (1.24.1).
         ["saludo_titulo_amable"] =
         [

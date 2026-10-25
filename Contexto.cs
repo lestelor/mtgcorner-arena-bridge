@@ -189,7 +189,8 @@ internal static class Contexto
     /// un arte cuyo número de Arena no conoce Scryfall, y sin ellos la web no
     /// sabría ni que es un Forest.
     /// </summary>
-    public sealed record EnMesa(int Grp, bool Girada, bool Tierra, int Id = 0, int? Fuerza = null, int? Resistencia = null, bool Mareada = false, int? En = null, string? Ficha = null, string? Subtipos = null);
+    /// <remarks><c>Retiene</c> (1.26.1): las cartas que este permanente tiene exiliadas «hasta que abandone el campo de batalla»; si se va, vuelven a su dueño.</remarks>
+    public sealed record EnMesa(int Grp, bool Girada, bool Tierra, int Id = 0, int? Fuerza = null, int? Resistencia = null, bool Mareada = false, int? En = null, string? Ficha = null, string? Subtipos = null, int[]? Retiene = null);
 
     /// <summary>
     /// LA MESA AL EMPEZAR TU PRIMERA FASE PRINCIPAL, para el consejo de cada
@@ -211,6 +212,8 @@ internal static class Contexto
 
     /// <summary>Tus comandantes al repartir la mano: para el consejo de mulligan, que llega antes que la mesa.</summary>
     public static Comandante[] ComandantesAlRepartir { get; private set; } = [];
+    /// <summary>Los del rival al repartir (1.26.1): están a la vista desde el turno 0, y su plan se avisa al empezar.</summary>
+    public static Comandante[] ComandantesRivalAlRepartir { get; private set; } = [];
     /// <summary>Los comandantes vistos en la partida, por dueño, y las veces que cada uno salió de la zona de mando a la pila.</summary>
     private static readonly Dictionary<int, List<int>> comandantesDe = new();
     private static readonly Dictionary<(int Dueno, int Grp), int> lanzadosDesdeMando = new();
@@ -288,6 +291,15 @@ internal static class Contexto
     private static readonly Regex Subtipos = new(@"""subtypes"":\s*\[([^\]]{0,200})\]", RegexOptions.Compiled);
     // Un aura o un equipo pegado: «"affectorId": 296, "affectedIds": [ 288 ], "type": [ "AnnotationType_Attachment" ]».
     private static readonly Regex Pegado = new(@"""affectorId"":\s*(\d+),\s*""affectedIds"":\s*\[\s*(\d+)\s*\],\s*""type"":\s*\[\s*""AnnotationType_Attachment""", RegexOptions.Compiled);
+    // Una carta exiliada DEBAJO de otra mientras ésta siga en el campo («exilia
+    // una criatura hasta que X abandone el campo de batalla»): «"affectorId": 288,
+    // "affectedIds": [ 291 ], "type": [ "AnnotationType_DisplayCardUnderCard" ],
+    // "details": [ { "key": "TemporaryZoneTransfer", …, "valueInt32": [ 1 ] }».
+    // Con 0 la carta se queda debajo para siempre (impronta): sólo vale el 1. El
+    // usuario, 2026-10-25: el consejo proponía sacrificar una carta así y devolvía
+    // al rival la criatura que tenía exiliada.
+    private static readonly Regex BajoCarta = new(@"""affectorId"":\s*(\d+),\s*""affectedIds"":\s*\[\s*([\d,\s]+?)\s*\],\s*""type"":\s*\[\s*""AnnotationType_DisplayCardUnderCard""\s*\],\s*""details"":\s*\[(.{0,400}?)\]\s*\}", RegexOptions.Compiled);
+    private static readonly Regex Temporal = new(@"TemporaryZoneTransfer[^\[]*\[\s*1\b", RegexOptions.Compiled);
     private static readonly Regex ZonaCompleta = new(@"""zoneId"":\s*(\d+),\s*""type"":\s*""ZoneType_\w+"",\s*""visibility"":\s*""\w+""(?:,\s*""ownerSeatId"":\s*(\d+))?(?:,\s*""objectInstanceIds"":\s*\[([\d,\s]*)\])?", RegexOptions.Compiled);
     // Un traslado: qué instancia y a qué zona llega. Los detalles son una lista de
     // pares y `zone_dest` no es el primero, así que se salta con `.{0,400}?`.
@@ -363,6 +375,8 @@ internal static class Contexto
     private static readonly Dictionary<int, (int? Fuerza, int? Resistencia, bool Mareada, string Subtipos)> estadoCarta = new();
     /// <summary>Aura o equipo → la instancia a la que va pegado.</summary>
     private static readonly Dictionary<int, int> pegadaA = new();
+    /// <summary>Quién retiene a quién: el permanente y las cartas que tiene exiliadas debajo (ver BajoCarta).</summary>
+    private static readonly Dictionary<int, HashSet<int>> retenidas = new();
     /// <summary>El turno de tu última fase principal avisada, y el que está por avisar al acabar la tanda.</summary>
     private static int turnoAvisado, turnoPorAvisar;
     /// <summary>La mesa tal como estaba en la línea en que empezó la fase: al acabar la tanda ya puede haber tierras giradas.</summary>
@@ -750,6 +764,14 @@ internal static class Contexto
             if (linea.Contains("AnnotationType_Attachment\"", StringComparison.Ordinal))
                 foreach (Match pg in Pegado.Matches(linea))
                     pegadaA[int.Parse(pg.Groups[1].Value)] = int.Parse(pg.Groups[2].Value);
+            if (linea.Contains("AnnotationType_DisplayCardUnderCard\"", StringComparison.Ordinal))
+                foreach (Match bc in BajoCarta.Matches(linea))
+                {
+                    if (!Temporal.IsMatch(bc.Groups[3].Value)) continue;
+                    var quien = int.Parse(bc.Groups[1].Value);
+                    if (!retenidas.TryGetValue(quien, out var bajo)) retenidas[quien] = bajo = new HashSet<int>();
+                    foreach (Match n in Regex.Matches(bc.Groups[2].Value, @"\d+")) bajo.Add(int.Parse(n.Value));
+                }
             foreach (Match mt in Mantenimiento.Matches(linea))
             {
                 var n = int.Parse(mt.Groups[1].Value);
@@ -776,6 +798,7 @@ internal static class Contexto
                 {
                     firmaMano = firma;
                     ComandantesAlRepartir = Comandantes(miAsiento);
+                    ComandantesRivalAlRepartir = Comandantes(3 - miAsiento);
                     if (!leyendoLoViejo)
                         try { ManoNueva?.Invoke(cartasMano, tierrasMano, mulligansHechos); } catch { /* cosa de quien escucha */ }
                 }
@@ -829,6 +852,7 @@ internal static class Contexto
                 girada.Clear();
                 estadoCarta.Clear();
                 pegadaA.Clear();
+                retenidas.Clear();
                 turnoAvisado = turnoPorAvisar = turnoRivalAvisado = 0;
                 mesaRivalPorAvisar = null;
                 vidaYoAhora = vidaRivalAhora = null;
@@ -837,6 +861,7 @@ internal static class Contexto
                 lanzadosDesdeMando.Clear();
                 lanzamientosVistos.Clear();
                 ComandantesAlRepartir = [];
+                ComandantesRivalAlRepartir = [];
                 miAsiento = 0;
             }
         }
@@ -1011,6 +1036,10 @@ internal static class Contexto
         var (mano, _, _) = ManoCompleta();
         var mia = new List<EnMesa>();
         var suya = new List<EnMesa>();
+        // Lo que está en el exilio AHORA: una carta retenida sólo cuenta mientras siga ahí.
+        var exiliadas = idsZona.Where(z => zonas.TryGetValue(z.Key, out var t) && t == "Exile").SelectMany(z => z.Value).ToHashSet();
+        int[]? Retiene(int id) => retenidas.TryGetValue(id, out var bajo)
+            && bajo.Where(exiliadas.Contains).Select(h => objetos.TryGetValue(h, out var r) ? r.Grp : 0).Where(g => g > 0).ToArray() is { Length: > 0 } gs ? gs : null;
         foreach (var (idz, ids) in idsZona)
         {
             if (!zonas.TryGetValue(idz, out var tipo) || tipo != "Battlefield") continue;
@@ -1022,7 +1051,7 @@ internal static class Contexto
                 int? en = pegadaA.TryGetValue(id, out var destino) && ids.Contains(destino) ? destino : null;
                 var c = new EnMesa(o.Grp, girada.GetValueOrDefault(id), o.EsTierra, id, est.Fuerza, est.Resistencia, est.Mareada, en,
                     o.EsFicha ? (est.Subtipos is { Length: > 0 } st ? st : "Token") : null,
-                    est.Subtipos is { Length: > 0 } sts ? sts : null);
+                    est.Subtipos is { Length: > 0 } sts ? sts : null, Retiene(id));
                 if (o.Dueno == miAsiento) mia.Add(c); else suya.Add(c);
             }
         }

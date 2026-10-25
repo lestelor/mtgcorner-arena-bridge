@@ -673,7 +673,8 @@ internal static class Program
                 ultimas.Add((m, rival));
             }
             string Carta(Contexto.EnMesa c) => $"{(c.Ficha is { } f ? f + "*" : c.Grp.ToString())}#{c.Id}"
-                + (c.Fuerza is { } fu ? $" {fu}/{c.Resistencia}" : "") + (c.Girada ? " g" : "") + (c.Mareada ? " m" : "") + (c.En is { } en ? $" ->#{en}" : "");
+                + (c.Fuerza is { } fu ? $" {fu}/{c.Resistencia}" : "") + (c.Girada ? " g" : "") + (c.Mareada ? " m" : "") + (c.En is { } en ? $" ->#{en}" : "")
+                + (c.Retiene is { Length: > 0 } ret ? $" retiene[{string.Join(",", ret)}]" : "");
             // Brawl: los comandantes, «grp (zona de mando, lanzado N)» o «grp (fuera)».
             static string Mandos(Contexto.Comandante[]? cs) => cs is { Length: > 0 } ? string.Join(", ", cs.Select(c => $"{c.Grp} ({(c.EnZona ? "zona de mando" : "fuera")}, lanzado {c.Lanzado})")) : "-";
             void Escribir(string que, Contexto.Mesa m) => Console.WriteLine(
@@ -834,7 +835,7 @@ internal static class Program
             for (var i = 0; i < sobresD.Count; i++)
             {
                 var s = sobresD[i];
-                var datosD = await Draft.Datos(httpD, s.Edicion);
+                var datosD = await Draft.Datos(httpD, s.Edicion, s.Evento);
                 if (datosD is null) { Console.WriteLine($"{s.Edicion}: sin datos de la web"); continue; }
                 var (cartasD, coloresD) = Draft.Valorar(s, datosD);
                 var deArenaD = BaseArena.Nombres(cartasD.Where(c => c.Datos is null).Select(c => c.Grp));
@@ -860,7 +861,7 @@ internal static class Program
             {
                 var pool = estadoD.Terminado ?? (sobresD.Count > 0 ? new Contexto.PoolDraft(sobresD[^1].Evento, sobresD[^1].Edicion, sobresD[^1].Elegidas) : null);
                 if (pool is null) { Console.WriteLine("\nSin draft acabado."); return 1; }
-                var datosM = await Draft.Datos(httpD, pool.Edicion);
+                var datosM = await Draft.Datos(httpD, pool.Edicion, pool.Evento);
                 var mazoM = datosM is null ? null : Draft.Construir(pool.Cartas, datosM);
                 Console.WriteLine($"\nMAZO con {pool.Cartas.Length} elegidas ({(estadoD.Terminado is null ? "draft sin acabar" : "draft acabado")}):");
                 if (mazoM is null) { Console.WriteLine("  (no sale: sin datos o menos de 15 jugables)"); return 1; }
@@ -1628,6 +1629,12 @@ internal static class Program
         Contexto.BibliotecaCambio += ActualizarRastreador;
         Contexto.Cambio += ActualizarRastreador;
         Contexto.ManoNueva += ConsejoMulligan;
+        // BRAWL (1.26.1): con la primera mano, el plan del comandante rival; se
+        // enseña al empezar el primer turno, con el mulligan ya decidido.
+        Contexto.ManoNueva += (_, _, mulligans) => { if (mulligans == 0) _ = PrepararComandanteRival(http); };
+        Contexto.MiFasePrincipal += _ => MostrarComandanteRival();
+        Contexto.TurnoDelRival += _ => MostrarComandanteRival();
+        Contexto.PartidaAcabada += () => Interlocked.Exchange(ref comandanteRivalTexto, null);
         // El draft: cada sobre, valorado, en la columna (ver Draft.cs); y si al
         // arrancar ya hay uno a medias, ése.
         Contexto.DraftCambio += s => _ = Draft.Mostrar(http, s, BajarImagen, tono: () => tonoActual, avisar: AvisoDraft);
@@ -2289,6 +2296,8 @@ internal static class Program
     {
         grp = c.Grp, girada = c.Girada, tierra = c.Tierra, id = c.Id,
         fuerza = c.Fuerza, resistencia = c.Resistencia, mareada = c.Mareada, en = c.En, ficha = c.Ficha, subtipos = c.Subtipos,
+        // 1.26.1: las cartas que tiene exiliadas hasta que abandone el campo (ver Contexto.EnMesa).
+        retiene = c.Retiene,
     };
 
     /// <summary>
@@ -2475,6 +2484,45 @@ internal static class Program
     private static string? FiguraEntrenador()
     {
         lock (figurasEntrenador) return figurasEntrenador.TryGetValue(tonoActual, out var f) ? f : null;
+    }
+
+    // ── BRAWL: EL PLAN DEL COMANDANTE RIVAL (1.26.1, 2026-10-25) ───────────
+    //
+    // El usuario: «¿se podría predecir el modo de juego del oponente a partir
+    // del comandante y del color?». En Brawl el comandante rival está a la vista
+    // desde el turno 0 y su mazo gira alrededor de él: con la primera mano se
+    // pide a la web qué suele hacer y cómo jugarle (/api/mtga-device/comandante-rival,
+    // que lo guarda por comandante e idioma), y se enseña en la zona del
+    // entrenador al empezar el primer turno, ya pasado el mulligan. Una vez por
+    // partida, y nunca en eventos competitivos.
+
+    private static string? comandanteRivalPartida;
+    private static string? comandanteRivalTexto;
+
+    internal sealed record RespuestaComandanteRival([property: System.Text.Json.Serialization.JsonPropertyName("texto")] string? Texto);
+
+    private static async Task PrepararComandanteRival(HttpClient http)
+    {
+        if (!EsBrawl(Contexto.Formato) || EventoCompetitivo(Contexto.Evento)) return;
+        var rivales = Contexto.ComandantesRivalAlRepartir;
+        var partida = Contexto.PartidaActual ?? "";
+        if (rivales.Length == 0 || partida == comandanteRivalPartida) return;
+        comandanteRivalPartida = partida;
+        try
+        {
+            using var r = await http.PostAsJsonAsync($"{PuertaDevice}/comandante-rival",
+                new { comandantes = rivales.Select(c => c.Grp), formato = Contexto.Formato, idioma = Textos.Idioma, tono = tonoActual }, JsonOpciones);
+            if (!r.IsSuccessStatusCode) return;
+            if ((await r.Content.ReadFromJsonAsync<RespuestaComandanteRival>(JsonOpciones))?.Texto is { Length: > 0 } texto)
+                Interlocked.Exchange(ref comandanteRivalTexto, texto);
+        }
+        catch { /* sin aviso: la partida sigue igual */ }
+    }
+
+    private static void MostrarComandanteRival()
+    {
+        if (Interlocked.Exchange(ref comandanteRivalTexto, null) is not { } texto) return;
+        Superposicion.MostrarSinEsperar(Textos.T("comandante_rival"), texto, 16, importante: true, avatar: FiguraEntrenador());
     }
 
     internal sealed record RespuestaMulligan(

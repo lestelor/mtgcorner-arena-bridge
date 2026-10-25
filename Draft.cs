@@ -71,18 +71,23 @@ internal static class Draft
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static readonly Dictionary<string, Respuesta> porEdicion = new();
 
-    /// <summary>Los datos de una edición, una vez por sesión del programa (la web los cachea medio día).</summary>
-    internal static async Task<Respuesta?> Datos(HttpClient http, string edicion)
+    /// <summary>
+    /// Los datos de una edición, una vez por sesión del programa (la web los
+    /// cachea medio día). Con el evento (1.26.1), los de su cola de 17lands: los
+    /// bots de Quick Draft no eligen como las personas de Premier.
+    /// </summary>
+    internal static async Task<Respuesta?> Datos(HttpClient http, string edicion, string? evento = null)
     {
         if (edicion.Length == 0) return null;
-        lock (porEdicion) if (porEdicion.TryGetValue(edicion, out var ya)) return ya;
+        var clave = edicion + "|" + (evento ?? "");
+        lock (porEdicion) if (porEdicion.TryGetValue(clave, out var ya)) return ya;
         try
         {
-            var r = await http.GetAsync($"/api/mtga-device/draft?set={Uri.EscapeDataString(edicion)}");
+            var r = await http.GetAsync($"/api/mtga-device/draft?set={Uri.EscapeDataString(edicion)}&evento={Uri.EscapeDataString(evento ?? "")}");
             if (!r.IsSuccessStatusCode) return null;
             var d = await r.Content.ReadFromJsonAsync<Respuesta>(Json);
             // Sin cartas no se guarda: puede que 17lands aún no tenga la edición y la tenga mañana.
-            if (d?.Cartas is { Length: > 0 }) lock (porEdicion) porEdicion[edicion] = d;
+            if (d?.Cartas is { Length: > 0 }) lock (porEdicion) porEdicion[clave] = d;
             return d;
         }
         catch { return null; }
@@ -159,7 +164,7 @@ internal static class Draft
     {
         // Sin draft, o en un evento donde la ayuda externa está prohibida: nada.
         if (s is null || Program.EventoCompetitivo(s.Evento)) { Columna.Draft(null, []); UltimoConsejo = null; return; }
-        var datos = await Datos(http, s.Edicion);
+        var datos = await Datos(http, s.Edicion, s.Evento);
         var (cartas, colores) = datos is null
             ? (s.Cartas.Select(g => new Valorada(g, null, null)).ToList(), "")
             : Valorar(s, datos);
@@ -265,7 +270,7 @@ internal static class Draft
         Func<string?>? tono = null, Action<string, string>? avisar = null)
     {
         if (Program.EventoCompetitivo(pool.Evento)) return;
-        var datos = await Datos(http, pool.Edicion);
+        var datos = await Datos(http, pool.Edicion, pool.Evento);
         if (datos is null || Construir(pool.Cartas, datos) is not { } mazo) return;
         var titulo = Textos.T("draft_mazo_titulo", mazo.Colores,
             string.Join(" · ", mazo.Tierras.Select(t => $"{t.N} {Textos.T("tierra_" + char.ToLowerInvariant(t.Color))}")));
@@ -304,7 +309,7 @@ internal static class Draft
             {
                 set = pool.Edicion, mazo = mazo.Cartas.Select(c => c.Arena), colores = mazo.Colores,
                 banquillo = pool.Cartas.Where(g => !mazo.Cartas.Any(c => c.Arena == g)).Distinct().Take(30),
-                idioma = Textos.Idioma, tono,
+                idioma = Textos.Idioma, tono, evento = pool.Evento,
             }, Json);
             return r.IsSuccessStatusCode ? (await r.Content.ReadFromJsonAsync<RespuestaPlan>(Json))?.Plan : null;
         }
@@ -328,6 +333,8 @@ internal static class Draft
             {
                 set = s.Edicion, sobre = s.Sobre, eleccion = s.Eleccion, candidatas, elegidas = s.Elegidas, colores,
                 idioma = Textos.Idioma, tono,
+                // 1.26.1: el evento (la cola de 17lands) y el sobre entero, para las señales y lo que va a volver.
+                evento = s.Evento, sobreCompleto = s.Cartas,
             }, Json);
             return r.IsSuccessStatusCode ? await r.Content.ReadFromJsonAsync<RespuestaConsejo>(Json) : null;
         }
