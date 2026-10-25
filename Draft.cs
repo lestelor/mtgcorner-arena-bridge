@@ -52,7 +52,9 @@ internal static class Draft
         [property: JsonPropertyName("partidas")] int Partidas,
         [property: JsonPropertyName("arte")] string? Arte,
         [property: JsonPropertyName("imagen")] string? Imagen,
-        [property: JsonPropertyName("tipos")] string[]? Tipos = null)
+        [property: JsonPropertyName("tipos")] string[]? Tipos = null,
+        // 1.26.2: quita criaturas del rival (lo dice la web por el texto, ver QUITA en lib/draft17lands.ts).
+        [property: JsonPropertyName("quita")] bool Quita = false)
     {
         public bool EsCriatura => Tipos?.Any(t => t.Contains("Creature", StringComparison.OrdinalIgnoreCase)) == true;
         public bool EsTierra => Tipos?.Any(t => t.Contains("Land", StringComparison.OrdinalIgnoreCase)) == true;
@@ -63,7 +65,17 @@ internal static class Draft
 
     internal sealed record RespuestaConsejo(
         [property: JsonPropertyName("eleccion")] int? Eleccion,
-        [property: JsonPropertyName("por_que")] string? PorQue);
+        [property: JsonPropertyName("por_que")] string? PorQue,
+        // 1.26.2: las dos de un Pick Two Draft (la primera es también `eleccion`).
+        [property: JsonPropertyName("elecciones")] int[]? Elecciones = null);
+
+    /// <summary>
+    /// ¿SE COGEN DOS POR ELECCIÓN? Los «PickTwoDraft_FRA_20260929» (el usuario,
+    /// 2026-10-25: «en este draft pedían que se elija de dos en dos»): Arena
+    /// registra cada elección con dos GrpIds y el entrenador recomendaba una.
+    /// </summary>
+    internal static int CuantasPorEleccion(string? evento) =>
+        evento is { Length: > 0 } e && e.Contains("PickTwo", StringComparison.OrdinalIgnoreCase) ? 2 : 1;
 
     /// <summary>El último consejo del entrenador en el draft (título y texto), para volver a verlo pulsando su fila.</summary>
     internal static (string Titulo, string Texto)? UltimoConsejo { get; private set; }
@@ -168,7 +180,20 @@ internal static class Draft
         var (cartas, colores) = datos is null
             ? (s.Cartas.Select(g => new Valorada(g, null, null)).ToList(), "")
             : Valorar(s, datos);
-        var mejor = cartas.FirstOrDefault(c => c.Nota is not null)?.Grp;
+        var cuantas = CuantasPorEleccion(s.Evento);
+        // Las de mejor nota: una, o dos en un Pick Two.
+        var mejores = cartas.Where(c => c.Nota is not null).Take(cuantas).Select(c => c.Grp).ToHashSet();
+
+        // EL ENTRENADOR SE PIDE YA, sin esperar a las ilustraciones (1.26.2). Antes
+        // se pedía después de bajarlas una a una, y con un sobre nuevo eso eran
+        // segundos que se sumaban a los ~4,5 de la IA: quien elegía deprisa ya
+        // tenía el sobre siguiente cuando llegaba, y el consejo se tiraba.
+        // Con dos por elección, seis candidatas; con una, cuatro. Y si no quedan
+        // más cartas que las que hay que coger, no hay nada que decidir.
+        var candidatas = cartas.Where(c => c.Nota is not null).Take(cuantas == 2 ? 6 : 4).Select(c => c.Grp).ToArray();
+        var pedido = candidatas.Length > cuantas && candidatas.Length >= 2
+            ? Consejo(http, s, candidatas, colores, tono?.Invoke(), cuantas)
+            : Task.FromResult<RespuestaConsejo?>(null);
         // Las que 17lands no tiene (Alchemy recién salida), con su nombre de la base de Arena.
         var deArena = BaseArena.Nombres(cartas.Where(c => c.Datos?.Nombre is null).Select(c => c.Grp));
         var filas = new List<Columna.FilaDraft>();
@@ -179,7 +204,7 @@ internal static class Draft
                 new Columna.CartaMazo(v.Grp, 0, v.Datos?.Nombre ?? deArena.GetValueOrDefault(v.Grp) ?? Textos.T("draft_sin_datos"), "", 0, false, arte, v.Datos?.Imagen),
                 v.Nota is double n ? n.ToString("0.0", CultureInfo.InvariantCulture) : "—",
                 v.Datos?.Gih is double gih ? (gih * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%" : "",
-                v.Grp == mejor));
+                mejores.Contains(v.Grp)));
         }
         // Si mientras bajaban las ilustraciones llegó otro sobre, éste ya no vale.
         // (En el taller no hay vigía: el sobre es el que se le da.)
@@ -189,18 +214,23 @@ internal static class Draft
         UltimoConsejo = null;
         Columna.Draft(titulo, filas);
 
-        // EL ENTRENADOR, con las notas ya a la vista: tarda un par de segundos.
-        var candidatas = cartas.Where(c => c.Nota is not null).Take(4).Select(c => c.Grp).ToArray();
-        if (candidatas.Length < 2) return;
-        var consejo = await Consejo(http, s, candidatas, colores, tono?.Invoke());
-        if (consejo is not { Eleccion: int elegida, PorQue: { Length: > 0 } porQue } || !Sigue()) return;
-        var nombre = cartas.FirstOrDefault(c => c.Grp == elegida)?.Datos?.Nombre;
-        if (nombre is null) return;
-        filas = filas.Select(f => f with { Mejor = f.Carta.Grp == elegida }).ToList();
+        // EL ENTRENADOR, con las notas ya a la vista (lo pedido arriba).
+        var consejo = await pedido;
+        if (consejo is not { Eleccion: int primera, PorQue: { Length: > 0 } porQue } || !Sigue()) return;
+        var elegidas = (consejo.Elecciones is { Length: > 0 } dos ? dos : [primera])
+            .Where(g => cartas.Any(c => c.Grp == g)).Distinct().Take(cuantas).ToArray();
+        var nombres = elegidas.Select(g => cartas.First(c => c.Grp == g).Datos?.Nombre).Where(n => n is not null).ToArray();
+        if (nombres.Length == 0) return;
+        var nombre = string.Join(" + ", nombres);
+        filas = filas.Select(f => f with { Mejor = elegidas.Contains(f.Carta.Grp) }).ToList();
         UltimoConsejo = (titulo, $"{Textos.T("draft_coge", nombre)}. {porQue}");
         Columna.Draft(titulo, filas, (Textos.T("draft_entrenador", nombre), porQue));
-        // El aviso, sólo cuando el entrenador no se queda con la de mejor nota.
-        if (elegida != mejor) avisar?.Invoke(titulo, UltimoConsejo.Value.Texto);
+        // EL AVISO, EN CADA ELECCIÓN (1.26.2). Hasta ahora sólo salía cuando el
+        // entrenador no se quedaba con la de mejor nota, que era casi nunca: el
+        // usuario, 2026-10-25, «no me salen sugerencias… sólo salieron en la
+        // segunda selección». El consejo se quedaba en la fila de la columna, y la
+        // columna es justo lo que se pliega para ver el sobre.
+        avisar?.Invoke(titulo, UltimoConsejo.Value.Texto);
     }
 
     // ── EL MAZO SUGERIDO, AL ACABAR EL DRAFT (fase 3) ──────────────────────
@@ -247,6 +277,19 @@ internal static class Draft
             if (entra is null || sale is null) break;
             mejores.Remove(sale); mejores.Add(entra); fuera.Remove(entra);
         }
+        // Y AL MENOS CUATRO QUE QUITEN CRIATURAS, si se eligieron (1.26.2; el
+        // usuario, 2026-10-25: «no sólo es elegir las mejores cartas sino la
+        // combinación correcta»). Sale la peor que no quita, sin bajar de 14
+        // criaturas; y sólo si la que entra no es mucho peor (un punto de nota):
+        // una eliminación mala no vale más que una buena criatura.
+        while (mejores.Count(c => c.Quita) < 4)
+        {
+            var entra = fuera.FirstOrDefault(c => c.Quita);
+            var criaturasDentro = mejores.Count(c => c.EsCriatura);
+            var sale = mejores.Where(c => !c.Quita && (!c.EsCriatura || criaturasDentro > 14)).OrderBy(Nota).FirstOrDefault();
+            if (entra is null || sale is null || Nota(entra) + 1.0 < Nota(sale)) break;
+            mejores.Remove(sale); mejores.Add(entra); fuera.Remove(entra);
+        }
         // Las tierras: 17, por cuántas cartas de cada color (una bicolor cuenta en los dos).
         var porColor = pareja.ToDictionary(ch => ch, ch => mejores.Count(c => Colores(c).Contains(ch)));
         var total = Math.Max(1, porColor.Values.Sum());
@@ -273,7 +316,7 @@ internal static class Draft
         var datos = await Datos(http, pool.Edicion, pool.Evento);
         if (datos is null || Construir(pool.Cartas, datos) is not { } mazo) return;
         var titulo = Textos.T("draft_mazo_titulo", mazo.Colores,
-            string.Join(" · ", mazo.Tierras.Select(t => $"{t.N} {Textos.T("tierra_" + char.ToLowerInvariant(t.Color))}")));
+            string.Join(" · ", mazo.Tierras.Select(t => $"{t.N} {Textos.T((t.N == 1 ? "tierra_" : "tierras_") + char.ToLowerInvariant(t.Color))}")));
         async Task<List<PanelCartas.Carta>> Bajar(IEnumerable<Carta> cartas)
         {
             var lista = new List<PanelCartas.Carta>();
@@ -283,11 +326,34 @@ internal static class Draft
         }
         var criaturas = mazo.Cartas.Where(c => c.EsCriatura).ToList();
         var otras = mazo.Cartas.Where(c => !c.EsCriatura).ToList();
-        var secciones = new List<PanelCartas.Seccion>
+
+        // LO QUE VA AL BANQUILLO, LO PRIMERO (1.26.2). El usuario, 2026-10-25, al
+        // ver el mazo: «las cartas ya las he elegido… en todo caso me debería decir
+        // qué cartas debo descartar para llegar a las 40 que pide el juego». En un
+        // Pick Two se eligen 42, y la ventana sólo enseñaba las 23 que se juegan:
+        // averiguar qué 19 sobraban era cosa suya. Es lo elegido menos el mazo,
+        // copia a copia (tres Tomik y se juegan dos: una al banquillo). Las tierras
+        // no básicas elegidas también van aquí: el mazo sugerido no las juega.
+        var porGrp = new Dictionary<int, Carta>();
+        foreach (var c in datos.Cartas ?? []) porGrp.TryAdd(c.Arena, c);
+        var quedan = mazo.Cartas.GroupBy(c => c.Arena).ToDictionary(g => g.Key, g => g.Count());
+        var fuera = new List<int>();
+        foreach (var g in pool.Cartas)
+            if (quedan.TryGetValue(g, out var n) && n > 0) quedan[g] = n - 1;
+            else fuera.Add(g);
+        var nombresArena = BaseArena.Nombres(fuera.Where(g => !porGrp.ContainsKey(g)));
+        var alBanquillo = new List<PanelCartas.Carta>();
+        foreach (var g in fuera.OrderBy(g => porGrp.GetValueOrDefault(g)?.Nombre ?? nombresArena.GetValueOrDefault(g) ?? ""))
         {
-            new(Textos.T("draft_mazo_criaturas", criaturas.Count), null, await Bajar(criaturas)),
-            new(Textos.T("draft_mazo_hechizos", otras.Count), null, await Bajar(otras)),
-        };
+            var c = porGrp.GetValueOrDefault(g);
+            // Sin ilustración, el panel pinta el nombre: mejor eso que perderla de la lista.
+            alBanquillo.Add(new PanelCartas.Carta(c?.Nombre ?? nombresArena.GetValueOrDefault(g) ?? $"#{g}", await bajar(c?.Imagen) ?? "", null, null));
+        }
+
+        var secciones = new List<PanelCartas.Seccion>();
+        if (alBanquillo.Count > 0) secciones.Add(new(Textos.T("draft_mazo_fuera", alBanquillo.Count), null, alBanquillo));
+        secciones.Add(new(Textos.T("draft_mazo_criaturas", criaturas.Count), null, await Bajar(criaturas)));
+        secciones.Add(new(Textos.T("draft_mazo_hechizos", otras.Count), null, await Bajar(otras)));
         UltimoMazo = (titulo, secciones, null);
         Columna.MazoDraft(Textos.T("draft_mazo_fila", mazo.Colores));
         PanelCartas.Mostrar(titulo, secciones);
@@ -325,7 +391,7 @@ internal static class Draft
     }
 
     /// <summary>Lo que dice el entrenador de este sobre, o null si la web no contesta.</summary>
-    internal static async Task<RespuestaConsejo?> Consejo(HttpClient http, Contexto.SobreDraft s, int[] candidatas, string colores, string? tono)
+    internal static async Task<RespuestaConsejo?> Consejo(HttpClient http, Contexto.SobreDraft s, int[] candidatas, string colores, string? tono, int cuantas = 1)
     {
         try
         {
@@ -335,6 +401,8 @@ internal static class Draft
                 idioma = Textos.Idioma, tono,
                 // 1.26.1: el evento (la cola de 17lands) y el sobre entero, para las señales y lo que va a volver.
                 evento = s.Evento, sobreCompleto = s.Cartas,
+                // 1.26.2: dos en un Pick Two Draft.
+                cuantas,
             }, Json);
             return r.IsSuccessStatusCode ? await r.Content.ReadFromJsonAsync<RespuestaConsejo>(Json) : null;
         }

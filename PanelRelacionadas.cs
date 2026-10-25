@@ -122,6 +122,8 @@ internal static partial class PanelCartas
             if (alto <= altoArena - 60 && ANCHO_PANEL <= libre) break;
         }
         alto = altoRel = Math.Min(Math.Max(alto, altoRel), Math.Max(alto, altoArena - 60));
+        // Las pestañas de similares, sin rueda (ver altoRejilla): miden lo que miden.
+        desplazamientoRejilla = 0; altoRejilla = 0;
     }
 
     /// <summary>

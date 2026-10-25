@@ -406,8 +406,24 @@ internal static class Columna
         Rehacer();
     }
 
-    /// <summary>Abierta sin el ratón encima: en el taller (--abierta) y durante un draft.</summary>
-    private static bool SiempreAbierta => ForzarAbierta || draft.Length > 0;
+    /// <summary>Abierta sin el ratón encima: en el taller (--abierta) y durante un draft (salvo que la plegaras).</summary>
+    private static bool SiempreAbierta => ForzarAbierta || (draft.Length > 0 && !DraftPlegada);
+
+    /// <summary>
+    /// PLEGARLA EN EL DRAFT (1.26.2). Abierta todo el draft tapaba la primera
+    /// columna de cartas del sobre, y no había forma de cerrarla (el usuario,
+    /// 2026-10-25: «la barra sale abierta y no la puedo comprimir y me tapa»).
+    /// Pulsando la fila del sobre se pliega como fuera del draft (se abre al
+    /// pasar el ratón) o vuelve a quedarse abierta. Lo pone y lo guarda Program
+    /// (ajustes.json), para que el próximo draft empiece como lo dejaste.
+    ///
+    /// PLEGADA DE SALIDA (el usuario, 2026-10-25: «sí, que salga plegada por
+    /// defecto»): el consejo del entrenador ya sale en un aviso en cada elección,
+    /// así que la columna no hace falta abierta para leerlo.
+    /// </summary>
+    public static volatile bool DraftPlegada = true;
+    /// <summary>Quien guarda el cambio de <see cref="DraftPlegada"/> (Program, en ajustes.json).</summary>
+    public static Action<bool>? AlPlegarDraft { get; set; }
 
     private static volatile CartaMazo[] rastreo = [];
     private static volatile int bibliotecaTam;
@@ -498,7 +514,7 @@ internal static class Columna
                 DrawText(hdc, Etiqueta(f), -1, ref r, DT_CALCRECT | DT_SINGLELINE);
                 // El hueco del icono, el texto, y el aire de la derecha (y la
                 // flecha del desplegable, o la ilustración y el coste de la carta).
-                var extra = f.Accion == Accion.Mejorar ? 30 : f.Accion is Accion.CartaMazo or Accion.Rastreo or Accion.CartaDraft ? 70 : BotonesDe(f) is { } bf ? bf.Length * ANCHO_BOTON + 4 : 0;
+                var extra = f.Accion is Accion.Mejorar or Accion.Draft ? 30 : f.Accion is Accion.CartaMazo or Accion.Rastreo or Accion.CartaDraft ? 70 : BotonesDe(f) is { } bf ? bf.Length * ANCHO_BOTON + 4 : 0;
                 ancho = Math.Max(ancho, ANCHO_CERRADA + 2 + (r.Right - r.Left) + 16 + extra);
             }
             // Abierto el desplegable, un ancho fijo cómodo: si cambiara con cada
@@ -539,7 +555,8 @@ internal static class Columna
         var dr = draft;
         if (dr.Length > 0)
         {
-            arriba.Add(new Fila(Accion.Draft, GlifoDe(Accion.Draft), "", "draft", tituloDraft));
+            arriba.Add(new Fila(Accion.Draft, GlifoDe(Accion.Draft), "", "draft", tituloDraft,
+                AyudaPropia: Textos.T(DraftPlegada ? "draft_fijar" : "draft_plegar")));
             if (consejoDraft is { } cd)
                 arriba.Add(new Fila(Accion.ConsejoDraft, GlifoDe(Accion.ConsejoDraft), "", "draftconsejo", cd.Corto, AyudaPropia: cd.Largo));
             if (abierta)
@@ -1093,7 +1110,20 @@ internal static class Columna
                             _ = Task.Run(async () => { try { await pulsarCarta(Accion.Similares, datoC); } catch { /* lo cuenta quien la lanzó */ } });
                             return IntPtr.Zero;
                         }
-                        case Accion.CartaDraft or Accion.Draft:
+                        case Accion.Draft:
+                        {
+                            // La chincheta: clavar o soltar la columna durante el draft (ver DraftPlegada).
+                            // Con el ratón encima sigue abierta; al salir, se pliega si se soltó.
+                            DraftPlegada = !DraftPlegada;
+                            var guardar = AlPlegarDraft;
+                            var valor = DraftPlegada;
+                            if (guardar is not null) _ = Task.Run(() => { try { guardar(valor); } catch { /* sin guardar, vale para esta sesión */ } });
+                            filaAyuda = -1;   // la ayuda de la fila cambia con ella
+                            Rehacer(); Recolocar();
+                            InvalidateRect(hWnd, IntPtr.Zero, true);
+                            return IntPtr.Zero;
+                        }
+                        case Accion.CartaDraft:
                             return IntPtr.Zero;
                         case Accion.MasCartas when f.Dato is "draft-arriba" or "draft-abajo":
                             desdeDraft = Math.Max(0, desdeDraft + (f.Dato == "draft-arriba" ? -8 : 8));
@@ -1257,9 +1287,21 @@ internal static class Columna
                     SelectObject(hdc, texto);
                     SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : nueva ? Rgb(252, 211, 77) : Rgb(226, 232, 240));
                     var esMazo = filas[i].Accion == Accion.Mejorar;
+                    var esSobre = filas[i].Accion == Accion.Draft;
                     var botones = ocupada ? null : BotonesDe(filas[i]);
                     var conBotones = botones is not null;
-                    var rTexto = new RECT { Left = ANCHO_CERRADA + 2, Top = arriba, Right = ancho - (esMazo ? 36 : botones is not null ? botones.Length * ANCHO_BOTON + 12 : 10), Bottom = arriba + ALTO_FILA };
+                    var rTexto = new RECT { Left = ANCHO_CERRADA + 2, Top = arriba, Right = ancho - (esMazo || esSobre ? 36 : botones is not null ? botones.Length * ANCHO_BOTON + 12 : 10), Bottom = arriba + ALTO_FILA };
+                    if (esSobre)
+                    {
+                        // La chincheta del sobre: clavada (azul), la columna se queda abierta
+                        // todo el draft; suelta (gris), se pliega como siempre. Ver DraftPlegada.
+                        SelectObject(hdc, glifos);
+                        SetTextColor(hdc, DraftPlegada ? Rgb(148, 163, 184) : Rgb(56, 189, 248));
+                        var rChincheta = new RECT { Left = ancho - 36, Top = arriba, Right = ancho - 8, Bottom = arriba + ALTO_FILA };
+                        DrawText(hdc, DraftPlegada ? "" : "", -1, ref rChincheta, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                        SelectObject(hdc, texto);
+                        SetTextColor(hdc, i == filaBajoRaton ? Rgb(255, 255, 255) : nueva ? Rgb(252, 211, 77) : Rgb(226, 232, 240));
+                    }
                     if (botones is not null)
                     {
                         // Los botones a la derecha; el señalado, resaltado y en azul.

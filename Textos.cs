@@ -1194,6 +1194,12 @@ internal static class Textos
             "Click a card to open it on the site", "Pulsa una carta para abrirla en la web", "Klicke eine Karte an, um sie auf der Website zu öffnen", "Cliquez sur une carte pour l'ouvrir sur le site",
             "Clica numa carta para a abrires no site", "Clicca una carta per aprirla sul sito", "カードをクリックするとサイトで開きます", "点击一张牌即可在网站上打开",
         ],
+        // El pie cuando la rejilla no cabe y queda algo por debajo (PanelCartas.altoRejilla).
+        ["panel_rueda"] =
+        [
+            "Scroll down for more", "Baja con la rueda para ver el resto", "Mit dem Mausrad nach unten für mehr", "Fais défiler pour voir la suite",
+            "Desce com a roda para ver o resto", "Scorri con la rotella per vedere il resto", "ホイールで下にスクロールすると続きがあります", "向下滚动查看其余部分",
+        ],
         // Lo que dice el aviso al pulsar «Importar ahora» en la columna.
         ["col_subiendo"] =
         [
@@ -2148,10 +2154,37 @@ internal static class Textos
             "Escolhe {0}", "Prendi {0}", "{0}を取ろう", "拿 {0}",
         ],
         // El mazo sugerido al acabar el draft (Draft.MostrarMazo).
+        // 1.26.2: dice que es el mazo de 40 con TUS cartas y qué tierras añadir (el
+        // usuario, 2026-10-25: «¿qué significa? porque las cartas ya las he elegido»).
         ["draft_mazo_titulo"] =
         [
-            "Suggested deck · {0} · {1}", "Mazo sugerido · {0} · {1}", "Deckvorschlag · {0} · {1}", "Deck suggéré · {0} · {1}",
-            "Baralho sugerido · {0} · {1}", "Mazzo suggerito · {0} · {1}", "おすすめデッキ・{0}・{1}", "推荐套牌・{0}・{1}",
+            "Your 40-card deck · {0} · add {1}", "Tu mazo de 40 · {0} · añade {1}", "Dein 40-Karten-Deck · {0} · dazu {1}", "Ton deck de 40 · {0} · ajoute {1}",
+            "O teu baralho de 40 · {0} · junta {1}", "Il tuo mazzo da 40 · {0} · aggiungi {1}", "40枚のデッキ・{0}・{1}を追加", "你的40张套牌・{0}・加入{1}",
+        ],
+        // Lo elegido que no entra: lo primero de la ventana, que es lo que se hace en Arena.
+        ["draft_mazo_fuera"] =
+        [
+            "To the sideboard ({0})", "Al banquillo ({0})", "Ins Sideboard ({0})", "En réserve ({0})",
+            "Para o sideboard ({0})", "In sideboard ({0})", "サイドボードへ（{0}）", "放到备牌（{0}）",
+        ],
+        // La fila del sobre en la columna: la chincheta (Columna.DraftPlegada).
+        ["draft_plegar"] =
+        [
+            "Click to let the column fold during the draft (it opens when you hover it)",
+            "Pulsa para que la columna se pliegue durante el draft (se abre al pasar el ratón)",
+            "Klicken, damit sich die Leiste im Draft einklappt (sie öffnet sich beim Darüberfahren)",
+            "Clique pour que la colonne se replie pendant le draft (elle s'ouvre au survol)",
+            "Clica para a coluna se recolher durante o draft (abre ao passar o rato)",
+            "Clicca perché la colonna si chiuda durante il draft (si apre passandoci sopra)",
+            "クリックするとドラフト中にカラムが折りたたまれます（マウスを乗せると開きます）",
+            "点击后选秀时侧栏会收起（鼠标移上去时打开）",
+        ],
+        ["draft_fijar"] =
+        [
+            "Click to keep the column open during the draft", "Pulsa para dejar la columna abierta durante el draft",
+            "Klicken, um die Leiste im Draft offen zu lassen", "Clique pour garder la colonne ouverte pendant le draft",
+            "Clica para manter a coluna aberta durante o draft", "Clicca per tenere la colonna aperta durante il draft",
+            "クリックするとドラフト中はカラムを開いたままにします", "点击后选秀时侧栏保持打开",
         ],
         ["draft_mazo_fila"] =
         [
@@ -2178,6 +2211,12 @@ internal static class Textos
         ["tierra_b"] = ["Swamp", "Pantano", "Sumpf", "Marais", "Pântano", "Palude", "沼", "沼泽"],
         ["tierra_r"] = ["Mountain", "Montaña", "Gebirge", "Montagne", "Montanha", "Montagna", "山", "山脉"],
         ["tierra_g"] = ["Forest", "Bosque", "Wald", "Forêt", "Floresta", "Foresta", "森", "树林"],
+        // En plural, para «añade 9 Llanuras · 8 Bosques» (el título salía «9 Llanura · 8 Bosque», 2026-10-25).
+        ["tierras_w"] = ["Plains", "Llanuras", "Ebenen", "Plaines", "Planícies", "Pianure", "平地", "平原"],
+        ["tierras_u"] = ["Islands", "Islas", "Inseln", "Îles", "Ilhas", "Isole", "島", "海岛"],
+        ["tierras_b"] = ["Swamps", "Pantanos", "Sümpfe", "Marais", "Pântanos", "Paludi", "沼", "沼泽"],
+        ["tierras_r"] = ["Mountains", "Montañas", "Gebirge", "Montagnes", "Montanhas", "Montagne", "山", "山脉"],
+        ["tierras_g"] = ["Forests", "Bosques", "Wälder", "Forêts", "Florestas", "Foreste", "森", "树林"],
         ["col_mano"] =
         [
             "Hand: {0}", "Mano: {0}", "Hand: {0}", "Main : {0}",

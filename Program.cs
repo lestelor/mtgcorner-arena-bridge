@@ -1635,6 +1635,11 @@ internal static class Program
         Contexto.MiFasePrincipal += _ => MostrarComandanteRival();
         Contexto.TurnoDelRival += _ => MostrarComandanteRival();
         Contexto.PartidaAcabada += () => Interlocked.Exchange(ref comandanteRivalTexto, null);
+        // La columna plegada o clavada en el draft, como la dejaste (1.26.2): antes
+        // del primer sobre, que es cuando decide si se abre.
+        Columna.DraftPlegada = LeerAjustes().DraftPlegada ?? true;
+        draftPlegadaLeida = true;
+        Columna.AlPlegarDraft = _ => GuardarAjustes();
         // El draft: cada sobre, valorado, en la columna (ver Draft.cs); y si al
         // arrancar ya hay uno a medias, ése.
         Contexto.DraftCambio += s => _ = Draft.Mostrar(http, s, BajarImagen, tono: () => tonoActual, avisar: AvisoDraft);
@@ -2173,7 +2178,10 @@ internal static class Program
     /// contestó.
     /// </summary>
     internal sealed record Ajustes(bool Consejo, string? Tono = null, DateTime? PrimerUso = null, int Partidas = 0,
-        DateTime? OpinionPreguntada = null, int OpinionVeces = 0, bool OpinionRespondida = false);
+        DateTime? OpinionPreguntada = null, int OpinionVeces = 0, bool OpinionRespondida = false,
+        // 1.26.2: la columna plegada durante el draft (ver Columna.DraftPlegada).
+        // Sin valor (nunca se tocó la chincheta), plegada: es lo de salida.
+        bool? DraftPlegada = null);
     private static DateTime? primerUso, opinionPreguntada;
     private static int partidasVistas, opinionVeces;
     private static bool opinionRespondida;
@@ -2187,6 +2195,8 @@ internal static class Program
 
     /// <summary>Los talleres que tocan la opinión no escriben ajustes: probar no puede dejar apuntado que ya contestaste.</summary>
     private static bool sinGuardarAjustes;
+    /// <summary>Ya se leyó de ajustes.json si la columna va plegada en el draft (ver GuardarAjustes).</summary>
+    private static bool draftPlegadaLeida;
 
     private static void GuardarAjustes()
     {
@@ -2194,8 +2204,11 @@ internal static class Program
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FicheroAjustes)!);
+            // La de la columna, la de esta sesión si ya se leyó; si no (otro modo de
+            // arranque), la que hubiera: guardar otra cosa no puede soltarla.
+            bool? plegada = draftPlegadaLeida ? Columna.DraftPlegada : LeerAjustes().DraftPlegada;
             File.WriteAllText(FicheroAjustes, JsonSerializer.Serialize(new Ajustes(consejoActivo, tonoActual, primerUso, partidasVistas,
-                opinionPreguntada, opinionVeces, opinionRespondida), JsonOpciones));
+                opinionPreguntada, opinionVeces, opinionRespondida, plegada), JsonOpciones));
         }
         catch { /* sin guardar, vale para esta sesión */ }
     }

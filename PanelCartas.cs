@@ -143,6 +143,8 @@ internal static partial class PanelCartas
     [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hdc);
     [DllImport("gdi32.dll")] private static extern bool BitBlt(IntPtr destino, int x, int y, int ancho, int alto, IntPtr origen, int x1, int y1, uint op);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateRoundRectRgn(int izq, int arriba, int der, int abajo, int anchoElipse, int altoElipse);
+    [DllImport("gdi32.dll")] private static extern int IntersectClipRect(IntPtr hdc, int izq, int arriba, int der, int abajo);
+    [DllImport("gdi32.dll")] private static extern int SelectClipRgn(IntPtr hdc, IntPtr region);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateFont(int alto, int ancho, int escape, int orientacion, int grosor,
         uint cursiva, uint subrayado, uint tachado, uint juego, uint precision, uint recorte, uint calidad, uint paso, string cara);
@@ -191,6 +193,19 @@ internal static partial class PanelCartas
     private static int anchoCarta = 170, altoCarta = 237;
     private static int bajoRaton = -1;   // índice en `huecos`; -2 = la X; -1 = nada
     private static int altoRegion, anchoRegion;
+
+    /// <summary>
+    /// LA REJILLA CON RUEDA (1.26.2). El mazo sugerido de un Pick Two son 42
+    /// cartas en tres secciones, y ni con la carta más pequeña cabía: el panel
+    /// salía más alto que Arena y lo de abajo no se veía (el usuario, 2026-10-25:
+    /// «no puedo hacer scroll para verlo todo»). Ahora, si no cabe, la ventana se
+    /// queda a la altura de Arena y la rejilla se mueve con la rueda entre la
+    /// cabecera y el pie. `altoRejilla` es lo que mide entera; 0 = cabe, sin rueda.
+    /// </summary>
+    private static int desplazamientoRejilla, altoRejilla;
+    private static int TopeRejilla => altoRejilla > alto ? altoRejilla - alto : 0;
+    /// <summary>Dónde acaba la zona de las cartas: justo encima del pie.</summary>
+    private static int AbajoRejilla => alto - ALTO_PIE - MARGEN / 2;
 
     /// <summary>
     /// UN PANEL SÓLO DE TEXTO: el resumen de la partida. Va por secciones —cada
@@ -298,6 +313,7 @@ internal static partial class PanelCartas
         copiado = false;
         desplazamiento = 0;
         huecos = [];
+        desplazamientoRejilla = 0; altoRejilla = 0;
         var (anchoArena, altoArena) = MedidasDeArena();
         // EL ANCHO: con extras (el resumen), a dos columnas y tan ancho como
         // permita Arena hasta 1180; sin ellos, el de siempre (758).
@@ -763,6 +779,14 @@ internal static partial class PanelCartas
             (huecos, alto) = Disponer(secciones);
             if (alto <= altoArena - 60 && ANCHO_PANEL <= anchoArena - 40) break;
         }
+        // Ni con la más pequeña: la ventana, a la altura de Arena, y el resto con la rueda.
+        desplazamientoRejilla = 0;
+        altoRejilla = 0;
+        if (altoArena > 300 && alto > altoArena - 60)
+        {
+            altoRejilla = alto;
+            alto = altoArena - 60;
+        }
         bajoRaton = -1;
         if (huecos.Length == 0) return;
         hilo = new Thread(Correr) { IsBackground = true, Name = "panel" };
@@ -973,10 +997,16 @@ internal static partial class PanelCartas
             if (rectLeyenda.Right > 0 && xr >= rectLeyenda.Left && xr < rectLeyenda.Right && yr >= rectLeyenda.Top && yr < rectLeyenda.Bottom) return BAJO_LEYENDA;
         }
         var x = (short)(lParam.ToInt64() & 0xFFFF);
-        var y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
+        int y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
         var cr = QueHayEnRelacionadas(x, y);
         if (cr != 0) return cr;
         if (y < ALTO_CABECERA) return x >= ANCHO_PANEL - 44 ? -2 : -1;
+        // Con rueda, la rejilla va desplazada y el pie no es de ninguna carta.
+        if (TopeRejilla > 0)
+        {
+            if (y >= AbajoRejilla) return -1;
+            y += desplazamientoRejilla;
+        }
         var lista = huecos;
         for (var i = 0; i < lista.Length; i++)
         {
@@ -1027,7 +1057,16 @@ internal static partial class PanelCartas
 
             case WM_MOUSEWHEEL:
             {
-                if (texto is null) return IntPtr.Zero;
+                if (texto is null)
+                {
+                    // La rejilla que no cabe (ver altoRejilla): media carta por golpe de rueda.
+                    if (TopeRejilla == 0) return IntPtr.Zero;
+                    var giroR = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+                    desplazamientoRejilla = Math.Clamp(desplazamientoRejilla - giroR * (altoCarta / 2) / 120, 0, TopeRejilla);
+                    bajoRaton = -1;
+                    InvalidateRect(hWnd, IntPtr.Zero, false);
+                    return IntPtr.Zero;
+                }
                 var giro = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
                 var tope = Math.Max(0, altoTexto - AltoVisibleTexto);
                 desplazamiento = Math.Clamp(desplazamiento - giro / 120 * 48, 0, tope);
@@ -1457,13 +1496,31 @@ internal static partial class PanelCartas
             if (rel is not null) PintarRelacionadas(hdc);
 
             var lista = huecos;
+            // Con rueda (ver altoRejilla): todo desplazado, y recortado entre la cabecera y el pie.
+            var dy = TopeRejilla > 0 ? desplazamientoRejilla : 0;
+            if (TopeRejilla > 0)
+            {
+                IntersectClipRect(hdc, 0, ALTO_CABECERA, ANCHO_PANEL, AbajoRejilla);
+                if (grafico != IntPtr.Zero) GdipSetClipRectI(grafico, 0, ALTO_CABECERA, ANCHO_PANEL, AbajoRejilla - ALTO_CABECERA, 0);
+            }
+            // EL RECORTE DE LO QUE PINTA GDI, A MANO: el de IntersectClipRect no aguanta
+            // a que GDI+ pinte en el mismo lienzo (lo restaura al dibujar una imagen),
+            // y el rótulo «Criaturas (15)» salía encima del pie. Las imágenes ya las
+            // recorta GdipSetClipRectI; los rellenos y los textos, esto.
+            var conRueda = TopeRejilla > 0;
+            RECT Visible(RECT x) => conRueda
+                ? new RECT { Left = x.Left, Right = x.Right, Top = Math.Max(x.Top, ALTO_CABECERA), Bottom = Math.Min(x.Bottom, AbajoRejilla) }
+                : x;
             for (var i = 0; i < lista.Length; i++)
             {
-                var h = lista[i];
+                var h = lista[i] with { Y = lista[i].Y - dy };
+                if (conRueda && (h.Y + h.Alto <= ALTO_CABECERA || h.Y >= AbajoRejilla)) continue;
                 var r = new RECT { Left = h.X, Top = h.Y, Right = h.X + h.Ancho, Bottom = h.Y + h.Alto };
 
                 if (h.Carta is null)
                 {
+                    // Un rótulo a medias contra el borde, mejor no: o entero o nada.
+                    if (conRueda && (r.Top < ALTO_CABECERA || r.Bottom > AbajoRejilla)) continue;
                     // El rótulo de la sección: lo que produce el combo. Pulsable si tiene ruta.
                     var pulsable = h.Seccion.Ruta is not null;
                     if (i == bajoRaton && pulsable) FillRect(hdc, ref r, resalte);
@@ -1477,7 +1534,7 @@ internal static partial class PanelCartas
                 // Bajo el ratón: un filo azul alrededor, que se vea cuál se va a abrir.
                 if (i == bajoRaton)
                 {
-                    var rf = new RECT { Left = r.Left - 3, Top = r.Top - 3, Right = r.Right + 3, Bottom = r.Bottom + 3 };
+                    var rf = Visible(new RECT { Left = r.Left - 3, Top = r.Top - 3, Right = r.Right + 3, Bottom = r.Bottom + 3 });
                     FillRect(hdc, ref rf, marco);
                 }
 
@@ -1489,16 +1546,24 @@ internal static partial class PanelCartas
                 else
                 {
                     // Sin imagen, el nombre: mejor un hueco con letra que un agujero.
-                    FillRect(hdc, ref r, resalte);
+                    var rv = Visible(r);
+                    FillRect(hdc, ref rv, resalte);
                     SelectObject(hdc, fPie);
                     SetTextColor(hdc, Rgb(226, 232, 240));
-                    var rn = new RECT { Left = r.Left + 6, Top = r.Top, Right = r.Right - 6, Bottom = r.Bottom };
+                    var rn = new RECT { Left = rv.Left + 6, Top = rv.Top, Right = rv.Right - 6, Bottom = rv.Bottom };
                     DrawText(hdc, h.Carta.Nombre, -1, ref rn, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 }
             }
 
             // «×2»: las que ya tienes, encima de su carta.
-            foreach (var h in lista) if (h.Carta is { Copias: > 0 } tuya) PintarCopias(hdc, tuya.Copias, h.X, h.Y, h.Ancho, h.Alto);
+            foreach (var h in lista)
+                if (h.Carta is { Copias: > 0 } tuya && (!conRueda || (h.Y - dy >= ALTO_CABECERA && h.Y - dy + h.Alto <= AbajoRejilla)))
+                    PintarCopias(hdc, tuya.Copias, h.X, h.Y - dy, h.Ancho, h.Alto);
+            if (TopeRejilla > 0)
+            {
+                SelectClipRgn(hdc, IntPtr.Zero);
+                if (grafico != IntPtr.Zero) GdipResetClip(grafico);
+            }
 
             // La carta de la que se parte, grande, si el ratón está en su miniatura: encima de la rejilla.
             if (rel is { } relGrande) PintarCartaGrande(hdc, relGrande);
@@ -1510,7 +1575,9 @@ internal static partial class PanelCartas
             if (texto is null)
             {
                 var sobre = bajoRaton >= 0 && bajoRaton < lista.Length ? lista[bajoRaton].Carta : null;
-                var pie = sobre is null || (sobre.PrecioUsd is null && sobre.Copias <= 0) ? Textos.T("panel_pie")
+                var pie = sobre is null || (sobre.PrecioUsd is null && sobre.Copias <= 0)
+                    // Con rueda y sin llegar abajo, el pie lo dice: si no, lo de abajo no existe para nadie.
+                    ? (TopeRejilla > 0 && desplazamientoRejilla < TopeRejilla ? Textos.T("panel_rueda") : Textos.T("panel_pie"))
                     : string.Join(" · ", new[] { sobre.Nombre, sobre.PrecioUsd is { } p ? $"${p:0.00}" : null, sobre.Copias > 0 ? Textos.T("panel_en_coleccion", sobre.Copias) : null }.Where(t => t is not null));
                 DrawText(hdc, pie, -1, ref rPie, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
             }
