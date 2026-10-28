@@ -716,6 +716,25 @@ internal static class Program
             await Task.Delay(TimeSpan.FromSeconds(args.Contains("--sin-ventana") ? 1 : 26));
             return 0;
         }
+        // --probar-nombres: lee la base de cartas de Arena y dice cuántas cartas
+        // mandaría a la web (ver MandarNombres). Con --enviar las manda de verdad,
+        // al sitio de MTGCORNER_SITIO si está puesto, aunque ya se hubieran mandado.
+        if (args.Length > 0 && args[0] == "--probar-nombres")
+        {
+            var todas = BaseArena.Todas();
+            if (todas is null) { Console.WriteLine("No se ha podido leer la base de cartas de Arena."); return 1; }
+            Console.WriteLine($"base {todas.Value.Firma}: {todas.Value.Cartas.Count} cartas primarias");
+            foreach (var c in todas.Value.Cartas.Where(c => c.Grp is 58441 or 58453 or 6873)) Console.WriteLine($"  {c.Grp}: {c.Nombre} [{c.Set} {c.Numero}]");
+            if (args.Contains("--enviar"))
+            {
+                var vinculoN = Vinculo.Leer();
+                if (vinculoN is null) { Console.WriteLine("Sin vincular: no hay token para mandar."); return 1; }
+                using var httpN = new HttpClient { BaseAddress = new Uri(Sitio), Timeout = TimeSpan.FromMinutes(2) };
+                httpN.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", vinculoN.Token);
+                Console.WriteLine(await MandarNombres(httpN, forzar: true));
+            }
+            return 0;
+        }
         if (args.Length > 0 && (args[0] == "--probar-rastreador" || args[0] == "--probar-mulligan"))
         {
             // El mazo del último registro, como en el residente, y luego el
@@ -744,13 +763,20 @@ internal static class Program
                 var tierraP = listaP.Where(c => c.Tierra).Select(c => c.Grp).FirstOrDefault();
                 var hechizos = listaP.Where(c => !c.Tierra).OrderBy(c => c.Cmc).Select(c => c.Grp).ToArray();
                 int[] Mano(int t) => [.. Enumerable.Repeat(tierraP, t), .. Enumerable.Range(0, 7 - t).Select(i => hechizos[i % hechizos.Length])];
-                foreach (var (t, m) in new[] { (2, 0), (1, 0), (3, 0), (5, 0), (2, 1) })
-                    Console.WriteLine($"{t} tierras, {m} mulligans: {TextoMulligan(Mano(t), t, m, mazoP, "prueba")}");
-                // --ia: también la respuesta de la IA para la mano de 2 tierras.
+                // Con quién empieza (1.26.3): empiezas, empieza el rival, sin saberlo.
+                foreach (var (t, m, e) in new (int, int, bool?)[] { (2, 0, true), (1, 0, true), (1, 0, false), (3, 0, false), (5, 0, null), (2, 1, true) })
+                    Console.WriteLine($"{t} tierras, {m} mulligans, {(e is null ? "sin saber quien empieza" : e.Value ? "empiezas" : "empieza el rival")}: {TextoMulligan(Mano(t), t, m, mazoP, "prueba", e)}");
+                // --ia: también la respuesta de la IA para la mano de 2 tierras, y para la de 1 empezando tú y robando primero.
                 if (args.Contains("--ia"))
                 {
                     var rIa = await httpP.PostAsJsonAsync($"{PuertaDevice}/mulligan", new { idioma = Textos.Idioma, formato = "standard", mano = Mano(2), mazo = mazoP.Select(c => new { grp = c.Grp, n = c.N }), mulligans = 0, tierras = 2, probabilidad = 54, objetivo = 3 }, JsonOpciones);
-                    Console.WriteLine($"IA: {await rIa.Content.ReadAsStringAsync()}");
+                    Console.WriteLine($"IA (2 tierras): {await rIa.Content.ReadAsStringAsync()}");
+                    foreach (var e in new[] { true, false })
+                    {
+                        var (p1, o1, s1) = Probabilidades(Mano(1), 1, mazoP, e);
+                        var r1 = await httpP.PostAsJsonAsync($"{PuertaDevice}/mulligan", new { idioma = Textos.Idioma, formato = "standard", mano = Mano(1), mazo = mazoP.Select(c => new { grp = c.Grp, n = c.N }), nombreMazo = args.SkipWhile(a => a != "--mazo").Skip(1).FirstOrDefault(), mulligans = 0, tierras = 1, probabilidad = Math.Round(p1 * 100), objetivo = o1, empiezo = e, segunda = s1 is { } x ? Math.Round(x * 100) : (double?)null }, JsonOpciones);
+                        Console.WriteLine($"IA (1 tierra, {(e ? "empiezas" : "empieza el rival")}): {await r1.Content.ReadAsStringAsync()}");
+                    }
                 }
                 // --sin-ventana: sólo la consola (para probar con una partida en marcha).
                 if (args.Contains("--sin-ventana")) return 0;
@@ -1606,6 +1632,10 @@ internal static class Program
             }
         }
         httpResidente = http;
+        // Los nombres de las cartas a la web, si la base de Arena ha cambiado (ver
+        // MandarNombres). Un minuto después de arrancar y en segundo plano: no es
+        // urgente y no puede retrasar nada de lo que se ve.
+        _ = Task.Run(async () => { await Task.Delay(TimeSpan.FromMinutes(1)); await MandarNombres(http); });
         refrescarColumna = ActualizarColumna;
         // Un clic en el juego cierra la ventana de cartas, estadísticas o resumen que haya.
         Columna.AlPulsarFuera = PanelCartas.CerrarPorClicFuera;
@@ -2193,6 +2223,53 @@ internal static class Program
         catch { return new Ajustes(false); }
     }
 
+    // ── LOS NOMBRES DE LAS CARTAS DE ARENA, A LA WEB (1.26.3, 2026-10-28) ──
+    //
+    // La web traduce los números de Arena con un índice que sale de Scryfall, y
+    // Scryfall a veces no los tiene (Reality Fracture entera, recién salida) o
+    // los tiene mal (el 58441 es una Island en Arena y Plains en Scryfall). La
+    // base de cartas de Arena sí lo sabe todo: cuando cambia —una edición
+    // nueva—, se manda el nombre de cada número a /api/mtga-device/nombres. La
+    // web sólo los usa para rellenar huecos. Una vez por base: la firma de la
+    // última mandada se apunta en nombres-enviados.txt.
+
+    private static string FicheroNombresEnviados => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MtgCornerArenaBridge", "nombres-enviados.txt");
+
+    /// <summary>
+    /// Manda los nombres si la base de Arena ha cambiado desde la última vez (o
+    /// siempre, con <paramref name="forzar"/>). Por tandas de 2.500. Si una tanda
+    /// falla, no se apunta nada y se reintenta en el próximo arranque. Devuelve
+    /// lo que pasó, para el modo de taller; en el residente no se enseña.
+    /// </summary>
+    internal static async Task<string> MandarNombres(HttpClient http, bool forzar = false)
+    {
+        try
+        {
+            var todas = BaseArena.Todas();
+            if (todas is null) return "sin base de Arena";
+            var (firma, cartas) = todas.Value;
+            if (!forzar && File.Exists(FicheroNombresEnviados) && File.ReadAllText(FicheroNombresEnviados).Trim() == firma) return "ya mandados para esta base";
+            int recibidas = 0, nuevas = 0;
+            foreach (var tanda in cartas.Chunk(2500))
+            {
+                using var r = await http.PostAsJsonAsync($"{PuertaDevice}/nombres",
+                    new { nombres = tanda.Select(c => new { grp = c.Grp, nombre = c.Nombre, set = c.Set, numero = c.Numero }) }, JsonOpciones);
+                if (!r.IsSuccessStatusCode) return $"la web contestó {(int)r.StatusCode}: se reintenta en el próximo arranque";
+                var d = await r.Content.ReadFromJsonAsync<RespuestaNombres>(JsonOpciones);
+                recibidas += d?.Recibidas ?? 0;
+                nuevas += d?.Nuevas ?? 0;
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(FicheroNombresEnviados)!);
+            File.WriteAllText(FicheroNombresEnviados, firma);
+            return $"mandadas {recibidas}, nuevas en la web {nuevas}";
+        }
+        catch (Exception e) { return $"fallo: {e.Message}"; }
+    }
+
+    internal sealed record RespuestaNombres(
+        [property: System.Text.Json.Serialization.JsonPropertyName("recibidas")] int Recibidas,
+        [property: System.Text.Json.Serialization.JsonPropertyName("nuevas")] int Nuevas);
+
     /// <summary>Los talleres que tocan la opinión no escriben ajustes: probar no puede dejar apuntado que ya contestaste.</summary>
     private static bool sinGuardarAjustes;
     /// <summary>Ya se leyó de ajustes.json si la columna va plegada en el draft (ver GuardarAjustes).</summary>
@@ -2419,13 +2496,17 @@ internal static class Program
 
     // ── EL CONSEJO DE MULLIGAN (pedido del usuario el 2026-10-03) ─────────
 
-    /// <summary>La última mano ofrecida (tierras y mulligans): al acabar la partida se apunta con el resultado.</summary>
-    private static (int Tierras, int Mulligans)? ultimaMano;
+    /// <summary>La última mano ofrecida (tierras, mulligans y si empezabas): al acabar la partida se apunta con el resultado.</summary>
+    private static (int Tierras, int Mulligans, bool? Empiezo)? ultimaMano;
 
     private static string FicheroManos => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MtgCornerArenaBridge", "manos.json");
 
-    /// <summary>Una mano jugada: con qué mazo, cuántas tierras, tras cuántos mulligans y si se ganó.</summary>
-    internal sealed record ManoJugada(string Mazo, int Tierras, int Mulligans, bool Gane, DateTime Cuando);
+    /// <summary>
+    /// Una mano jugada: con qué mazo, cuántas tierras, tras cuántos mulligans y
+    /// si se ganó. Y desde el 1.26.3 si empezabas tú (null en las de antes): con
+    /// eso se podrá separar el historial por quién empieza cuando haya bastantes.
+    /// </summary>
+    internal sealed record ManoJugada(string Mazo, int Tierras, int Mulligans, bool Gane, DateTime Cuando, bool? Empiezo = null);
 
     private static List<ManoJugada> LeerManos()
     {
@@ -2445,7 +2526,7 @@ internal static class Program
         try
         {
             var lista = LeerManos();
-            lista.Add(new ManoJugada(mazo, m.Tierras, m.Mulligans, gane, DateTime.UtcNow));
+            lista.Add(new ManoJugada(mazo, m.Tierras, m.Mulligans, gane, DateTime.UtcNow, m.Empiezo));
             Directory.CreateDirectory(Path.GetDirectoryName(FicheroManos)!);
             File.WriteAllText(FicheroManos, JsonSerializer.Serialize(lista.TakeLast(2000), JsonOpciones));
         }
@@ -2555,14 +2636,37 @@ internal static class Program
     /// </summary>
     private static void ConsejoMulligan(int[] cartas, int tierras, int mulligans)
     {
-        ultimaMano = (tierras, mulligans);
+        var empiezo = Contexto.EmpiezoAlRepartir;
+        ultimaMano = (tierras, mulligans, empiezo);
         if (EventoCompetitivo(Contexto.Evento)) return;
         // En Brawl el primer mulligan es gratis: siete nuevas y ninguna al fondo.
         var alFondo = EsBrawl(Contexto.Formato) ? Math.Max(0, mulligans - 1) : mulligans;
-        var texto = TextoMulligan(cartas, tierras, alFondo, Contexto.CartasMazo, Contexto.Mazo);
+        var texto = TextoMulligan(cartas, tierras, alFondo, Contexto.CartasMazo, Contexto.Mazo, empiezo);
         var esta = Interlocked.Increment(ref manoEnCurso);
-        if (httpResidente is { } http) _ = MulliganConIa(http, cartas, tierras, mulligans, alFondo, texto, esta);
+        if (httpResidente is { } http) _ = MulliganConIa(http, cartas, tierras, mulligans, alFondo, texto, esta, empiezo);
         else MostrarMano(texto);
+    }
+
+    /// <summary>
+    /// LAS PROBABILIDADES DE LA MANO: llegar a 3 tierras en el turno 3 (o a 4 en
+    /// el 4, si ya tienes 3) y, con una sola tierra, a la segunda en el turno 2.
+    /// Empezando el rival se roba una carta más antes de cada turno tuyo (1.26.3;
+    /// el usuario, 2026-10-28: «no es lo mismo salir primero que segundo»): con
+    /// 1 tierra en un mazo de 60 con 17, la segunda en el turno 2 pasa de un 30 %
+    /// a un 52 %. Sin saber quién empieza, como si empezaras tú, que es lo prudente.
+    /// </summary>
+    private static (double P, int Objetivo, double? Segunda) Probabilidades(int[] cartas, int tierras, (int Grp, int N)[] mazo, bool? empiezo)
+    {
+        var datos = cartasDelMazoActual.GroupBy(c => c.Grp).ToDictionary(g => g.Key, g => g.First());
+        var tamMazo = mazo.Length > 0 ? mazo.Sum(c => c.N) : 60;
+        var tierrasMazo = datos.Count > 0 ? mazo.Where(c => datos.TryGetValue(c.Grp, out var d) && d.Tierra).Sum(c => c.N) : (int)Math.Round(tamMazo * 0.4);
+        var quedan = Math.Max(0, tierrasMazo - tierras);
+        var biblioteca = Math.Max(1, tamMazo - cartas.Length);
+        var extra = empiezo == false ? 1 : 0;
+        var objetivo = tierras < 3 ? 3 : 4;
+        var p = AlMenos(Math.Max(0, objetivo - tierras), objetivo - 1 + extra, quedan, biblioteca);
+        double? segunda = tierras == 1 ? AlMenos(1, 1 + extra, quedan, biblioteca) : null;
+        return (p, objetivo, segunda);
     }
 
     /// <summary>La IA tarda 2-4 s (medido en producción el 2026-10-03); con más de esto, el de las cuentas.</summary>
@@ -2584,18 +2688,14 @@ internal static class Program
         Superposicion.MostrarSinEsperar(Textos.T("mul_titulo"), texto, 20, importante: true, avatar: FiguraEntrenador());
     }
 
-    private static async Task MulliganConIa(HttpClient http, int[] cartas, int tierras, int mulligans, int alFondo, string deLasCuentas, int esta)
+    private static async Task MulliganConIa(HttpClient http, int[] cartas, int tierras, int mulligans, int alFondo, string deLasCuentas, int esta, bool? empiezo)
     {
         string? conIa = null;
         try
         {
             using var tope = new CancellationTokenSource(TimeSpan.FromSeconds(ESPERA_IA_MANO));
             var mazo = Contexto.CartasMazo;
-            var tamMazo = mazo.Length > 0 ? mazo.Sum(c => c.N) : 60;
-            var datos = cartasDelMazoActual.GroupBy(c => c.Grp).ToDictionary(g => g.Key, g => g.First());
-            var tierrasMazo = datos.Count > 0 ? mazo.Where(c => datos.TryGetValue(c.Grp, out var d) && d.Tierra).Sum(c => c.N) : (int)Math.Round(tamMazo * 0.4);
-            var objetivo = tierras < 3 ? 3 : 4;
-            var p = AlMenos(Math.Max(0, objetivo - tierras), objetivo - 1, Math.Max(0, tierrasMazo - tierras), Math.Max(1, tamMazo - cartas.Length));
+            var (p, objetivo, segunda) = Probabilidades(cartas, tierras, mazo, empiezo);
             var r = await http.PostAsJsonAsync($"{PuertaDevice}/mulligan", new
             {
                 idioma = Textos.Idioma,
@@ -2611,6 +2711,9 @@ internal static class Program
                 tierras,
                 probabilidad = Math.Round(p * 100),
                 objetivo,
+                // 1.26.3: quién empieza (null si no se sabe) y, con 1 tierra, la segunda en el turno 2.
+                empiezo,
+                segunda = segunda is { } s ? Math.Round(s * 100) : (double?)null,
             }, JsonOpciones, tope.Token);
             var d = r.IsSuccessStatusCode ? await r.Content.ReadFromJsonAsync<RespuestaMulligan>(JsonOpciones, tope.Token) : null;
             if (d?.Veredicto is { } v && d.Razon is { Length: > 0 } razon)
@@ -2636,24 +2739,24 @@ internal static class Program
     /// en el turno 3 (o a 4 en el 4, si ya tienes 3) empezando tú; y, si hay
     /// historial suficiente, cómo te ha ido con manos así en este mazo.
     ///
-    /// Las reglas son las de siempre en Construido de 60: con 0–1 o 6–7 tierras,
-    /// mulligan; con 2, sólo si hay con qué jugar pronto y la tercera llega a
-    /// tiempo la mitad de las veces; 3–4, quedártela; 5, floja. Con 5 cartas o
-    /// menos casi todo se queda: otra más es peor.
+    /// Las reglas son las de siempre en Construido de 60: con 0 o 6–7 tierras,
+    /// mulligan; con 1, mulligan salvo robando primero con tres jugadas baratas
+    /// o más, que es arriesgada (la IA, si contesta, lo mira carta a carta); con
+    /// 2, sólo si hay con qué jugar pronto y la tercera llega a tiempo la mitad
+    /// de las veces; 3–4, quedártela; 5, floja. Con 5 cartas o menos casi todo
+    /// se queda: otra más es peor.
     /// </summary>
-    internal static string TextoMulligan(int[] cartas, int tierras, int mulligans, (int Grp, int N)[] mazo, string? nombreMazo)
+    internal static string TextoMulligan(int[] cartas, int tierras, int mulligans, (int Grp, int N)[] mazo, string? nombreMazo, bool? empiezo = null)
     {
         var datos = cartasDelMazoActual.GroupBy(c => c.Grp).ToDictionary(g => g.Key, g => g.First());
-        var tamMazo = mazo.Length > 0 ? mazo.Sum(c => c.N) : 60;
-        var tierrasMazo = datos.Count > 0 ? mazo.Where(c => datos.TryGetValue(c.Grp, out var d) && d.Tierra).Sum(c => c.N) : (int)Math.Round(tamMazo * 0.4);
         var baratas = cartas.Count(g => datos.TryGetValue(g, out var d) && !d.Tierra && d.Cmc <= 2);
         var conservas = 7 - mulligans;
 
-        var objetivo = tierras < 3 ? 3 : 4;
-        var p = AlMenos(Math.Max(0, objetivo - tierras), objetivo - 1, Math.Max(0, tierrasMazo - tierras), Math.Max(1, tamMazo - cartas.Length));
+        var (p, objetivo, segunda) = Probabilidades(cartas, tierras, mazo, empiezo);
 
         var veredicto = conservas <= 5 ? (tierras is >= 1 and <= 5 ? "mul_quedate" : "mul_arriesgada")
-            : tierras <= 1 || tierras >= 6 ? "mul_mulligan"
+            : tierras == 0 || tierras >= 6 ? "mul_mulligan"
+            : tierras == 1 ? (empiezo == false && baratas >= 3 ? "mul_arriesgada" : "mul_mulligan")
             : tierras == 2 ? (baratas >= 2 && p >= 0.5 ? "mul_quedate" : "mul_arriesgada")
             : tierras == 5 ? (conservas <= 6 ? "mul_quedate" : "mul_arriesgada")
             : "mul_quedate";
@@ -2664,7 +2767,8 @@ internal static class Program
             Textos.T("mul_resumen", tierras, baratas),
         };
         // La probabilidad, sólo si dice algo: con 4 tierras o más ya está hecha.
-        if (tierras < objetivo) lineas.Add(Textos.T("mul_prob", Math.Round(p * 100), objetivo));
+        if (tierras < objetivo) lineas.Add(Textos.T(empiezo == false ? "mul_prob_robando" : "mul_prob", Math.Round(p * 100), objetivo));
+        if (segunda is { } s2) lineas.Add(Textos.T("mul_segunda", Math.Round(s2 * 100)));
         // Tu historial con manos así (mismo mazo, mismas tierras, mismos mulligans), si hay bastante.
         if (nombreMazo is { Length: > 0 })
         {

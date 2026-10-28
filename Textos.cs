@@ -1802,6 +1802,18 @@ internal static class Textos
             "{0}% chance of having {1} lands on turn {1} on the play.", "{0}% de tener {1} tierras en el turno {1} si empiezas.", "{0} % Chance auf {1} Länder in Zug {1}, wenn du beginnst.", "{0} % de chances d'avoir {1} terrains au tour {1} si tu commences.",
             "{0}% de ter {1} terrenos no turno {1} se começares.", "{0}% di avere {1} terre al turno {1} se inizi tu.", "先手なら {1} ターン目に土地 {1} 枚の確率 {0}%。", "先手时第 {1} 回合有 {1} 张地的几率为 {0}%。",
         ],
+        // Empezando el rival se roba una carta más antes de cada turno tuyo (1.26.3).
+        ["mul_prob_robando"] =
+        [
+            "{0}% chance of having {1} lands on turn {1} on the draw.", "{0}% de tener {1} tierras en el turno {1} si empieza el rival.", "{0} % Chance auf {1} Länder in Zug {1}, wenn der Gegner beginnt.", "{0} % de chances d'avoir {1} terrains au tour {1} si l'adversaire commence.",
+            "{0}% de ter {1} terrenos no turno {1} se o oponente começar.", "{0}% di avere {1} terre al turno {1} se inizia l'avversario.", "後手なら {1} ターン目に土地 {1} 枚の確率 {0}%。", "后手时第 {1} 回合有 {1} 张地的几率为 {0}%。",
+        ],
+        // Con una sola tierra lo que decide es la segunda, no la tercera (1.26.3).
+        ["mul_segunda"] =
+        [
+            "{0}% chance of a second land by turn 2.", "{0}% de tener la segunda tierra en el turno 2.", "{0} % Chance auf ein zweites Land bis Zug 2.", "{0} % de chances d'avoir un deuxième terrain au tour 2.",
+            "{0}% de ter o segundo terreno no turno 2.", "{0}% di avere la seconda terra al turno 2.", "2 ターン目までに 2 枚目の土地を引く確率 {0}%。", "第 2 回合前摸到第二张地的几率为 {0}%。",
+        ],
         ["mul_historial"] =
         [
             "Hands like this in this deck: {1}–{2} ({3}%).", "Manos así en este mazo: {1}–{2} ({3}%).", "Solche Hände mit diesem Deck: {1}–{2} ({3} %).", "Mains comme celle-ci avec ce deck : {1}–{2} ({3} %).",

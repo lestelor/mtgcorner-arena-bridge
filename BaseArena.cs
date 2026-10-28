@@ -73,6 +73,53 @@ internal static class BaseArena
         return new DirectoryInfo(raw).GetFiles("Raw_CardDatabase_*.mtga").OrderByDescending(f => f.LastWriteTimeUtc).FirstOrDefault()?.FullName;
     }
 
+    /// <summary>Una carta de la base, para mandar su nombre a la web (ver <see cref="Todas"/>).</summary>
+    internal sealed record CartaBase(int Grp, string Nombre, string? Set, string? Numero);
+
+    /// <summary>
+    /// TODAS LAS CARTAS PRIMARIAS DE LA BASE (sin fichas), con su nombre en
+    /// inglés, su edición y su número EN ARENA (1.26.3, 2026-10-28).
+    ///
+    /// Para que la web sepa qué carta es cada número cuando Scryfall no lo dice
+    /// o lo dice mal: el índice de la web sale del arena_id de Scryfall, que no
+    /// tenía las cartas de Reality Fracture y ponía Plains donde Arena tiene una
+    /// Island (las básicas de KTK). Ver Program.MandarNombres y
+    /// /api/mtga-device/nombres. La firma (nombre del fichero y fecha) dice si
+    /// la base ha cambiado desde la última vez: sólo entonces se manda.
+    /// </summary>
+    internal static (string Firma, List<CartaBase> Cartas)? Todas()
+    {
+        try
+        {
+            var fichero = Fichero();
+            if (fichero is null) return null;
+            var firma = $"{Path.GetFileName(fichero)}|{File.GetLastWriteTimeUtc(fichero).Ticks}";
+            var uri = new Uri(fichero).AbsoluteUri + "?mode=ro&immutable=1";
+            if (sqlite3_open_v2(Encoding.UTF8.GetBytes(uri + "\0"), out var db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, IntPtr.Zero) != 0) { sqlite3_close(db); return null; }
+            var cartas = new List<CartaBase>();
+            try
+            {
+                const string sql = "select c.GrpId, min(l.Loc), c.ExpansionCode, c.CollectorNumber from Cards c " +
+                                   "join Localizations_enUS l on l.LocId = c.TitleId " +
+                                   "where c.IsPrimaryCard = 1 and c.IsToken = 0 group by c.GrpId";
+                if (sqlite3_prepare16_v2(db, sql, -1, out var stmt, IntPtr.Zero) != 0) return null;
+                try
+                {
+                    string? Texto(int col) => Marshal.PtrToStringUni(sqlite3_column_text16(stmt, col));
+                    while (sqlite3_step(stmt) == SQLITE_ROW)
+                    {
+                        var nombre = Texto(1);
+                        if (nombre is { Length: > 0 }) cartas.Add(new CartaBase(sqlite3_column_int(stmt, 0), nombre, Texto(2), Texto(3)));
+                    }
+                }
+                finally { sqlite3_finalize(stmt); }
+            }
+            finally { sqlite3_close(db); }
+            return cartas.Count > 0 ? (firma, cartas) : null;
+        }
+        catch { return null; }
+    }
+
     /// <summary>El nombre en inglés de cada GrpId que la base conozca.</summary>
     internal static IReadOnlyDictionary<int, string> Nombres(IEnumerable<int> grps)
     {

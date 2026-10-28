@@ -214,6 +214,15 @@ internal static class Contexto
     public static Comandante[] ComandantesAlRepartir { get; private set; } = [];
     /// <summary>Los del rival al repartir (1.26.1): están a la vista desde el turno 0, y su plan se avisa al empezar.</summary>
     public static Comandante[] ComandantesRivalAlRepartir { get; private set; } = [];
+    /// <summary>
+    /// ¿EMPIEZAS TÚ? Al repartir (1.26.3; el usuario, 2026-10-28: «no es lo
+    /// mismo salir primero que segundo»). Robando primero llega una carta más
+    /// antes de cada turno tuyo, y con una sola tierra eso cambia la mano. Lo
+    /// dice el `turnInfo` que acompaña a la oferta de mano: su `activePlayer`
+    /// es quien jugará el turno 1 (comprobado en las 8 partidas del Player.log
+    /// del 2026-10-28). null si no venía.
+    /// </summary>
+    public static bool? EmpiezoAlRepartir { get; private set; }
     /// <summary>Los comandantes vistos en la partida, por dueño, y las veces que cada uno salió de la zona de mando a la pila.</summary>
     private static readonly Dictionary<int, List<int>> comandantesDe = new();
     private static readonly Dictionary<(int Dueno, int Grp), int> lanzadosDesdeMando = new();
@@ -314,6 +323,8 @@ internal static class Contexto
     // y tomar el primero de ésos te sentaba en el 1 cada pocos segundos
     // (visto el 2026-09-26: los colores propios alternaban con los del rival).
     private static readonly Regex Asiento = new(@"""systemSeatIds"":\s*\[\s*(\d)\s*\]", RegexOptions.Compiled);
+    /// <summary>El jugador activo de un `turnInfo`; antes del turno 1, quien empieza.</summary>
+    private static readonly Regex JugadorActivo = new(@"""turnInfo"":\s*\{[^}]*""activePlayer"":\s*(\d)", RegexOptions.Compiled);
     // El evento y el formato van en el `request` de EventSetDeckV3, JSON escapado
     // dentro de una cadena: \x22 es la comilla, \\ la barra que la precede.
     private static readonly Regex EventoCola = new(@"\\\x22EventName\\\x22:\\\x22([A-Za-z0-9_-]+)", RegexOptions.Compiled);
@@ -799,6 +810,11 @@ internal static class Contexto
                     firmaMano = firma;
                     ComandantesAlRepartir = Comandantes(miAsiento);
                     ComandantesRivalAlRepartir = Comandantes(3 - miAsiento);
+                    // De esta misma línea: uno de otra sería de otra partida o de un turno ya
+                    // jugado. Si una mano tras un mulligan no lo trae, vale el de la primera.
+                    var activo = JugadorActivo.Match(linea);
+                    if (activo.Success) EmpiezoAlRepartir = int.Parse(activo.Groups[1].Value) == miAsiento;
+                    else if (mulligansHechos == 0) EmpiezoAlRepartir = null;
                     if (!leyendoLoViejo)
                         try { ManoNueva?.Invoke(cartasMano, tierrasMano, mulligansHechos); } catch { /* cosa de quien escucha */ }
                 }
