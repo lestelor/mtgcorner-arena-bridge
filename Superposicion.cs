@@ -296,7 +296,14 @@ internal static class Superposicion
     /// enlace. Las acciones se llaman en el hilo del aviso: quien las pone las
     /// manda a otro si tardan.
     /// </summary>
-    public sealed record Opciones(string[]? Rarezas = null, Action<int>? AlElegir = null, string? Enlace = null, Action? AlEnlace = null);
+    public sealed record Opciones(string[]? Rarezas = null, Action<int>? AlElegir = null, string? Enlace = null, Action? AlEnlace = null, uint? Borde = null);
+
+    /// <summary>
+    /// EL CONTORNO DE LOS COMBOS (1.26.4; el usuario, 2026-10-29: «verde si son
+    /// míos y rojo si son del rival»): el borde del bocadillo, o la banda de la
+    /// izquierda sin entrenador, de este color en vez del del entrenador.
+    /// </summary>
+    public const uint BORDE_MIO = 0xFF22C55E, BORDE_RIVAL = 0xFFEF4444;
     [ThreadStatic] private static Opciones? opciones;
     /// <summary>Lo que ocupan, dentro del globo y debajo del texto.</summary>
     private const int ALTO_GEMAS = 74, ALTO_ENLACE = 28, LADO_GEMA = 26, BAJO_ENLACE = -5, BAJO_GEMA = -20;
@@ -941,7 +948,8 @@ internal static class Superposicion
             GdipFillPath(g, tinta, arriba);
             GdipDeleteBrush(tinta); GdipDeletePath(arriba);
         }
-        GdipCreatePen1(color, 1.6f, 2, out var pluma);
+        // Con un color de borde propio (combos: verde los tuyos, rojo los del rival), más grueso para que se vea.
+        GdipCreatePen1(opciones?.Borde ?? color, opciones?.Borde is null ? 1.6f : 3f, 2, out var pluma);
         GdipDrawPath(g, pluma, c);
         GdipDeleteBrush(relleno); GdipDeletePen(pluma); GdipDeletePath(c); GdipDeleteGraphics(g);
     }
@@ -1298,7 +1306,8 @@ internal static class Superposicion
         var lienzo = CreateCompatibleBitmap(hdcVentana, ANCHO, ALTO);
         var lienzoAnterior = SelectObject(hdc, lienzo);
         var fondo = CreateSolidBrush(Rgb(9, 13, 24));
-        var filo = CreateSolidBrush(Rgb(245, 158, 11));
+        // La banda de la izquierda (aviso sin entrenador): ámbar, o el color de borde que pida el aviso (ARGB a RGB).
+        var filo = CreateSolidBrush(opciones?.Borde is uint b ? Rgb((int)((b >> 16) & 0xFF), (int)((b >> 8) & 0xFF), (int)(b & 0xFF)) : Rgb(245, 158, 11));
         var marca = CreateFont(13, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
         var fuerte = CreateFont(20, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");
         var normal = CreateFont(17, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Segoe UI");

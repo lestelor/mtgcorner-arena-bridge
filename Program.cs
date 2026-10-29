@@ -1717,6 +1717,8 @@ internal static class Program
         Contexto.MiFasePrincipal += _ => { Interlocked.Increment(ref manoEnCurso); if (manoAviso is not null) { manoAviso = null; Columna.Olvidar("mano"); refrescarColumna?.Invoke(); } };
         Contexto.PartidaAcabada += ApuntarMano;
         Contexto.Cambio += () => VigilarAmenazas(http, ActualizarColumna);
+        // Y los tuyos (1.26.4), con el contorno verde.
+        Contexto.Cambio += () => VigilarMisCombos(http);
         _ = Task.Run(async () => { try { if (await BuscarVersionNueva() is not null) Columna.Destacar("version"); } catch { /* sin red */ } });
         Contexto.Cambio += () => { if (Contexto.EnPartida && partidaPendiente is not null) { partidaPendiente = null; Columna.Olvidar("resumen"); } };
         Contexto.PartidaAcabada += () =>
@@ -3207,8 +3209,10 @@ internal static class Program
                     var ranura = "combo:" + (a.Combo.Id ?? "");
                     // Debajo, QUÉ HACE el combo en una frase (la web la resume de
                     // Commander Spellbook; el usuario, 2026-10-10).
+                    // Con el contorno rojo: es del rival (los tuyos, en verde; ver VigilarMisCombos).
                     void Avisar(string? resumen) => Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"),
-                        texto + (resumen is { Length: > 0 } ? "\n" + resumen : ""), 8, imagenes, fijo: true, ranura: ranura);
+                        texto + (resumen is { Length: > 0 } ? "\n" + resumen : ""), 8, imagenes, fijo: true, ranura: ranura,
+                        opciones: new Superposicion.Opciones(Borde: Superposicion.BORDE_RIVAL));
                     Avisar(a.Combo.Resumen);
                     // EL AVISO NO ESPERA A LA FRASE (el usuario, 2026-10-10: «primero que
                     // avise rápido del combo y de mientras que se pida la explicación»). Si
@@ -3253,7 +3257,8 @@ internal static class Program
                     // (el usuario, 2026-10-10: «no me ha salido el comentario de cómo
                     // funciona la sinergia»). Sin esperarla: si no venía, se pide aparte.
                     void AvisarSin(string? resumen) => Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"),
-                        textoSin + (resumen is { Length: > 0 } ? "\n" + resumen : ""), 8, imagenesSin, fijo: true, ranura: ranuraSin);
+                        textoSin + (resumen is { Length: > 0 } ? "\n" + resumen : ""), 8, imagenesSin, fijo: true, ranura: ranuraSin,
+                        opciones: new Superposicion.Opciones(Borde: Superposicion.BORDE_RIVAL));
                     AvisarSin(g2.Resumen);
                     if (g2.Resumen is not { Length: > 0 } && g2.Regla is { } reglaSin && g2.Cartas is { Length: >= 2 } todas)
                         _ = Task.Run(async () =>
@@ -3274,6 +3279,79 @@ internal static class Program
                         });
                 }
                 alCambiar();
+            }
+            catch { /* cancelado o sin red: a la siguiente */ }
+        });
+    }
+
+    /// <summary>
+    /// TUS COMBOS (1.26.4; el usuario, 2026-10-29: «en el bridge te avisa de los
+    /// combos del rival, pero estaría bien que también avisase de los míos… con
+    /// imágenes de las cartas como cuando son del rival… verde si son míos y rojo
+    /// si son del rival»). Como las amenazas del rival, con tus cartas en mesa,
+    /// mano y zona de mando: un combo LISTO si las tienes todas, y A UNA CARTA si
+    /// la que falta está en tu mazo (la web lo filtra con `mazo=`). Una vez por
+    /// combo y partida; en eventos competitivos, nada, como el resto de consejos.
+    /// </summary>
+    private static readonly HashSet<string> AvisadosMios = new();
+    private static CancellationTokenSource? esperaMios;
+    private static string misCartasRevisadas = "";
+
+    private static void VigilarMisCombos(HttpClient http)
+    {
+        var mias = string.Join(",", Contexto.MisCartas);
+        if (mias == misCartasRevisadas) return;
+        if (!Contexto.EnPartida || Contexto.MisCartas.Length < 2 || EventoCompetitivo(Contexto.Evento))
+        {
+            esperaMios?.Cancel();
+            misCartasRevisadas = mias;
+            if (!Contexto.EnPartida) lock (AvisadosMios) AvisadosMios.Clear();
+            return;
+        }
+        esperaMios?.Cancel();
+        var cts = esperaMios = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(2000, cts.Token);
+                misCartasRevisadas = mias;
+                var mazo = string.Join(",", Contexto.CartasMazo.Select(c => c.Grp).Take(120));
+                var r = await http.GetFromJsonAsync<RespuestaAmenazas>(
+                    $"{PuertaDevice}/amenazas?ids={Uri.EscapeDataString(mias)}&mazo={Uri.EscapeDataString(mazo)}&propio=1&idioma={Textos.Idioma}{Juego()}", JsonOpciones, cts.Token);
+                if (!Contexto.EnPartida || cts.IsCancellationRequested) return;
+                (AmenazaPuente Combo, bool Lista)? avisar = null;
+                lock (AvisadosMios)
+                {
+                    foreach (var c in r?.Listos ?? []) if (avisar is null && c.Id is { } id && AvisadosMios.Add(id)) avisar = (c, true);
+                    foreach (var c in (r?.Casi ?? []).Take(2)) if (avisar is null && c.Id is { } id && AvisadosMios.Add(id + ":casi")) avisar = (c, false);
+                }
+                if (avisar is not { } a) return;
+                // Las que ya tienes primero, y la que falta al final.
+                var piezasCombo = (a.Combo.Piezas ?? []).OrderByDescending(p => p.EnMesa).ToArray();
+                var minis = await Task.WhenAll(piezasCombo.Take(4).Select(p => BajarImagen(p.Imagen)));
+                if (!Contexto.EnPartida || cts.IsCancellationRequested) return;
+                var piezas = string.Join(" + ", piezasCombo.Select(p => p.Nombre));
+                var falta = string.Join(", ", piezasCombo.Where(p => !p.EnMesa).Select(p => p.Nombre));
+                var texto = Textos.T(a.Lista ? "sup_mi_combo" : "sup_mi_combo_casi", piezas, a.Combo.Resultado ?? "", falta);
+                var imagenes = minis.Where(f => f is not null).Select(f => f!).ToArray();
+                var ranura = "micombo:" + (a.Combo.Id ?? "");
+                void Avisar(string? resumen) => Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"),
+                    texto + (resumen is { Length: > 0 } ? "\n" + resumen : ""), 8, imagenes, fijo: true, ranura: ranura,
+                    opciones: new Superposicion.Opciones(Borde: Superposicion.BORDE_MIO));
+                Avisar(a.Combo.Resumen);
+                // La frase de qué hace, si no venía: se pide aparte y se añade, como en las del rival.
+                if (a.Combo.Resumen is not { Length: > 0 } && a.Combo.Id is { } idCombo)
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var rr = await http.GetFromJsonAsync<RespuestaResumenCombo>(
+                                $"{PuertaDevice}/combo-resumen?id={Uri.EscapeDataString(idCombo)}&idioma={Textos.Idioma}", JsonOpciones);
+                            if (rr?.Resumen is { Length: > 0 } frase && Superposicion.RanuraAbierta(ranura)) Avisar(frase);
+                        }
+                        catch { /* sin frase: el aviso ya salió */ }
+                    });
             }
             catch { /* cancelado o sin red: a la siguiente */ }
         });
@@ -4571,6 +4649,12 @@ internal static partial class LogArena
                 var copia = new JsonObject();
                 if (mazo["MainDeck"] is JsonNode principal) copia["MainDeck"] = principal.DeepClone();
                 if (mazo["Sideboard"] is JsonNode banca) copia["Sideboard"] = banca.DeepClone();
+                // El comandante de Brawl (1.26.4). lib/mtgaLog.ts lo lee de aquí desde
+                // la 1.25.0, pero este recorte no lo copiaba: cada arranque de Arena
+                // dejaba los mazos de Brawl en la web con 99 cartas y sin comandante
+                // (visto el 2026-10-29 en cinco mazos del usuario; sólo lo conservaban
+                // los que llegaron después por otra línea, al editarlos o jugarlos).
+                if (mazo["CommandZone"] is JsonNode mando) copia["CommandZone"] = mando.DeepClone();
                 reducidas[id] = copia;
             }
             salida[claveListas] = reducidas;

@@ -802,6 +802,18 @@ internal static class Textos
             "Opponent is one card from a combo: {0} → {1}", "El rival está a una carta de un combo: {0} → {1}", "Der Gegner ist eine Karte von einer Combo entfernt: {0} → {1}", "L'adversaire est à une carte d'un combo : {0} → {1}",
             "O adversário está a uma carta de um combo: {0} → {1}", "L'avversario è a una carta da un combo: {0} → {1}", "対戦相手はコンボまであと1枚: {0} → {1}", "对手只差一张牌就能组合技：{0} → {1}",
         ],
+        // TUS COMBOS (1.26.4): todas las piezas en mesa, mano o zona de mando; o te falta una que está en tu mazo.
+        // {0} = las piezas, {1} = qué hace, {2} = la que falta.
+        ["sup_mi_combo"] =
+        [
+            "You have a combo ready: {0} → {1}", "Tienes un combo listo: {0} → {1}", "Du hast eine Combo bereit: {0} → {1}", "Tu as un combo prêt : {0} → {1}",
+            "Tens um combo pronto: {0} → {1}", "Hai una combo pronta: {0} → {1}", "コンボの準備ができています: {0} → {1}", "你的组合技已就绪：{0} → {1}",
+        ],
+        ["sup_mi_combo_casi"] =
+        [
+            "One card from your combo, {2} is in your deck: {0} → {1}", "Te falta una carta para tu combo, {2} está en tu mazo: {0} → {1}", "Eine Karte fehlt dir zur Combo, {2} ist in deinem Deck: {0} → {1}", "Il te manque une carte pour ton combo, {2} est dans ton deck : {0} → {1}",
+            "Falta-te uma carta para o teu combo, {2} está no teu baralho: {0} → {1}", "Ti manca una carta per la tua combo, {2} è nel tuo mazzo: {0} → {1}", "コンボまであと1枚、{2} はデッキにあります: {0} → {1}", "你的组合技只差一张，{2} 在你的套牌里：{0} → {1}",
+        ],
         // El rótulo del panel de una amenaza. {0} = produce, {1} = en mesa, {2} = falta.
         ["panel_mesa"] =
         [

@@ -74,6 +74,14 @@ internal static class Contexto
     public static int[] VistasRival { get; private set; } = [];
 
     /// <summary>
+    /// TUS CARTAS A MANO (1.26.4; el usuario, 2026-10-29: «avisa de los combos del
+    /// rival, pero estaría bien que también avisase de los míos»): las tuyas en el
+    /// campo de batalla, en la mano y en la zona de mando, sin repetir. Con ellas se
+    /// buscan los combos que ya puedes montar y los que te faltan por una carta.
+    /// </summary>
+    public static int[] MisCartas { get; private set; } = [];
+
+    /// <summary>
     /// LA OTRA CARA de esa carta, si está transformada, o null.
     ///
     /// Arena numera por separado las dos caras —una Saga vuelta criatura tiene
@@ -885,6 +893,7 @@ internal static class Contexto
         var colores = "";
         var mesa = new SortedSet<int>();
         var vistas = new SortedSet<int>();
+        var mias = new SortedSet<int>();
         if (miAsiento != 0)
         {
             var sb = new System.Text.StringBuilder();
@@ -893,6 +902,9 @@ internal static class Contexto
                 if (o.Dueno == miAsiento)
                 {
                     foreach (var c in o.Colores) if (!sb.ToString().Contains(c)) sb.Append(c);
+                    // Tus combos (1.26.4): lo que tienes a mano para montarlos.
+                    if (o.EsCarta && o.Grp > 0 && o.Zona is { } zm && zonas.TryGetValue(zm, out var tzm) && tzm is "Battlefield" or "Hand" or "Command")
+                        mias.Add(o.Grp);
                 }
                 else if (o.EsCarta && o.Grp > 0 && o.Dueno == 3 - miAsiento && o.Zona is { } z && zonas.TryGetValue(z, out var tz))
                 {
@@ -902,7 +914,7 @@ internal static class Contexto
             }
             colores = sb.ToString();
         }
-        Cambiar(mazo, carta, otraCara, rival, rivalOtra, enPartida, colores, [.. mesa], [.. vistas]);
+        Cambiar(mazo, carta, otraCara, rival, rivalOtra, enPartida, colores, [.. mesa], [.. vistas], [.. mias]);
         ContarBiblioteca();
         if (!ReferenceEquals(draftAntes, estadoDraft.Sobre) && !MismoSobre(Draft, estadoDraft.Sobre))
         {
@@ -1133,15 +1145,16 @@ internal static class Contexto
         return cuenta.Select(kv => (kv.Key, kv.Value)).ToArray();
     }
 
-    private static void Cambiar(string? mazo, int? carta, int? otraCara, int? rival, int? rivalOtra, bool enPartida, string colores, int[] mesa, int[] vistas)
+    private static void Cambiar(string? mazo, int? carta, int? otraCara, int? rival, int? rivalOtra, bool enPartida, string colores, int[] mesa, int[] vistas, int[]? mias = null)
     {
         if (mazo == null) cartasMazo = [];
+        mias ??= [];
         if (mazo == Mazo && cartasMazo.SequenceEqual(CartasMazo) && carta == Carta && otraCara == CartaOtraCara
             && rival == CartaRival && rivalOtra == CartaRivalOtraCara && enPartida == EnPartida
-            && colores == MisColores && mesa.SequenceEqual(MesaRival) && vistas.SequenceEqual(VistasRival)
+            && colores == MisColores && mesa.SequenceEqual(MesaRival) && vistas.SequenceEqual(VistasRival) && mias.SequenceEqual(MisCartas)
             && formato == Formato && evento == Evento && edicion == Edicion) return;
         Mazo = mazo; CartasMazo = cartasMazo; Carta = carta; CartaOtraCara = otraCara; CartaRival = rival; CartaRivalOtraCara = rivalOtra; EnPartida = enPartida;
-        MisColores = colores; MesaRival = mesa; VistasRival = vistas; Formato = formato; Evento = evento; Edicion = edicion;
+        MisColores = colores; MesaRival = mesa; VistasRival = vistas; MisCartas = mias; Formato = formato; Evento = evento; Edicion = edicion;
         try { Cambio?.Invoke(); } catch { /* lo que haga quien escucha es cosa suya */ }
     }
 
