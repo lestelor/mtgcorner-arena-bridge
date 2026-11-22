@@ -63,9 +63,16 @@ Si la colección no se puede leer, se suben igualmente los mazos y los comodines
 MtgCornerArenaBridge.exe --probar-coleccion            lee la colección y dice cuántas cartas salen
 MtgCornerArenaBridge.exe --probar-log [rutas] [--salida f]   recorta un log y dice qué enviaría
 MtgCornerArenaBridge.exe --licencia                    deja la GPLv3 al lado del programa
+MtgCornerArenaBridge.exe --probar-permiso              lee la colección con permiso de administrador (sale el aviso de Windows)
 ```
 
 Ninguno conecta con mtgcorner.com ni guarda nada.
+
+Si Arena está abierto como administrador, Windows no deja leer su memoria a un
+programa normal. Entonces el programa lo dice y ofrece leer la colección con
+permiso: una copia de sí mismo, con el aviso de Windows, que sólo lee la
+colección, la deja en un fichero temporal y se cierra (`--leer-coleccion-a`).
+Nada se queda funcionando como administrador.
 
 ## Compilar
 
@@ -83,6 +90,22 @@ dotnet publish -c Release -r win-x64 -p:SelfContained=true -p:PublishSingleFile=
 Aviso: algunos antivirus ponen en cuarentena `HackF5.UnitySpy.dll` mientras se
 compila, por ser una librería que lee memoria de otros procesos. Si la
 compilación falla copiando esa DLL, es eso.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+- Committers and reviewers: [lestelor](https://github.com/lestelor)
+- Approvers: [lestelor](https://github.com/lestelor)
+
+Privacy: the program only sends your collection, decks, wildcards and the parts
+of Arena's log that describe your decks and games to your own
+[mtgcorner.com](https://mtgcorner.com) account, once you link it. It never
+writes to the game. See the
+[privacy policy](https://mtgcorner.com/legal/privacidad).
+
+Download page: [mtgcorner.com/import-arena](https://mtgcorner.com/import-arena).
 
 ## Licencia
 
