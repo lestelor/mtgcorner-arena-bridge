@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 
 using HackF5.UnitySpy;
 using HackF5.UnitySpy.Detail;
@@ -135,6 +138,105 @@ internal static class LectorArena
             error = ex.GetType().Name + ": " + ex.Message;
             return null;
         }
+    }
+
+    // ── ARENA ABIERTO COMO ADMINISTRADOR (2026-11-22) ─────────────────────
+    //
+    // Si Arena corre con permisos de administrador y este programa no, Windows
+    // no deja leer su memoria: «Win32Exception: Acceso denegado», tres intentos
+    // y sin colección. Arena no los pide (su lanzador y el juego van como
+    // «asInvoker»): los hereda de quien lo abre, como «Ejecutar como
+    // administrador» o un instalador que lo relanza al acabar. Le pasó al usuario
+    // el 2026-10-25 y el 2026-11-22. Esperar no lo arregla, así que se dice qué
+    // pasa y se ofrece leerla con permiso: una copia de este programa, con el
+    // aviso de Windows, que sólo lee, deja la colección en un fichero y se va.
+    // Nada se queda funcionando como administrador.
+
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint acceso, bool heredar, int pid);
+    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr h);
+    [DllImport("advapi32.dll", SetLastError = true)] private static extern bool OpenProcessToken(IntPtr proceso, uint acceso, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError = true)] private static extern bool GetTokenInformation(IntPtr token, int clase, out int valor, int largo, out int devuelto);
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000, TOKEN_QUERY = 0x0008;
+    private const int TokenElevation = 20;
+
+    /// <summary>¿Corre ese proceso como administrador? null si no se puede saber.</summary>
+    private static bool? Elevado(int pid)
+    {
+        var proceso = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        if (proceso == IntPtr.Zero) return null;
+        try
+        {
+            if (!OpenProcessToken(proceso, TOKEN_QUERY, out var token)) return null;
+            try { return GetTokenInformation(token, TokenElevation, out var valor, sizeof(int), out _) ? valor != 0 : null; }
+            finally { CloseHandle(token); }
+        }
+        finally { CloseHandle(proceso); }
+    }
+
+    /// <summary>
+    /// Arena corre como administrador y este programa no: la colección no se
+    /// puede leer hasta que se abra Arena normal o se lea con permiso.
+    /// </summary>
+    public static bool ArenaSinPermiso()
+    {
+        try
+        {
+            var arena = BuscarProceso();
+            return arena is not null && Elevado(arena.Id) == true && Elevado(Environment.ProcessId) == false;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>El fichero que deja la copia con permiso: siempre en la carpeta temporal y con este nombre.</summary>
+    private static readonly Regex NombreFichero = new(@"^mtgcorner-coleccion-[0-9a-f]{32}\.json$");
+
+    /// <summary>
+    /// La colección leída por una copia de este programa con permiso de
+    /// administrador. Sale el aviso de Windows; si se dice que no, si Arena se
+    /// cierra o si tarda más de dos minutos, null.
+    /// </summary>
+    public static async Task<CartaColeccion[]?> LeerConPermiso()
+    {
+        var ruta = Path.Combine(Path.GetTempPath(), $"mtgcorner-coleccion-{Guid.NewGuid():N}.json");
+        try
+        {
+            var inicio = new ProcessStartInfo(Environment.ProcessPath!, $"--leer-coleccion-a \"{ruta}\"")
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden,
+            };
+            using var copia = Process.Start(inicio);
+            if (copia is null) return null;
+            using var plazo = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            try { await copia.WaitForExitAsync(plazo.Token); }
+            catch (OperationCanceledException) { try { copia.Kill(); } catch { } return null; }
+            if (!File.Exists(ruta)) return null;
+            var leidas = JsonSerializer.Deserialize<CartaColeccion[]>(await File.ReadAllTextAsync(ruta));
+            return leidas is { Length: > 0 } ? leidas : null;
+        }
+        // 1223: se dijo que no en el aviso de Windows.
+        catch { return null; }
+        finally { try { File.Delete(ruta); } catch { } }
+    }
+
+    /// <summary>
+    /// Lo que hace la copia con permiso (<c>--leer-coleccion-a</c>): leer la
+    /// colección y dejarla en el fichero. Nada más: ni enlace, ni arranque, ni
+    /// red. Sólo escribe un fichero con el nombre que pone <see cref="LeerConPermiso"/>.
+    /// </summary>
+    public static int EscribirColeccionEn(string ruta)
+    {
+        try
+        {
+            var destino = Path.GetFullPath(ruta);
+            if (!NombreFichero.IsMatch(Path.GetFileName(destino))) return 2;
+            var cartas = LeerColeccion(out _);
+            if (cartas is null) return 1;
+            File.WriteAllText(destino, JsonSerializer.Serialize(cartas));
+            return 0;
+        }
+        catch { return 1; }
     }
 
     /// <summary>

@@ -361,6 +361,11 @@ internal static class Program
         // comprobar un release descargado: el puente del usuario quedó cerrado y
         // su arranque apuntando a un fichero temporal que luego se borró.
         if (args.Length > 0 && args[0] is "--version" or "-v") return 0;
+        // La copia con permiso de administrador que lanza «Leer ahora» (ver
+        // LectorArena.LeerConPermiso): lee la colección, la deja en el fichero y
+        // se va. También antes de nada más, por lo mismo que --version: no debe
+        // registrar el enlace ni el arranque, ni tocar el residente.
+        if (args.Length > 1 && args[0] == "--leer-coleccion-a") return LectorArena.EscribirColeccionEn(args[1]);
         Columna.Version = VersionPropia;
         // Primera suposición: el idioma de Windows, que es lo único que se sabe
         // antes de hablar con nadie. En cuanto se confirma en el navegador, la
@@ -384,6 +389,14 @@ internal static class Program
         if (args.Length > 0 && args[0] == "--probar-log") return ProbarLog(args.Skip(1).ToArray());
         if (args.Length > 0 && args[0] == "--probar-coleccion") return ProbarColeccion();
         if (args.Length > 0 && args[0] == "--probar-offsets") return ProbarOffsets.Ejecutar();
+        // La lectura con permiso de administrador, sola: sale el aviso de Windows.
+        if (args.Length > 0 && args[0] == "--probar-permiso")
+        {
+            Console.WriteLine("Arena as administrator and this program not: " + LectorArena.ArenaSinPermiso());
+            var conPermiso = await LectorArena.LeerConPermiso();
+            Console.WriteLine(conPermiso is null ? "Couldn't read it with permission." : $"Read with permission: {conPermiso.Length} cards, {conPermiso.Sum(c => c.Cantidad)} copies.");
+            return conPermiso is null ? 1 : 0;
+        }
         if (args.Length > 0 && args[0] == "--licencia") return EscribirLicencia();
         // Poner o quitar el arranque con Windows. Son dos líneas en el registro
         // del usuario y no conectan con nada, como los de prueba de arriba.
@@ -1301,6 +1314,14 @@ internal static class Program
         }
         // La misma subida, sin aviso, para la partida recién acabada (ver SubirTrasPartida).
         subirSinAviso = frag => Subir(null, frag, avisar: false);
+        // La colección leída con permiso de administrador (ver AvisarSinPermiso):
+        // se sube sola y se dice cómo fue. Si quedan mazos por elegir, lo avisa
+        // la propia subida.
+        void SubirConPermiso(CartaColeccion[] col) => _ = Subir(col, null, alTerminar: fin =>
+        {
+            if (fin == Subida.AlDia) Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_coleccion_subida", col.Length), 8, ranura: "permiso");
+            else if (fin == Subida.Fallo) Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("col_fallo"), 10, ranura: "permiso");
+        });
 
         // LA COLUMNA DE ICONOS SOBRE EL JUEGO (ver Columna.cs): lo que hace cada uno.
         Columna.Iniciar(async (accion, dato) =>
@@ -1319,7 +1340,11 @@ internal static class Program
                     // Pulsado a mano: si hay mazos que revisar, se ABRE la página de
                     // revisión (el aviso decía «esperan en el navegador» y nada lo
                     // abría; el usuario, 2026-09-26).
-                    await Subir(LectorArena.LeerColeccion(out _), LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta())).Fragmentos,
+                    // Arena como administrador: los mazos se suben igual, y la
+                    // colección se ofrece leerla con permiso (ver AvisarSinPermiso).
+                    var colImportar = LectorArena.LeerColeccion(out _);
+                    if (colImportar is null && LectorArena.ArenaSinPermiso()) AvisarSinPermiso(SubirConPermiso);
+                    await Subir(colImportar, LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta())).Fragmentos,
                         abrirNavegador: true,
                         alTerminar: fin =>
                         {
@@ -1768,7 +1793,7 @@ internal static class Program
             {
                 // Arena tarda en dejar la colección lista; se reintenta en vez de
                 // adivinar un plazo. Si no sale, se sube igual lo del log.
-                var coleccion = await EsperarColeccion();
+                var coleccion = await EsperarColeccion(SubirConPermiso);
                 var primera = LogArena.Leer(LogArena.FicherosPorDefecto(LogArena.Carpeta()));
                 if (!await Subir(coleccion, primera.Fragmentos)) return 1;
             }
@@ -3632,13 +3657,18 @@ internal static class Program
     /// quedarse con el «no se pudo» de los primeros segundos sería perder la
     /// única lectura buena de la sesión.
     /// </summary>
-    private static async Task<CartaColeccion[]?> EsperarColeccion()
+    private static async Task<CartaColeccion[]?> EsperarColeccion(Action<CartaColeccion[]> alLeerConPermiso)
     {
         var limite = DateTime.UtcNow.AddMinutes(5);
         while (DateTime.UtcNow < limite && LectorArena.ArenaAbierto())
         {
             var cartas = LectorArena.LeerColeccion(out _);
             if (cartas is not null && cartas.Length > 0) return cartas;
+            // Arena abierto como administrador: esperar no lo arregla. Antes se
+            // reintentaba cinco minutos y se rendía en silencio; ahora se avisa
+            // encima del juego, con «Leer ahora» (ver AvisarSinPermiso), y los
+            // mazos se suben ya sin la colección.
+            if (LectorArena.ArenaSinPermiso()) { AvisarSinPermiso(alLeerConPermiso); return null; }
             await Task.Delay(TimeSpan.FromSeconds(20));
         }
         return null;
@@ -4043,6 +4073,19 @@ internal static class Program
                 Textos.Linea("coleccion_leida", cartas.Length);
                 return cartas;
             }
+            // Arena abierto como administrador: reintentar no sirve. Se dice qué
+            // pasa y se ofrece leerla con permiso (ver LectorArena.ArenaSinPermiso).
+            if (LectorArena.ArenaSinPermiso())
+            {
+                var conPermiso = await OfrecerLecturaConPermiso();
+                if (conPermiso is not null)
+                {
+                    Textos.Linea("coleccion_leida", conPermiso.Length);
+                    return conPermiso;
+                }
+                Avisar();
+                return null;
+            }
             // Arena recién abierto responde sin cartas: se reintenta antes de
             // darlo por perdido.
             Textos.Linea("fallo_coleccion", intento, error);
@@ -4066,12 +4109,52 @@ internal static class Program
     }
 
     /// <summary>
+    /// En la ventana: Arena está abierto como administrador. Se explica y se
+    /// espera un minuto a que se pulse Intro para leerla con permiso; sin
+    /// respuesta, se sigue sin colección (mazos y comodines se guardan igual).
+    /// </summary>
+    private static async Task<CartaColeccion[]?> OfrecerLecturaConPermiso()
+    {
+        Console.WriteLine();
+        Textos.Linea("sin_permiso");
+        Textos.Linea("sin_permiso_2");
+        if (Console.IsInputRedirected) return null;
+        Textos.Linea("sin_permiso_tecla");
+        var limite = DateTime.UtcNow.AddMinutes(1);
+        while (DateTime.UtcNow < limite && !Console.KeyAvailable) await Task.Delay(100);
+        if (!Console.KeyAvailable || Console.ReadKey(true).Key != ConsoleKey.Enter) return null;
+        Textos.Linea("leyendo_con_permiso");
+        var cartas = await LectorArena.LeerConPermiso();
+        if (cartas is null) Textos.Linea("sin_permiso_fallo");
+        return cartas;
+    }
+
+    /// <summary>
+    /// Encima del juego: Arena está abierto como administrador. El aviso lo
+    /// explica y lleva «Leer ahora», que lee la colección con permiso y se la
+    /// pasa a <paramref name="alLeer"/> (quien la sube). Ranura propia para no
+    /// pisar los demás avisos.
+    /// </summary>
+    private static void AvisarSinPermiso(Action<CartaColeccion[]> alLeer)
+    {
+        Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sup_sin_permiso"), 60, ranura: "permiso",
+            opciones: new Superposicion.Opciones(Enlace: Textos.T("sup_leer_con_permiso"), AlEnlace: () => _ = Task.Run(async () =>
+            {
+                Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("leyendo_con_permiso"), 30, ranura: "permiso");
+                var cartas = await LectorArena.LeerConPermiso();
+                if (cartas is null) { Superposicion.MostrarSinEsperar(Textos.T("sup_titulo"), Textos.T("sin_permiso_fallo"), 12, ranura: "permiso"); return; }
+                alLeer(cartas);
+            })));
+    }
+
+    /// <summary>
     /// <c>--probar-coleccion</c>: lee la colección y dice cuántas cartas salen, o
     /// el diagnóstico si falla. No conecta con mtgcorner.com ni guarda nada.
     /// </summary>
     private static int ProbarColeccion()
     {
         Console.WriteLine("MTG Arena open: " + LectorArena.ArenaAbierto());
+        Console.WriteLine("Arena as administrator and this program not: " + LectorArena.ArenaSinPermiso());
         var cartas = LectorArena.LeerColeccion(out var error);
         if (cartas is not null)
         {

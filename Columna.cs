@@ -227,6 +227,14 @@ internal static class Columna
     private static volatile int anchoAbierta = ANCHO_ABIERTA;
     /// <summary>Alguna etiqueta no cabe ni en el ancho máximo: el visor tiene trabajo.</summary>
     private static volatile bool hayDesbordadas;
+    /// <summary>
+    /// Lo que dice el botón bajo el ratón no cabe en su fila. `hayDesbordadas`
+    /// sólo mide los nombres de las filas, y en la fila «Programa» el nombre
+    /// cabe pero lo que dice el botón de la versión («MTG Corner v1.26.4 ·
+    /// buscar actualización») no: se quedaba cortado y quieto (el usuario,
+    /// 2026-11-22: «no se mueve como si fuese un cartel»). Lo pone el pintado.
+    /// </summary>
+    private static bool botonDesborda;
     private static int ticksVisor;
 
     /// <summary>
@@ -982,7 +990,7 @@ internal static class Columna
                     // letras»). Sólo se repinta cuando hay algo que mover.
                     bool late; lock (destacadas) late = destacadas.Count > 0;
                     if (late) faseLatido++;
-                    if ((abierta && hayDesbordadas) || late) { ticksVisor++; InvalidateRect(hWnd, IntPtr.Zero, false); }
+                    if ((abierta && (hayDesbordadas || botonDesborda)) || late) { ticksVisor++; InvalidateRect(hWnd, IntPtr.Zero, false); }
                     else ticksVisor = 0;
                     return IntPtr.Zero;
                 }
@@ -1008,6 +1016,8 @@ internal static class Columna
                 var fila = FilaEn(lParam);
                 var boton = BotonEn(fila, lParam);
                 var cambia = !abierta || fila != filaBajoRaton || boton != botonBajoRaton;
+                // Otro botón: su frase empieza a correr desde el principio.
+                if (fila != filaBajoRaton || boton != botonBajoRaton) { botonDesborda = false; ticksVisor = 0; }
                 botonBajoRaton = boton;
                 if (!abierta) { abierta = true; if (rastreo.Length > 0) Rehacer(); Recolocar(); }
                 // Una carta del desplegable recién señalada: a precalentar (ver AlSenalarCarta).
@@ -1181,6 +1191,9 @@ internal static class Columna
     {
         var pantalla = BeginPaint(hWnd, out var ps);
         var ancho = abierta ? anchoAbierta : ANCHO_CERRADA;
+        // Se vuelve a decidir en cada pintado: sin botón señalado (el ratón se fue,
+        // la columna se cerró), el visor deja de latir por su frase.
+        botonDesborda = false;
         // DOBLE BÚFER: todo se pinta en un mapa de bits y se vuelca de una vez.
         // Pintando directo, al abrirse la columna (cambia de ancho y se repinta
         // entera) y con el visor repintando cada 40 ms se veía el fondo un
@@ -1329,9 +1342,10 @@ internal static class Columna
                     }
                     var rotulo = ocupada ? Etiqueta(filas[i]) + new string('.', 1 + faseCurso % 3) : Etiqueta(filas[i]);
                     // Sobre un botón de la fila de la carta, la fila dice qué hace.
-                    if (botones is not null && i == filaBajoRaton && botonBajoRaton >= 0 && botonBajoRaton < botones.Length)
+                    var dePulsador = botones is not null && i == filaBajoRaton && botonBajoRaton >= 0 && botonBajoRaton < botones.Length;
+                    if (dePulsador)
                     {
-                        rotulo = RotuloBoton(botones[botonBajoRaton]);
+                        rotulo = RotuloBoton(botones![botonBajoRaton]);
                         SetTextColor(hdc, Rgb(125, 211, 252));
                     }
                     // ¿Cabe? Si no, se pinta entera desplazada según el latido
@@ -1340,6 +1354,8 @@ internal static class Columna
                     var rMedida = new RECT();
                     DrawText(hdc, rotulo, -1, ref rMedida, DT_CALCRECT | DT_SINGLELINE);
                     var sobra = (rMedida.Right - rMedida.Left) - (rTexto.Right - rTexto.Left);
+                    // Y si es la frase de un botón la que no cabe, el visor tiene que latir (ver botonDesborda).
+                    if (dePulsador) botonDesborda = sobra > 0;
                     if (sobra <= 0)
                     {
                         DrawText(hdc, rotulo, -1, ref rTexto, DT_LEFT | DT_VCENTER | DT_SINGLELINE);

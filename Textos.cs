@@ -659,6 +659,95 @@ internal static class Textos
             "コレクションを読み取れませんでした（3回中 {0} 回目）: {1}",
             "无法读取收藏（第 {0} 次，共 3 次）：{1}",
         ],
+        // Arena abierto como administrador (1.26.5; ver LectorArena.ArenaSinPermiso).
+        ["sin_permiso"] =
+        [
+            "Arena is open as administrator, so Windows won't let MTG Corner read your collection.",
+            "Arena está abierto como administrador y Windows no deja que MTG Corner lea tu colección.",
+            "Arena läuft als Administrator, deshalb lässt Windows MTG Corner deine Sammlung nicht lesen.",
+            "Arena est ouvert en tant qu'administrateur : Windows empêche MTG Corner de lire votre collection.",
+            "O Arena está aberto como administrador e o Windows não deixa o MTG Corner ler a tua coleção.",
+            "Arena è aperto come amministratore e Windows non lascia che MTG Corner legga la tua collezione.",
+            "Arena が管理者として実行されているため、Windows が MTG Corner によるコレクションの読み取りを許可しません。",
+            "Arena 正以管理员身份运行，Windows 不允许 MTG Corner 读取你的收藏。",
+        ],
+        ["sin_permiso_2"] =
+        [
+            "Close Arena and open it normally from its shortcut, or read it now with permission.",
+            "Cierra Arena y ábrelo normal desde su acceso directo, o léela ahora con permiso.",
+            "Schließe Arena und öffne es normal über die Verknüpfung, oder lies sie jetzt mit Berechtigung.",
+            "Fermez Arena et rouvrez-le normalement depuis son raccourci, ou lisez-la maintenant avec l'autorisation.",
+            "Fecha o Arena e abre-o normalmente pelo atalho, ou lê-a agora com permissão.",
+            "Chiudi Arena e riaprilo normalmente dal collegamento, oppure leggila ora con il permesso.",
+            "Arena を閉じてショートカットから通常どおり開くか、今すぐ許可を得て読み取ってください。",
+            "请关闭 Arena 并从快捷方式正常打开，或者现在授予权限后读取。",
+        ],
+        ["sin_permiso_tecla"] =
+        [
+            "Press Enter to read it now (Windows will ask for permission), or wait to continue without it.",
+            "Pulsa Intro para leerla ahora (Windows te pedirá permiso), o espera para seguir sin ella.",
+            "Drücke die Eingabetaste, um sie jetzt zu lesen (Windows fragt nach der Berechtigung), oder warte, um ohne sie fortzufahren.",
+            "Appuyez sur Entrée pour la lire maintenant (Windows vous demandera l'autorisation), ou patientez pour continuer sans elle.",
+            "Carrega em Enter para a ler agora (o Windows vai pedir permissão), ou espera para continuar sem ela.",
+            "Premi Invio per leggerla ora (Windows chiederà il permesso), oppure aspetta per continuare senza.",
+            "今すぐ読み取るには Enter キーを押してください（Windows が許可を求めます）。待つとコレクションなしで続行します。",
+            "按 Enter 立即读取（Windows 会请求权限），或稍候以不读取收藏继续。",
+        ],
+        ["leyendo_con_permiso"] =
+        [
+            "Reading the collection with permission…",
+            "Leyendo la colección con permiso…",
+            "Die Sammlung wird mit Berechtigung gelesen…",
+            "Lecture de la collection avec l'autorisation…",
+            "A ler a coleção com permissão…",
+            "Lettura della collezione con il permesso…",
+            "許可を得てコレクションを読み取っています…",
+            "正在获得权限后读取收藏…",
+        ],
+        ["sin_permiso_fallo"] =
+        [
+            "The collection couldn't be read with permission either (Windows didn't grant it, or Arena closed).",
+            "Tampoco se ha podido leer la colección con permiso (Windows no lo dio, o Arena se cerró).",
+            "Auch mit Berechtigung ließ sich die Sammlung nicht lesen (Windows hat sie nicht erteilt, oder Arena wurde geschlossen).",
+            "Impossible de lire la collection même avec l'autorisation (Windows ne l'a pas accordée, ou Arena s'est fermé).",
+            "Também não foi possível ler a coleção com permissão (o Windows não a deu, ou o Arena fechou).",
+            "Non è stato possibile leggere la collezione nemmeno con il permesso (Windows non l'ha concesso, o Arena si è chiuso).",
+            "許可を得てもコレクションを読み取れませんでした（Windows が許可しなかったか、Arena が終了しました）。",
+            "获得权限后仍无法读取收藏（Windows 未授予权限，或 Arena 已关闭）。",
+        ],
+        ["sup_sin_permiso"] =
+        [
+            "Arena is open as administrator, so Windows won't let me read your collection. Close Arena and open it normally, or read it now:",
+            "Arena está abierto como administrador y Windows no me deja leer tu colección. Cierra Arena y ábrelo normal, o léela ahora:",
+            "Arena läuft als Administrator, deshalb lässt Windows mich deine Sammlung nicht lesen. Schließe Arena und öffne es normal, oder lies sie jetzt:",
+            "Arena est ouvert en tant qu'administrateur : Windows m'empêche de lire ta collection. Ferme Arena et rouvre-le normalement, ou lis-la maintenant :",
+            "O Arena está aberto como administrador e o Windows não me deixa ler a tua coleção. Fecha o Arena e abre-o normalmente, ou lê-a agora:",
+            "Arena è aperto come amministratore e Windows non mi lascia leggere la tua collezione. Chiudi Arena e riaprilo normalmente, oppure leggila ora:",
+            "Arena が管理者として実行されているため、Windows がコレクションの読み取りを許可しません。Arena を閉じて通常どおり開くか、今すぐ読み取ってください：",
+            "Arena 正以管理员身份运行，Windows 不允许我读取你的收藏。请关闭 Arena 后正常打开，或现在读取：",
+        ],
+        ["sup_leer_con_permiso"] =
+        [
+            "Read it now (Windows will ask for permission)",
+            "Leer ahora (Windows pedirá permiso)",
+            "Jetzt lesen (Windows fragt nach der Berechtigung)",
+            "Lire maintenant (Windows demandera l'autorisation)",
+            "Ler agora (o Windows vai pedir permissão)",
+            "Leggi ora (Windows chiederà il permesso)",
+            "今すぐ読み取る（Windows が許可を求めます）",
+            "立即读取（Windows 会请求权限）",
+        ],
+        ["sup_coleccion_subida"] =
+        [
+            "Collection saved on MTG Corner: {0} cards.",
+            "Colección guardada en MTG Corner: {0} cartas.",
+            "Sammlung auf MTG Corner gespeichert: {0} Karten.",
+            "Collection enregistrée sur MTG Corner : {0} cartes.",
+            "Coleção guardada no MTG Corner: {0} cartas.",
+            "Collezione salvata su MTG Corner: {0} carte.",
+            "MTG Corner にコレクションを保存しました：{0} 枚。",
+            "收藏已保存到 MTG Corner：{0} 张牌。",
+        ],
         ["aviso_sin_coleccion"] =
         [
             "!! Your full collection (\"Arena\") will NOT be updated this time.",
